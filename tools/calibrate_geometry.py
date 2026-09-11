@@ -113,10 +113,21 @@ def main() -> int:
         prof["geometry_mode"] = chosen
         prof["oos_trades"] = int(m["n"])
         prof["oos_win_rate"] = float(m["wr"])
-        prof["oos_expectancy_r"] = float(m["exp"])
+        # The live gate (entry_policy) refuses on ``oos_expectancy_r <= 0`` only
+        # -- it does not look at profit factor or drawdown. A symbol that clears
+        # expectancy but fails the PF / DD / sample gates was therefore still
+        # being traded (measured: SOLUSD, PF 1.03 vs the 1.05 floor, traded 72
+        # times for -$311). Mark any gate failure as "no validated edge" (0.0)
+        # so the gate refuses it, rather than shipping a rule we don't enforce.
+        prof["oos_expectancy_r"] = float(m["exp"]) if passes else 0.0
         prof["oos_profit_factor"] = float(m["pf"])
         prof["oos_total_r"] = float(m.get("total_r", 0.0))
         prof["target_met_oos"] = bool(passes)
+        prof["gate_fail_reason"] = "" if passes else (
+            f"n={m['n']}<{MIN_OOS_TRADES} " if m["n"] < MIN_OOS_TRADES else ""
+        ) + (f"PF={m['pf']:.2f}<{MIN_OOS_PF} " if m["pf"] < MIN_OOS_PF else ""
+             ) + (f"DD={m['dd']:.1f}%>{MAX_OOS_DD_PCT}% " if m["dd"] > MAX_OOS_DD_PCT else ""
+                  ) + (f"exp={m['exp']:+.4f}<=0" if m["exp"] <= 0 else "")
         changed += 1
 
         print(f"{sym:8} mode={chosen:18} n={m['n']:4d} WR={m['wr']*100:6.2f}% "
