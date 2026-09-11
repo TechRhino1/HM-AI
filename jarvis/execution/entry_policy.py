@@ -160,10 +160,11 @@ def evaluate_entry(
     # to a *negative OOS* expectancy, and the engine traded them anyway because
     # nothing checked the OOS number.
     #
-    # This is a capital-protection-grade refusal: it can only prevent trading a
-    # proven loser, never add risk. A thin or missing OOS sample (too few
-    # purged-fold trades to trust) falls through to the normal edge gate rather
-    # than refusing on noise.
+    # This is a capital-protection-grade refusal: it refuses both a proven loser
+    # AND a sample too thin to trust. Letting a thin sample fall through was the
+    # old behaviour, and it was wrong: the portfolio twice reached an apparent
+    # profit carried by 3, then 19, trades from symbols whose OOS count described
+    # a book the engine never actually traded. Insufficient evidence = no trade.
     oos_exp = float(getattr(profile, "oos_expectancy_r", 0.0) or 0.0)
     oos_n = int(getattr(profile, "oos_trades", 0) or 0)
     # Raised from 10 to OOS_MIN_TRADES. Ten trades is far too thin to stake
@@ -173,7 +174,7 @@ def evaluate_entry(
     # BTCUSD was admitted on a sample the engine then realised only 3 trades of,
     # and those 3 trades (+7.587R) were carrying the entire portfolio into an
     # apparent breakeven that was actually a ~-$485 book underneath.
-    if oos_n >= OOS_MIN_TRADES and oos_exp <= 0.0:
+    if oos_n < OOS_MIN_TRADES or oos_exp <= 0.0:
         return EntryDecision(
             allowed=False,
             reason=(
