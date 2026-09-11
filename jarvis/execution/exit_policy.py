@@ -130,6 +130,11 @@ class ExitDecision:
     def changed(self) -> bool:
         return self.partial_close_pct > 0.0 or bool(self.actions)
 
+    @property
+    def partial_due(self) -> bool:
+        """True when a partial scale-out is signalled but not yet executed."""
+        return self.partial_close_pct > 0.0
+
 
 def evaluate_exit(
     *,
@@ -188,7 +193,13 @@ def evaluate_exit(
     # ── 2. Breakeven lock ───────────────────────────────────────────────────
     # Deferred until the trade has proven itself. Locking at 1R was the primary
     # cause of +20R winners being closed at +0.9R.
-    be_triggered = be_already_locked or dec.partial_close_pct > 0.0
+    #
+    # A pending partial also unlocks breakeven, because taking risk off the table
+    # is itself the proof the trade is working. NOTE: the caller owns the
+    # "partial already taken" flag; if it cannot actually split the lots it must
+    # still set `partial_already_taken=True` on subsequent calls, otherwise this
+    # function will keep reporting the partial as due.
+    be_triggered = be_already_locked or partial_already_taken or dec.partial_close_pct > 0.0
     if not be_triggered and r_multiple >= policy.be_trigger_r:
         be_triggered = True
         dec.actions.append(f"BE_LOCK_{policy.be_trigger_r:.2f}R")

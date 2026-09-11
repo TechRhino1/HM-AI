@@ -90,6 +90,18 @@ Consequences:
 5. Degenerate risk (`entry == initial_sl`) → **no-op**. Never manufacture a stop.
 6. `risk_dist` is a **price distance, not pips**. Mixing units caused a prior
    defect where an ATR multiple was compared against a pip count.
+7. **The caller owns the "partial already taken" flag.** `evaluate_exit` is a
+   pure function; it cannot know whether the partial was actually executed. A
+   caller that cannot split the lots (micro size) must still pass
+   `partial_already_taken=True` on subsequent calls, or the partial will be
+   reported as due on every tick. `ExitDecision.partial_due` exposes this state.
+
+### Monitor-loop robustness
+The 2-second monitoring loop **must never die on one malformed decision**. When
+reading optional fields off a decision object, coerce via
+`PositionMonitorEngine._coerce_positive_float` rather than comparing directly —
+a `None`/mock/non-numeric attribute previously raised `TypeError` mid-loop and
+aborted position management entirely.
 
 ### Adding a new exit rule
 Add it to `evaluate_exit` only. Append to `ExitDecision.actions` for telemetry.
@@ -204,11 +216,25 @@ python -m pytest tests/ -q --ignore=tests/test_india_perf.py
 ### What the regression suite pins
 - `test_e1_*` — the monitor must **not** re-declare exit thresholds, and its
   adapter must produce byte-identical stops to `evaluate_exit`.
+- `test_position_monitor.py` — BUY/SELL ratchet: no tightening before +2R, a real
+  profit lock beyond +2R, one-way stop on retracement.
+- `test_institutional_entry_exit.py` — SCALP/DAY_TRADING must route through the
+  canonical policy, not a private stage table.
 - Learning-loop R sign correctness.
 - Drift protection retains ≥ 70 % of signal under a 40-loss streak.
 
-When you change exit behaviour, expect `test_e1_*` to be the first to fail — that
-is the guard working.
+When you change exit behaviour, expect the ratchet tests to fail first — that is
+the guard working.
+
+### Two known environmental failures (NOT regressions)
+1. `test_apex_master_trader_optimization.py::...quality_gate...` — asserts Forex
+   `required_win_p` should be 0.55; the gate computes `floor_win_p = 0.46` for FX
+   plus a Kelly-derived term. The test's hardcoded expectation has drifted from
+   the gate logic. Pre-existing; unrelated to exit/learning/path work. Needs a
+   product decision on the intended Forex floor before anyone "fixes" it.
+2. `test_micro_scalp_engine.py::test_strategy_bandit_micro_arms` — the sandbox's
+   `safe-delete` shim raises `SystemExit(1)` on the test's own
+   `os.remove("test_bandit_state.json")` (bulk-delete guard). Passes in isolation.
 
 ---
 

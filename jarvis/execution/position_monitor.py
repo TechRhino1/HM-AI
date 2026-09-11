@@ -120,6 +120,28 @@ class PositionMonitorEngine:
             self._thread.join(timeout=3.0)
         logger.info("PositionMonitorEngine stopped.")
 
+    # ─── Helpers ───────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _coerce_positive_float(value: Any, default: Optional[float] = None) -> Optional[float]:
+        """Return ``value`` as a positive float, or ``default`` if that is impossible.
+
+        Guards the monitoring loop against malformed decision payloads: a mocked
+        or partially populated decision object used to raise TypeError on
+        comparison and abort management of the position entirely.
+        """
+        if value is None or isinstance(value, bool):
+            return default
+        try:
+            f = float(value)
+        except (TypeError, ValueError):
+            return default
+        if not (f > 0.0):
+            return default
+        if f != f or f in (float("inf"), float("-inf")):   # NaN / inf
+            return default
+        return f
+
     # ─── Main loop ─────────────────────────────────────────────────────────────
 
     def _monitor_loop(self):
@@ -229,11 +251,22 @@ class PositionMonitorEngine:
             # ── 0. Partial Profit-Taking (§B-2 / §B-3) ──────────────────────────
             if pos.ticket not in self._partially_closed_tickets and pos.volume >= 0.02:
                 decision_obj = self.state_manager.latest_decisions.get(symbol)
-                first_target = getattr(decision_obj, "first_target_price", None)
-                target_pct = getattr(decision_obj, "first_target_volume_pct", PARTIAL_CLOSE_PCT)
+                # Coerce defensively: the decision object may be absent or carry
+                # a non-numeric attribute (e.g. a mock in tests). Any bad value
+                # falls back to the R-based default rather than raising, because a
+                # monitoring loop must never die on one malformed decision.
+                first_target = self._coerce_positive_float(
+                    getattr(decision_obj, "first_target_price", None)
+                )
+                target_pct = self._coerce_positive_float(
+                    getattr(decision_obj, "first_target_volume_pct", None),
+                    default=PARTIAL_CLOSE_PCT,
+                )
+                if not (0.0 < target_pct < 1.0):
+                    target_pct = PARTIAL_CLOSE_PCT
 
                 risk_dist_init = abs(pos.open_price - pos.sl) if pos.sl > 0 else (atr * 1.5)
-                if not first_target or first_target <= 0:
+                if first_target is None:
                     first_target = (pos.open_price + (risk_dist_init * PARTIAL_TP_TRIGGER_R)) if pos.type == "BUY" else (pos.open_price - (risk_dist_init * PARTIAL_TP_TRIGGER_R))
 
                 is_target_hit = (c_price >= first_target) if pos.type == "BUY" else (c_price <= first_target)

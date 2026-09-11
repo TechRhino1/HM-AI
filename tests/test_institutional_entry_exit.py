@@ -229,12 +229,14 @@ class TestHorizonAdaptiveRatchetAndExits(unittest.TestCase):
             event_bus=self.event_bus
         )
 
-    def test_scalp_3_stage_ratchet(self):
-        """
-        Validates SCALP Horizon-Adaptive Ratchet:
-        Stage 0: +0.65R -> Entry + 0.08R
-        Stage 1: +1.10R -> Lock +0.40R
-        Stage 2: +1.50R -> Chandelier 0.80x ATR
+    def test_scalp_ratchet_uses_canonical_policy(self):
+        """SCALP must ratchet through the canonical policy, not a private table.
+
+        The previous assertions pinned the removed horizon-adaptive stage table
+        (Stage 0 at +0.65R locking +0.08R, etc.). Those early locks are exactly
+        what surrendered large winners, so the table no longer exists. What must
+        hold now: no premature tightening, then a real profit lock beyond +2R,
+        and a one-way stop.
         """
         ctx = MarketContext(
             symbol="XAUUSD",
@@ -250,42 +252,53 @@ class TestHorizonAdaptiveRatchetAndExits(unittest.TestCase):
         )
         self.monitor._ctx_cache["XAUUSD"] = (ctx, time.monotonic())
 
-        # Entry = 2400.0, SL = 2390.0 (risk_dist = 10.0), comment="[SCALP]"
         pos = PositionSnapshot(
-            ticket=401, symbol="XAUUSD", type="BUY", volume=0.01,
+            ticket=401, symbol="XAUUSD", type="BUY", volume=1.00,
             open_price=2400.0, current_price=2406.5, sl=2390.0, tp=2430.0,
-            profit=6.5, swap=0.0, commission=0.0, open_time=datetime.now(timezone.utc).isoformat(),
+            profit=6.5, swap=0.0, commission=0.0,
+            open_time=datetime.now(timezone.utc).isoformat(),
             magic=JARVIS_MAGIC_NUMBER, comment="[SCALP] Sniper Entry"
         )
         self.mt5_client.modify_position.return_value = {"status": "MODIFIED"}
 
-        # 1. R = 0.65 -> Stage 0: Entry + 0.08 * 10.0 = 2400.8
+        # 1. R = 0.65 — the policy must NOT lock a token +0.08R here.
         self.monitor._manage_single_position(pos)
-        self.mt5_client.modify_position.assert_called_with(401, sl=2400.8, tp=2430.0)
+        for c in self.mt5_client.modify_position.call_args_list:
+            self.assertLessEqual(
+                c.kwargs.get("sl", 0.0), 2390.0 + 1e-9,
+                "no stop ratchet before the +2R breakeven trigger",
+            )
 
-        # 2. Advance price to 2411.0 (R = 1.10) -> Stage 1: Entry + 0.40 * 10.0 = 2404.0
-        ctx.current_price = 2411.0
-        pos.current_price = 2411.0
-        pos.sl = 2400.8
+        # 2. R = 3.0 (price 2430) — a real profit lock must now be in force.
+        ctx.current_price = 2430.0
+        pos.current_price = 2430.0
         self.monitor._ctx_cache["XAUUSD"] = (ctx, time.monotonic())
         self.monitor._manage_single_position(pos)
-        self.mt5_client.modify_position.assert_called_with(401, sl=2404.0, tp=2430.0)
+        applied = [
+            c.kwargs.get("sl") for c in self.mt5_client.modify_position.call_args_list
+            if c.kwargs.get("sl") is not None
+        ]
+        self.assertTrue(applied, "a stop modification must occur at +3R")
+        self.assertGreaterEqual(
+            max(applied), 2400.0 + 10.0,
+            "at +3R the stop must lock at least +1R of profit",
+        )
 
-        # 3. Advance price to 2420.0 (R = 2.00 >= 1.50) -> Stage 2: Chandelier c_price - 0.80 * atr = 2420 - 8.0 = 2412.0
-        ctx.current_price = 2420.0
-        pos.current_price = 2420.0
-        pos.sl = 2404.0
+        # 3. One-way ratchet on retracement.
+        pos.sl = max(applied)
+        ctx.current_price = 2415.0
+        pos.current_price = 2415.0
         self.monitor._ctx_cache["XAUUSD"] = (ctx, time.monotonic())
+        self.mt5_client.modify_position.reset_mock()
         self.monitor._manage_single_position(pos)
-        self.mt5_client.modify_position.assert_called_with(401, sl=2412.0, tp=2430.0)
+        for c in self.mt5_client.modify_position.call_args_list:
+            self.assertGreaterEqual(
+                c.kwargs.get("sl", 0.0), pos.sl - 1e-9,
+                "stop must never move backwards",
+            )
 
-    def test_day_trading_3_stage_ratchet(self):
-        """
-        Validates DAY_TRADING Horizon-Adaptive Ratchet:
-        Stage 0: +0.85R -> Entry + 0.12R
-        Stage 1: +1.40R -> Lock +0.60R
-        Stage 2: +1.80R -> Chandelier 1.20x ATR
-        """
+    def test_day_trading_ratchet_uses_canonical_policy(self):
+        """DAY_TRADING must use the canonical policy (same rationale as SCALP)."""
         ctx = MarketContext(
             symbol="EURUSD",
             timestamp=datetime.now(timezone.utc),
@@ -300,34 +313,51 @@ class TestHorizonAdaptiveRatchetAndExits(unittest.TestCase):
         )
         self.monitor._ctx_cache["EURUSD"] = (ctx, time.monotonic())
 
-        # Entry = 1.0800, SL = 1.0750 (risk_dist = 0.0050), tag="DAY_TRADING"
+        # Entry 1.0800, SL 1.0750 -> 1R = 0.0050.
         pos = PositionSnapshot(
-            ticket=501, symbol="EURUSD", type="BUY", volume=0.01,
+            ticket=501, symbol="EURUSD", type="BUY", volume=1.00,
             open_price=1.0800, current_price=1.0843, sl=1.0750, tp=1.0950,
-            profit=43.0, swap=0.0, commission=0.0, open_time=datetime.now(timezone.utc).isoformat(),
+            profit=43.0, swap=0.0, commission=0.0,
+            open_time=datetime.now(timezone.utc).isoformat(),
             magic=JARVIS_MAGIC_NUMBER, comment="JARVIS DAY_TRADING"
         )
         self.mt5_client.modify_position.return_value = {"status": "MODIFIED"}
 
-        # 1. Price at 1.0843 -> favorable_dist = 0.0043 -> R = 0.0043 / 0.0050 = 0.86 >= 0.85 -> Stage 0: 1.0800 + 0.12 * 0.0050 = 1.0806
+        # 1. R = 0.86 — no premature stage-0 lock.
         self.monitor._manage_single_position(pos)
-        self.mt5_client.modify_position.assert_called_with(501, sl=1.0806, tp=1.0950)
+        for c in self.mt5_client.modify_position.call_args_list:
+            self.assertLessEqual(
+                c.kwargs.get("sl", 0.0), 1.0750 + 1e-9,
+                "no stop ratchet before the +2R breakeven trigger",
+            )
 
-        # 2. Advance to 1.0870 -> R = 1.40 -> Stage 1: 1.0800 + 0.60 * 0.0050 = 1.0830
-        ctx.current_price = 1.0870
-        pos.current_price = 1.0870
-        pos.sl = 1.0806
+        # 2. R = 3.0 (price 1.0950) — a real lock must be in force.
+        ctx.current_price = 1.0950
+        pos.current_price = 1.0950
         self.monitor._ctx_cache["EURUSD"] = (ctx, time.monotonic())
         self.monitor._manage_single_position(pos)
-        self.mt5_client.modify_position.assert_called_with(501, sl=1.0830, tp=1.0950)
+        applied = [
+            c.kwargs.get("sl") for c in self.mt5_client.modify_position.call_args_list
+            if c.kwargs.get("sl") is not None
+        ]
+        self.assertTrue(applied, "a stop modification must occur at +3R")
+        self.assertGreaterEqual(
+            max(applied), 1.0800 + 0.0050,
+            "at +3R the stop must lock at least +1R of profit",
+        )
 
-        # 3. Advance to 1.0900 -> R = 2.00 >= 1.80 -> Stage 2: c_price - 1.20 * atr = 1.0900 - 0.0024 = 1.0876
-        ctx.current_price = 1.0900
-        pos.current_price = 1.0900
-        pos.sl = 1.0830
+        # 3. One-way ratchet.
+        pos.sl = max(applied)
+        ctx.current_price = 1.0880
+        pos.current_price = 1.0880
         self.monitor._ctx_cache["EURUSD"] = (ctx, time.monotonic())
+        self.mt5_client.modify_position.reset_mock()
         self.monitor._manage_single_position(pos)
-        self.mt5_client.modify_position.assert_called_with(501, sl=1.0876, tp=1.0950)
+        for c in self.mt5_client.modify_position.call_args_list:
+            self.assertGreaterEqual(
+                c.kwargs.get("sl", 0.0), pos.sl - 1e-9,
+                "stop must never move backwards",
+            )
 
     def test_stagnation_exit_scalp(self):
         """Scalp trade holding > 45 minutes with progress R < 0.50R triggers auto-close."""
