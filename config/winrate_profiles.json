@@ -49,11 +49,11 @@
       "max_dd_r": 4.5,
       "target_met": false,
       "binding_constraint": "expectancy - the walk-forward-selected configuration has no edge out of sample",
-      "oos_trades": 83,
-      "oos_win_rate": 0.8072,
-      "oos_expectancy_r": 0.009,
-      "oos_profit_factor": 1.047,
-      "oos_total_r": 0.75,
+      "oos_trades": 257,
+      "oos_win_rate": 0.42023346303501946,
+      "oos_expectancy_r": -0.18259310514541635,
+      "oos_profit_factor": 0.6822123529211279,
+      "oos_total_r": -46.926428022372,
       "oos_target_met": true,
       "folds": 4,
       "oos_pre_policy_trades": 144,
@@ -257,7 +257,9 @@
           "trades_at_positive_wr": 0
         }
       ],
-      "notes": "Deployed tp0.25_beoff_pcoffx0.5_troff@2_mb48_s0.4168 chosen by walk-forward vote across 4 purged folds; OOS 80.7% on 83 trades (+0.009R, PF 1.05). In-sample reference: 112 trades, 79.5% WR, -0.008R. Regime policy enabled 4/6 regimes (disabled: BREAKOUT, TREND_BULL), fitted on train folds; all reported figures already exclude disabled regimes."
+      "notes": "Deployed tp0.25_beoff_pcoffx0.5_troff@2_mb48_s0.4168 chosen by walk-forward vote across 4 purged folds; OOS 80.7% on 83 trades (+0.009R, PF 1.05). In-sample reference: 112 trades, 79.5% WR, -0.008R. Regime policy enabled 4/6 regimes (disabled: BREAKOUT, TREND_BULL), fitted on train folds; all reported figures already exclude disabled regimes.",
+      "geometry_mode": "A_fixed_tp",
+      "target_met_oos": false
     },
     "BTCUSD": {
       "symbol": "BTCUSD",
@@ -282,11 +284,11 @@
       "max_dd_r": 6.75,
       "target_met": true,
       "binding_constraint": "out-of-sample - met in-sample (79.6%) but not on purged folds; OOS expectancy is non-positive (-0.017R)",
-      "oos_trades": 140,
-      "oos_win_rate": 0.7357,
-      "oos_expectancy_r": -0.0174,
-      "oos_profit_factor": 0.928,
-      "oos_total_r": -2.437,
+      "oos_trades": 207,
+      "oos_win_rate": 0.34299516908212563,
+      "oos_expectancy_r": 0.3984033751892939,
+      "oos_profit_factor": 1.6956061235890003,
+      "oos_total_r": 82.46949866418385,
       "oos_target_met": false,
       "folds": 4,
       "oos_pre_policy_trades": 193,
@@ -500,7 +502,9 @@
           "trades_at_positive_wr": 27
         }
       ],
-      "notes": "Deployed tp0.25_beoff_pcoffx0.5_troff@2_mb48_s0.60528 chosen by walk-forward vote across 4 purged folds; OOS 73.6% on 140 trades (-0.017R, PF 0.93). In-sample reference: 152 trades, 79.6% WR, +0.000R. Regime policy enabled 5/6 regimes (disabled: TREND_BEAR), fitted on train folds; all reported figures already exclude disabled regimes."
+      "notes": "Deployed tp0.25_beoff_pcoffx0.5_troff@2_mb48_s0.60528 chosen by walk-forward vote across 4 purged folds; OOS 73.6% on 140 trades (-0.017R, PF 0.93). In-sample reference: 152 trades, 79.6% WR, +0.000R. Regime policy enabled 5/6 regimes (disabled: TREND_BEAR), fitted on train folds; all reported figures already exclude disabled regimes.",
+      "geometry_mode": "E_atr_trail",
+      "target_met_oos": true
     },
     "ETHUSD": {
       "symbol": "ETHUSD",
@@ -525,11 +529,11 @@
       "max_dd_r": 2.187,
       "target_met": true,
       "binding_constraint": "out-of-sample - met in-sample (76.0%) but not on purged folds; OOS expectancy is non-positive (-0.037R)",
-      "oos_trades": 64,
-      "oos_win_rate": 0.6719,
-      "oos_expectancy_r": -0.0368,
-      "oos_profit_factor": 0.866,
-      "oos_total_r": -2.358,
+      "oos_trades": 106,
+      "oos_win_rate": 0.33962264150943394,
+      "oos_expectancy_r": 0.2504679365025831,
+      "oos_profit_factor": 1.4977450167503046,
+      "oos_total_r": 26.549601269273808,
       "oos_target_met": false,
       "folds": 4,
       "oos_pre_policy_trades": 64,
@@ -714,7 +718,9 @@
           "trades_at_positive_wr": 44
         }
       ],
-      "notes": "Deployed tp0.25_beoff_pcoffx0.5_troff@2_mb24_s0.670436 chosen by walk-forward vote across 4 purged folds; OOS 67.2% on 64 trades (-0.037R, PF 0.87). In-sample reference: 75 trades, 76.0% WR, +0.023R. Regime policy enabled 5/5 regimes, fitted on train folds; all reported figures already exclude disabled regimes."
+      "notes": "Deployed tp0.25_beoff_pcoffx0.5_troff@2_mb24_s0.670436 chosen by walk-forward vote across 4 purged folds; OOS 67.2% on 64 trades (-0.037R, PF 0.87). In-sample reference: 75 trades, 76.0% WR, +0.023R. Regime policy enabled 5/5 regimes, fitted on train folds; all reported figures already exclude disabled regimes.",
+      "geometry_mode": "E_atr_trail",
+      "target_met_oos": true
     },
     "EURUSD": {
       "symbol": "EURUSD",
@@ -739,11 +745,11 @@
       "max_dd_r": 5.75,
       "target_met": false,
       "binding_constraint": "expectancy - the walk-forward-selected configuration has no edge out of sample",
-      "oos_trades": 76,
-      "oos_win_rate": 0.6842,
-      "oos_expectancy_r": -0.1215,
-      "oos_profit_factor": 0.615,
-      "oos_total_r": -9.233,
+      "oos_trades": 106,
+      "oos_win_rate": 0.42452830188679247,
+      "oos_expectancy_r": -0.06753016509842591,
+      "oos_profit_factor": 0.8829920912917639,
+      "oos_total_r": -7.158197500433146,
       "oos_target_met": false,
       "folds": 4,
       "oos_pre_policy_trades": 118,
@@ -947,7 +953,9 @@
           "trades_at_positive_wr": 26
         }
       ],
-      "notes": "Deployed tp0.25_beoff_pcoffx0.5_troff@2_mb48_s0.711252 chosen by walk-forward vote across 4 purged folds; OOS 68.4% on 76 trades (-0.121R, PF 0.61). In-sample reference: 50 trades, 78.0% WR, -0.025R. Regime policy enabled 4/6 regimes (disabled: LIQUIDITY_SWEEP, TREND_BULL), fitted on train folds; all reported figures already exclude disabled regimes."
+      "notes": "Deployed tp0.25_beoff_pcoffx0.5_troff@2_mb48_s0.711252 chosen by walk-forward vote across 4 purged folds; OOS 68.4% on 76 trades (-0.121R, PF 0.61). In-sample reference: 50 trades, 78.0% WR, -0.025R. Regime policy enabled 4/6 regimes (disabled: LIQUIDITY_SWEEP, TREND_BULL), fitted on train folds; all reported figures already exclude disabled regimes.",
+      "geometry_mode": "E_atr_trail",
+      "target_met_oos": false
     },
     "GBPUSD": {
       "symbol": "GBPUSD",
@@ -972,11 +980,11 @@
       "max_dd_r": 5.411,
       "target_met": false,
       "binding_constraint": "win rate - best achievable in-sample with positive expectancy is 65.2% (tp1_beoff_pc0.5x0.5_troff@2_mb48_s0@thr0.631), below the 75% target",
-      "oos_trades": 74,
-      "oos_win_rate": 0.5676,
-      "oos_expectancy_r": -0.1319,
-      "oos_profit_factor": 0.669,
-      "oos_total_r": -9.759,
+      "oos_trades": 138,
+      "oos_win_rate": 0.5217391304347826,
+      "oos_expectancy_r": 0.026451359829371034,
+      "oos_profit_factor": 1.0550743329860583,
+      "oos_total_r": 3.6502876564532025,
       "oos_target_met": false,
       "folds": 4,
       "oos_pre_policy_trades": 75,
@@ -1161,7 +1169,9 @@
           "trades_at_positive_wr": 51
         }
       ],
-      "notes": "Deployed tp1.5_beoff_pcoffx0.5_troff@2_mb48_s0.67784 chosen by walk-forward vote across 4 purged folds; OOS 56.8% on 74 trades (-0.132R, PF 0.67). In-sample reference: 45 trades, 46.7% WR, +0.060R. Regime policy enabled 4/5 regimes (disabled: BREAKOUT), fitted on train folds; all reported figures already exclude disabled regimes."
+      "notes": "Deployed tp1.5_beoff_pcoffx0.5_troff@2_mb48_s0.67784 chosen by walk-forward vote across 4 purged folds; OOS 56.8% on 74 trades (-0.132R, PF 0.67). In-sample reference: 45 trades, 46.7% WR, +0.060R. Regime policy enabled 4/5 regimes (disabled: BREAKOUT), fitted on train folds; all reported figures already exclude disabled regimes.",
+      "geometry_mode": "A_fixed_tp",
+      "target_met_oos": true
     },
     "GER40": {
       "symbol": "GER40",
@@ -1186,11 +1196,11 @@
       "max_dd_r": 5.35,
       "target_met": false,
       "binding_constraint": "win rate - best achievable in-sample with positive expectancy is 70.2% (tp0.6_beoff_pc0.5x0.5_troff@2_mb24_s0@thr0.656), below the 75% target",
-      "oos_trades": 156,
-      "oos_win_rate": 0.6795,
-      "oos_expectancy_r": -0.0212,
-      "oos_profit_factor": 0.934,
-      "oos_total_r": -3.3,
+      "oos_trades": 143,
+      "oos_win_rate": 0.36363636363636365,
+      "oos_expectancy_r": 0.28491489856921365,
+      "oos_profit_factor": 1.5267385249596708,
+      "oos_total_r": 40.742830495397556,
       "oos_target_met": false,
       "folds": 4,
       "oos_pre_policy_trades": 160,
@@ -1385,7 +1395,9 @@
           "trades_at_positive_wr": 104
         }
       ],
-      "notes": "Deployed tp1.5_beoff_pc0.5x0.5_troff@2_mb24_s0.656022 chosen by walk-forward vote across 4 purged folds; OOS 68.0% on 156 trades (-0.021R, PF 0.93). In-sample reference: 104 trades, 68.3% WR, +0.127R. Regime policy enabled 4/5 regimes (disabled: LIQUIDITY_SWEEP), fitted on train folds; all reported figures already exclude disabled regimes."
+      "notes": "Deployed tp1.5_beoff_pc0.5x0.5_troff@2_mb24_s0.656022 chosen by walk-forward vote across 4 purged folds; OOS 68.0% on 156 trades (-0.021R, PF 0.93). In-sample reference: 104 trades, 68.3% WR, +0.127R. Regime policy enabled 4/5 regimes (disabled: LIQUIDITY_SWEEP), fitted on train folds; all reported figures already exclude disabled regimes.",
+      "geometry_mode": "B_single_scale",
+      "target_met_oos": true
     },
     "NAS100": {
       "symbol": "NAS100",
@@ -1410,11 +1422,11 @@
       "max_dd_r": 4.053,
       "target_met": true,
       "binding_constraint": "none - target met in-sample AND out-of-sample (OOS 80.0% on 90 trades)",
-      "oos_trades": 90,
-      "oos_win_rate": 0.8,
-      "oos_expectancy_r": 0.0627,
-      "oos_profit_factor": 1.324,
-      "oos_total_r": 5.647,
+      "oos_trades": 139,
+      "oos_win_rate": 0.5323741007194245,
+      "oos_expectancy_r": 0.10627854873818775,
+      "oos_profit_factor": 1.253069145574761,
+      "oos_total_r": 14.772718274608097,
       "oos_target_met": true,
       "folds": 4,
       "oos_pre_policy_trades": 90,
@@ -1609,7 +1621,9 @@
           "trades_at_positive_wr": 36
         }
       ],
-      "notes": "Deployed tp0.3_beoff_pcoffx0.5_troff@2_mb24_s0.657 chosen by walk-forward vote across 4 purged folds; OOS 80.0% on 90 trades (+0.063R, PF 1.32). In-sample reference: 95 trades, 82.1% WR, +0.078R. Regime policy enabled 5/5 regimes, fitted on train folds; all reported figures already exclude disabled regimes."
+      "notes": "Deployed tp0.3_beoff_pcoffx0.5_troff@2_mb24_s0.657 chosen by walk-forward vote across 4 purged folds; OOS 80.0% on 90 trades (+0.063R, PF 1.32). In-sample reference: 95 trades, 82.1% WR, +0.078R. Regime policy enabled 5/5 regimes, fitted on train folds; all reported figures already exclude disabled regimes.",
+      "geometry_mode": "A_fixed_tp",
+      "target_met_oos": true
     },
     "NZDUSD": {
       "symbol": "NZDUSD",
@@ -1634,11 +1648,11 @@
       "max_dd_r": 6.0,
       "target_met": false,
       "binding_constraint": "selection stability - 77.8% is reachable in-sample (tp0.3_beoff_pcoffx0.5_troff@2_mb48_s0@thr0.706) but walk-forward selection did not converge on it, so the deployed configuration achieves only 73.8%",
-      "oos_trades": 61,
-      "oos_win_rate": 0.7377,
-      "oos_expectancy_r": 0.0016,
-      "oos_profit_factor": 1.006,
-      "oos_total_r": 0.1,
+      "oos_trades": 158,
+      "oos_win_rate": 0.47468354430379744,
+      "oos_expectancy_r": -0.06933376906489401,
+      "oos_profit_factor": 0.8674057471293796,
+      "oos_total_r": -10.954735512253254,
       "oos_target_met": false,
       "folds": 4,
       "oos_pre_policy_trades": 89,
@@ -1824,7 +1838,9 @@
           "trades_at_positive_wr": 30
         }
       ],
-      "notes": "Deployed tp0.4_beoff_pcoffx0.5_troff@2_mb48_s0.635 chosen by walk-forward vote across 4 purged folds; OOS 73.8% on 61 trades (+0.002R, PF 1.01). In-sample reference: 61 trades, 73.8% WR, +0.033R. Regime policy enabled 3/4 regimes (disabled: TREND_BULL), fitted on train folds; all reported figures already exclude disabled regimes."
+      "notes": "Deployed tp0.4_beoff_pcoffx0.5_troff@2_mb48_s0.635 chosen by walk-forward vote across 4 purged folds; OOS 73.8% on 61 trades (+0.002R, PF 1.01). In-sample reference: 61 trades, 73.8% WR, +0.033R. Regime policy enabled 3/4 regimes (disabled: TREND_BULL), fitted on train folds; all reported figures already exclude disabled regimes.",
+      "geometry_mode": "A_fixed_tp",
+      "target_met_oos": false
     },
     "SOLUSD": {
       "symbol": "SOLUSD",
@@ -1849,11 +1865,11 @@
       "max_dd_r": 8.064,
       "target_met": false,
       "binding_constraint": "expectancy - the walk-forward-selected configuration has no edge out of sample",
-      "oos_trades": 76,
-      "oos_win_rate": 0.6053,
-      "oos_expectancy_r": -0.083,
-      "oos_profit_factor": 0.734,
-      "oos_total_r": -6.307,
+      "oos_trades": 187,
+      "oos_win_rate": 0.4385026737967914,
+      "oos_expectancy_r": -0.03573651871847851,
+      "oos_profit_factor": 0.928219815357997,
+      "oos_total_r": -6.682729000355481,
       "oos_target_met": false,
       "folds": 4,
       "oos_pre_policy_trades": 76,
@@ -2029,7 +2045,9 @@
           "trades_at_positive_wr": 52
         }
       ],
-      "notes": "Deployed tp1.5_be1_pcoffx0.5_troff@2_mb24_s0.636424 chosen by walk-forward vote across 4 purged folds; OOS 60.5% on 76 trades (-0.083R, PF 0.73). In-sample reference: 74 trades, 48.6% WR, -0.033R. Regime policy enabled 4/4 regimes, fitted on train folds; all reported figures already exclude disabled regimes."
+      "notes": "Deployed tp1.5_be1_pcoffx0.5_troff@2_mb24_s0.636424 chosen by walk-forward vote across 4 purged folds; OOS 60.5% on 76 trades (-0.083R, PF 0.73). In-sample reference: 74 trades, 48.6% WR, -0.033R. Regime policy enabled 4/4 regimes, fitted on train folds; all reported figures already exclude disabled regimes.",
+      "geometry_mode": "A_fixed_tp",
+      "target_met_oos": false
     },
     "UK100": {
       "symbol": "UK100",
@@ -2054,11 +2072,11 @@
       "max_dd_r": 1.25,
       "target_met": false,
       "binding_constraint": "selection stability - 82.0% is reachable in-sample (tp0.25_beoff_pcoffx0.5_troff@2_mb24_s0@thr0.652) but walk-forward selection did not converge on it, so the deployed configuration achieves only 70.0%",
-      "oos_trades": 58,
-      "oos_win_rate": 0.7931,
-      "oos_expectancy_r": 0.0368,
-      "oos_profit_factor": 1.178,
-      "oos_total_r": 2.135,
+      "oos_trades": 92,
+      "oos_win_rate": 0.5543478260869565,
+      "oos_expectancy_r": 0.11113090485374041,
+      "oos_profit_factor": 1.2507370534151256,
+      "oos_total_r": 10.224043246544118,
       "oos_target_met": true,
       "folds": 4,
       "oos_pre_policy_trades": 115,
@@ -2262,7 +2280,9 @@
           "trades_at_positive_wr": 84
         }
       ],
-      "notes": "Deployed tp1_beoff_pc0.5x0.5_troff@2_mb24_s0.693316 chosen by walk-forward vote across 4 purged folds; OOS 79.3% on 58 trades (+0.037R, PF 1.18). In-sample reference: 20 trades, 70.0% WR, +0.075R. Regime policy enabled 4/6 regimes (disabled: BREAKOUT, TREND_BULL), fitted on train folds; all reported figures already exclude disabled regimes."
+      "notes": "Deployed tp1_beoff_pc0.5x0.5_troff@2_mb24_s0.693316 chosen by walk-forward vote across 4 purged folds; OOS 79.3% on 58 trades (+0.037R, PF 1.18). In-sample reference: 20 trades, 70.0% WR, +0.075R. Regime policy enabled 4/6 regimes (disabled: BREAKOUT, TREND_BULL), fitted on train folds; all reported figures already exclude disabled regimes.",
+      "geometry_mode": "A_fixed_tp",
+      "target_met_oos": true
     },
     "US30": {
       "symbol": "US30",
@@ -2287,11 +2307,11 @@
       "max_dd_r": 3.625,
       "target_met": false,
       "binding_constraint": "win rate - best achievable in-sample with positive expectancy is 65.8% (tp1_beoff_pc0.5x0.5_troff@2_mb24_s0@thr0.638), below the 75% target",
-      "oos_trades": 61,
-      "oos_win_rate": 0.541,
-      "oos_expectancy_r": -0.198,
-      "oos_profit_factor": 0.563,
-      "oos_total_r": -12.078,
+      "oos_trades": 153,
+      "oos_win_rate": 0.40522875816993464,
+      "oos_expectancy_r": -0.14517012071514604,
+      "oos_profit_factor": 0.7473041578745396,
+      "oos_total_r": -22.211028469417343,
       "oos_target_met": false,
       "folds": 4,
       "oos_pre_policy_trades": 61,
@@ -2467,7 +2487,9 @@
           "trades_at_positive_wr": 67
         }
       ],
-      "notes": "Deployed tp1.5_beoff_pc0.5x0.5_troff@2_mb48_s0.637888 chosen by walk-forward vote across 4 purged folds; OOS 54.1% on 61 trades (-0.198R, PF 0.56). In-sample reference: 67 trades, 65.7% WR, +0.002R. Regime policy enabled 4/4 regimes, fitted on train folds; all reported figures already exclude disabled regimes."
+      "notes": "Deployed tp1.5_beoff_pc0.5x0.5_troff@2_mb48_s0.637888 chosen by walk-forward vote across 4 purged folds; OOS 54.1% on 61 trades (-0.198R, PF 0.56). In-sample reference: 67 trades, 65.7% WR, +0.002R. Regime policy enabled 4/4 regimes, fitted on train folds; all reported figures already exclude disabled regimes.",
+      "geometry_mode": "A_fixed_tp",
+      "target_met_oos": false
     },
     "USDCAD": {
       "symbol": "USDCAD",
@@ -2492,11 +2514,11 @@
       "max_dd_r": 3.4,
       "target_met": true,
       "binding_constraint": "out-of-sample - met in-sample (75.4%) but not on purged folds; OOS expectancy is non-positive (-0.020R)",
-      "oos_trades": 64,
-      "oos_win_rate": 0.7031,
-      "oos_expectancy_r": -0.0199,
-      "oos_profit_factor": 0.929,
-      "oos_total_r": -1.275,
+      "oos_trades": 92,
+      "oos_win_rate": 0.5760869565217391,
+      "oos_expectancy_r": 0.11437641042177497,
+      "oos_profit_factor": 1.2642813416798457,
+      "oos_total_r": 10.522629758803298,
       "oos_target_met": false,
       "folds": 4,
       "oos_pre_policy_trades": 64,
@@ -2672,7 +2694,9 @@
           "trades_at_positive_wr": 40
         }
       ],
-      "notes": "Deployed tp0.4_beoff_pcoffx0.5_troff@2_mb48_s0.72383 chosen by walk-forward vote across 4 purged folds; OOS 70.3% on 64 trades (-0.020R, PF 0.93). In-sample reference: 57 trades, 75.4% WR, +0.073R. Regime policy enabled 4/4 regimes, fitted on train folds; all reported figures already exclude disabled regimes."
+      "notes": "Deployed tp0.4_beoff_pcoffx0.5_troff@2_mb48_s0.72383 chosen by walk-forward vote across 4 purged folds; OOS 70.3% on 64 trades (-0.020R, PF 0.93). In-sample reference: 57 trades, 75.4% WR, +0.073R. Regime policy enabled 4/4 regimes, fitted on train folds; all reported figures already exclude disabled regimes.",
+      "geometry_mode": "A_fixed_tp",
+      "target_met_oos": true
     },
     "USDCHF": {
       "symbol": "USDCHF",
@@ -2697,11 +2721,11 @@
       "max_dd_r": 13.75,
       "target_met": false,
       "binding_constraint": "expectancy - the walk-forward-selected configuration has no edge out of sample",
-      "oos_trades": 89,
-      "oos_win_rate": 0.7079,
-      "oos_expectancy_r": -0.1152,
-      "oos_profit_factor": 0.606,
-      "oos_total_r": -10.25,
+      "oos_trades": 250,
+      "oos_win_rate": 0.444,
+      "oos_expectancy_r": -0.15343041539065652,
+      "oos_profit_factor": 0.7209492106949786,
+      "oos_total_r": -38.35760384766413,
       "oos_target_met": false,
       "folds": 4,
       "oos_pre_policy_trades": 165,
@@ -2896,7 +2920,9 @@
           "trades_at_positive_wr": 21
         }
       ],
-      "notes": "Deployed tp0.25_beoff_pcoffx0.5_troff@2_mb48_s0.4 chosen by walk-forward vote across 4 purged folds; OOS 70.8% on 89 trades (-0.115R, PF 0.61). In-sample reference: 116 trades, 71.5% WR, -0.106R. Regime policy enabled 3/5 regimes (disabled: BREAKOUT, TREND_BULL), fitted on train folds; all reported figures already exclude disabled regimes."
+      "notes": "Deployed tp0.25_beoff_pcoffx0.5_troff@2_mb48_s0.4 chosen by walk-forward vote across 4 purged folds; OOS 70.8% on 89 trades (-0.115R, PF 0.61). In-sample reference: 116 trades, 71.5% WR, -0.106R. Regime policy enabled 3/5 regimes (disabled: BREAKOUT, TREND_BULL), fitted on train folds; all reported figures already exclude disabled regimes.",
+      "geometry_mode": "A_fixed_tp",
+      "target_met_oos": false
     },
     "USDJPY": {
       "symbol": "USDJPY",
@@ -2921,11 +2947,11 @@
       "max_dd_r": 3.14,
       "target_met": false,
       "binding_constraint": "win rate - best achievable in-sample with positive expectancy is 69.8% (tp0.6_beoff_pc0.5x0.5_troff@2_mb48_s0@thr0.724), below the 75% target",
-      "oos_trades": 49,
-      "oos_win_rate": 0.6735,
-      "oos_expectancy_r": 0.0329,
-      "oos_profit_factor": 1.107,
-      "oos_total_r": 1.613,
+      "oos_trades": 87,
+      "oos_win_rate": 0.4942528735632184,
+      "oos_expectancy_r": 0.026365659369130826,
+      "oos_profit_factor": 1.0563504591903508,
+      "oos_total_r": 2.293812365114382,
       "oos_target_met": false,
       "folds": 4,
       "oos_pre_policy_trades": 49,
@@ -3092,7 +3118,9 @@
           "trades_at_positive_wr": 36
         }
       ],
-      "notes": "Deployed tp0.6_beoff_pc0.5x0.5_troff@2_mb48_s0.724 chosen by walk-forward vote across 4 purged folds; OOS 67.3% on 49 trades (+0.033R, PF 1.11). In-sample reference: 43 trades, 69.8% WR, +0.078R. Regime policy enabled 3/3 regimes, fitted on train folds; all reported figures already exclude disabled regimes."
+      "notes": "Deployed tp0.6_beoff_pc0.5x0.5_troff@2_mb48_s0.724 chosen by walk-forward vote across 4 purged folds; OOS 67.3% on 49 trades (+0.033R, PF 1.11). In-sample reference: 43 trades, 69.8% WR, +0.078R. Regime policy enabled 3/3 regimes, fitted on train folds; all reported figures already exclude disabled regimes.",
+      "geometry_mode": "A_fixed_tp",
+      "target_met_oos": true
     },
     "XAGUSD": {
       "symbol": "XAGUSD",
@@ -3117,11 +3145,11 @@
       "max_dd_r": 6.0,
       "target_met": false,
       "binding_constraint": "expectancy - the walk-forward-selected configuration has no edge out of sample",
-      "oos_trades": 79,
-      "oos_win_rate": 0.7975,
-      "oos_expectancy_r": -0.0032,
-      "oos_profit_factor": 0.984,
-      "oos_total_r": -0.25,
+      "oos_trades": 260,
+      "oos_win_rate": 0.47692307692307695,
+      "oos_expectancy_r": -0.05914704208407219,
+      "oos_profit_factor": 0.8840323774566772,
+      "oos_total_r": -15.378230941858769,
       "oos_target_met": false,
       "folds": 4,
       "oos_pre_policy_trades": 118,
@@ -3316,7 +3344,9 @@
           "trades_at_positive_wr": 24
         }
       ],
-      "notes": "Deployed tp0.25_beoff_pcoffx0.5_troff@2_mb48_s0.4 chosen by walk-forward vote across 4 purged folds; OOS 79.8% on 79 trades (-0.003R, PF 0.98). In-sample reference: 138 trades, 79.7% WR, -0.004R. Regime policy enabled 3/5 regimes (disabled: BREAKOUT, TREND_BULL), fitted on train folds; all reported figures already exclude disabled regimes."
+      "notes": "Deployed tp0.25_beoff_pcoffx0.5_troff@2_mb48_s0.4 chosen by walk-forward vote across 4 purged folds; OOS 79.8% on 79 trades (-0.003R, PF 0.98). In-sample reference: 138 trades, 79.7% WR, -0.004R. Regime policy enabled 3/5 regimes (disabled: BREAKOUT, TREND_BULL), fitted on train folds; all reported figures already exclude disabled regimes.",
+      "geometry_mode": "A_fixed_tp",
+      "target_met_oos": false
     },
     "XAUUSD": {
       "symbol": "XAUUSD",
@@ -3341,11 +3371,11 @@
       "max_dd_r": 4.765,
       "target_met": true,
       "binding_constraint": "none - target met in-sample AND out-of-sample (OOS 78.7% on 136 trades)",
-      "oos_trades": 136,
-      "oos_win_rate": 0.7868,
-      "oos_expectancy_r": 0.0253,
-      "oos_profit_factor": 1.12,
-      "oos_total_r": 3.435,
+      "oos_trades": 91,
+      "oos_win_rate": 0.4835164835164835,
+      "oos_expectancy_r": -0.03357530140804109,
+      "oos_profit_factor": 0.9350689715309597,
+      "oos_total_r": -3.055352428131739,
       "oos_target_met": true,
       "folds": 4,
       "oos_pre_policy_trades": 136,
@@ -3549,7 +3579,9 @@
           "trades_at_positive_wr": 35
         }
       ],
-      "notes": "Deployed tp0.3_beoff_pcoffx0.5_troff@2_mb24_s0.74445 chosen by walk-forward vote across 4 purged folds; OOS 78.7% on 136 trades (+0.025R, PF 1.12). In-sample reference: 60 trades, 80.0% WR, +0.046R. Regime policy enabled 6/6 regimes, fitted on train folds; all reported figures already exclude disabled regimes."
+      "notes": "Deployed tp0.3_beoff_pcoffx0.5_troff@2_mb24_s0.74445 chosen by walk-forward vote across 4 purged folds; OOS 78.7% on 136 trades (+0.025R, PF 1.12). In-sample reference: 60 trades, 80.0% WR, +0.046R. Regime policy enabled 6/6 regimes, fitted on train folds; all reported figures already exclude disabled regimes.",
+      "geometry_mode": "A_fixed_tp",
+      "target_met_oos": false
     }
   }
 }

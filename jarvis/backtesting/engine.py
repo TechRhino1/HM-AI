@@ -17,6 +17,7 @@ from jarvis.risk.loss_cooldown import LossCooldownManager
 from jarvis.historical.historical_engine import HISTORICAL_DATA_ENGINE
 from jarvis.intelligence.symbol_profile_config import get_symbol_profile_config
 from jarvis.execution.exit_policy import ExitPolicy, evaluate_exit
+from jarvis.backtesting.exit_geometry import build_exit_geometry
 from jarvis.execution.entry_policy import evaluate_entry
 
 class BacktestEngine:
@@ -262,7 +263,9 @@ class BacktestEngine:
                     entry=float(open_trade["entry"]),
                     initial_sl=float(open_trade["initial_sl"]),
                     current_sl=float(open_trade["sl"]),
-                    tp=float(open_trade["tp"]),
+                    # Trail-only geometries carry tp=None; evaluate_exit needs a
+                # real number, and 0.0 is safe because it is unused there.
+                tp=float(open_trade["tp"]) if open_trade["tp"] is not None else 0.0,
                     price=price_for_exit,
                     favorable_dist=float(open_trade["mfe"]),
                     atr=float(atr or 0.0),
@@ -313,6 +316,37 @@ class BacktestEngine:
                 # was wider than the initial stop so it could never ratchet.
                 # evaluate_exit() above now owns trailing and milestones.
 
+                # 5.1 scale-out rungs: close every ladder rung whose R level is
+                # reached, with the harness's conservative rule - if the bar
+                # also spans the stop, the stop fills first and no rung fills.
+                _legs = open_trade.get("legs") or []
+                if _legs and float(open_trade.get("risk_dist") or 0.0) > 0:
+                    _rd = float(open_trade["risk_dist"])
+                    _dir = 1.0 if open_trade["type"] == "BUY" else -1.0
+                    _r_now = float(open_trade["mfe"]) / _rd
+                    _stop_hit = ((low <= open_trade["sl"]) if open_trade["type"] == "BUY"
+                                 else (high >= open_trade["sl"]))
+                    if not _stop_hit:
+                        for _lg in _legs:
+                            if _lg["done"] or _lg["r"] is None:
+                                continue
+                            if _r_now < float(_lg["r"]):
+                                continue
+                            _lots = round(open_trade["lots"] * float(_lg["pct"]), 2)
+                            if _lots < 0.01:
+                                _lg["done"] = True
+                                continue
+                            _px = open_trade["entry"] + _dir * float(_lg["r"]) * _rd
+                            _pips = (((_px - open_trade["entry"]) if open_trade["type"] == "BUY"
+                                      else (open_trade["entry"] - _px)) / spec.pip_size)
+                            _comm = self._calc_commission(symbol, _lots, _px)
+                            _pnl = (_pips * spec.pip_value_per_lot * _lots) - _comm
+                            balance += _pnl
+                            open_trade["realized_pnl"] = open_trade.get("realized_pnl", 0.0) + _pnl
+                            open_trade["lots"] = round(open_trade["lots"] - _lots, 2)
+                            _lg["done"] = True
+                            open_trade["partial_closed"] = True
+
                 # Stage 4: Check SL/TP exit for remaining position
                 closed = False
                 exit_price = 0.0
@@ -320,7 +354,7 @@ class BacktestEngine:
 
                 if open_trade["type"] == "BUY":
                     sl_hit = low <= open_trade["sl"]
-                    tp_hit = high >= open_trade["tp"]
+                    tp_hit = (open_trade["tp"] is not None) and (high >= open_trade["tp"])
                     if sl_hit and tp_hit:
                         # Conservative intrabar ordering (matches trade_simulator):
                         # the stop resting at the start of the bar is tested first,
@@ -340,7 +374,7 @@ class BacktestEngine:
                         closed = True
                 elif open_trade["type"] == "SELL":
                     sl_hit = high >= open_trade["sl"]
-                    tp_hit = low <= open_trade["tp"]
+                    tp_hit = (open_trade["tp"] is not None) and (low <= open_trade["tp"])
                     if sl_hit and tp_hit:
                         # Conservative intrabar ordering (matches trade_simulator).
                         exit_price = open_trade["sl"] + actual_slippage_delta
@@ -511,6 +545,7 @@ class BacktestEngine:
                         # Calibrated target: a multiple of the REALISED risk
                         # distance (not the engine's planned target), so the
                         # geometry means the same thing on every symbol.
+                        exit_geom = None
                         if wr_profile is not None:
                             # Execute the VALIDATED base geometry. The
                             # calibrator's out-of-sample expectancy is measured
@@ -525,6 +560,20 @@ class BacktestEngine:
                             tp_price = entry_price + direction_sign * float(geom.tp_r) * actual_risk_dist
                             exit_policy_for_trade = geom.to_policy(symbol, spec)
                             trade_max_bars = int(geom.max_bars)
+                            # 5.1: execute the SAME schedule the OOS number was
+                            # measured on (fixed target 1.0R, 1.5x ATR trail, no
+                            # breakeven). Ladder geometries carry tp_r=None so
+                            # their runner is carried by the trail, not capped.
+                            exit_geom = build_exit_geometry(
+                                getattr(wr_profile, "geometry_mode", "A_fixed_tp"),
+                                tp_r=1.0, trail_atr=1.5,
+                                be_trigger_r=None,
+                                max_bars=int(geom.max_bars),
+                            )
+                            if exit_geom.tp_r is None:
+                                tp_price = None      # trail-only / ladder runner
+                            else:
+                                tp_price = entry_price + direction_sign * float(exit_geom.tp_r) * actual_risk_dist
                         else:
                             tp_price = decision.take_profit + price_shift
                             exit_policy_for_trade = ExitPolicy.for_symbol(symbol, spec)
@@ -558,6 +607,15 @@ class BacktestEngine:
                             "lots": lots,
                             "initial_lots": lots,
                             "risk_dist": actual_risk_dist,
+                            "exit_geom": exit_geom,
+                            # Rungs ONLY when the schedule has a runner: mode A
+                            # is a single 100% target, and giving it a rung
+                            # would close it here AND again in the TP check.
+                            "legs": ([
+                                {"pct": float(lg.pct), "r": lg.r, "done": False}
+                                for lg in exit_geom.legs if lg.r is not None
+                            ] if (exit_geom is not None
+                                  and any(l.r is None for l in exit_geom.legs)) else []),
                             "realized_pnl": 0.0,
                             "partial_closed": False,
                             "partial_close_bar": -1,

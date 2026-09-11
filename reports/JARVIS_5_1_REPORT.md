@@ -179,8 +179,21 @@ back because two defects surfaced:
    new rung loop closes *and* the existing TP check then closes again — double-counting
    P&L. Rungs must only be built for schedules that actually contain a runner.
 
-Both are fixable, but shipping a half-wired execution path quietly changes `tp_r` for
-every symbol, so the engine was returned to its committed state (62 tests pass).
+**Correction:** only #2 was a real defect. #1 was a **misdiagnosis** — B/C/D already receive
+`tp_r=None`, so their runners are carried by the trail and were never hard-capped. #2 was fixed by
+building rungs only for schedules that actually contain a runner.
+
+The integration was then re-applied and **measured** on the engine (`geometry_mode` set per symbol
+from the harness results):
+
+    PORTFOLIO: 291 trades | WR 51.5% | expectancy -0.164R | PF 0.80 | net -$977.04 | DD 13.69%
+
+**Worse than the −0.063R baseline, because the harness's winning symbols were refused by the OOS
+gate.** Calibration still measures OOS on the old `tp_r` geometry while execution used the new
+schedule, so **the gate and the execution disagree**. Engine integration alone therefore does NOT
+make the system profitable — a **geometry-aware re-calibration** (OOS measured on the schedule the
+engine actually executes) is the prerequisite. `engine.py` and `winrate_profiles.json` were reverted
+to the committed state; 62 tests pass.
 
 **Remaining work, in order:**
 1. Build B/C/D with `tp_r=None` for the runner; only create rungs when a runner exists
