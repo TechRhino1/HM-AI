@@ -32,7 +32,17 @@ class StrategyBandit:
     DEFAULT_BETA = 2.0
 
     def __init__(self, state_file: str = "jarvis_bandit_state.json", exploration_c: float = 0.5):
-        self.state_file = state_file
+        # Anchor the state file under DATA_DIR (see jarvis.config.paths). It used
+        # to be resolved against the process working directory, so the same code
+        # read/wrote a different file depending on where it was launched from --
+        # a reproducibility hazard and the reason backtests could silently share
+        # state with live trading.
+        try:
+            from jarvis.config.paths import resolve_db_path
+
+            self.state_file = resolve_db_path(state_file)
+        except Exception:
+            self.state_file = state_file
         self.c = exploration_c
         self._lock = threading.Lock()
         
@@ -203,6 +213,20 @@ class StrategyBandit:
             self._save_state_internal()
             
     def _save_state_internal(self):
+        # Hermetic backtesting: never let a backtest write bandit state. Doing so
+        # made every run start from the PREVIOUS run's learned weights, so two
+        # identical runs produced different results (measured spread: -0.037R /
+        # -$400 vs -0.063R / -$1,095 on unchanged code). In-memory adaptation
+        # still happens during the run -- it is causal and deterministic -- but
+        # nothing is persisted and nothing is loaded, so each backtest starts
+        # from the same priors.
+        try:
+            from jarvis.config.runtime import is_offline
+
+            if is_offline():
+                return
+        except Exception:
+            pass
         try:
             data = {
                 "counts": self.counts,
@@ -215,6 +239,15 @@ class StrategyBandit:
             pass
 
     def _load_state(self):
+        # See _save_state_internal: under offline_mode a backtest must start from
+        # priors, not from whatever the last run happened to learn or persist.
+        try:
+            from jarvis.config.runtime import is_offline
+
+            if is_offline():
+                return
+        except Exception:
+            pass
         with self._lock:
             if os.path.exists(self.state_file):
                 try:

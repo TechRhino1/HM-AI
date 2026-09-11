@@ -1,0 +1,126 @@
+TimeoutGuard: Error in MT5_Init: module 'MetaTrader5' has no attribute 'initialize'
+Traceback (most recent call last):
+  File "D:\HM_AI\HM-AI\jarvis\application\timeout_guard.py", line 44, in run_sync
+    return future.result(timeout=timeout_sec)
+           ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Itrai\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\concurrent\futures\_base.py", line 453, in result
+    return self.__get_result()
+           ~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\Itrai\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\concurrent\futures\_base.py", line 402, in __get_result
+    raise self._exception
+  File "C:\Users\Itrai\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\concurrent\futures\thread.py", line 59, in run
+    result = self.fn(*self.args, **self.kwargs)
+  File "D:\HM_AI\HM-AI\jarvis\execution\mt5_client.py", line 61, in _init
+    if not mt5.initialize():
+           ^^^^^^^^^^^^^^
+AttributeError: module 'MetaTrader5' has no attribute 'initialize'
+TimeoutGuard: Error in MT5_Init: module 'MetaTrader5' has no attribute 'initialize'
+Traceback (most recent call last):
+  File "D:\HM_AI\HM-AI\jarvis\application\timeout_guard.py", line 44, in run_sync
+    return future.result(timeout=timeout_sec)
+           ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Itrai\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\concurrent\futures\_base.py", line 460, in result
+    return self.__get_result()
+           ~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\Itrai\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\concurrent\futures\_base.py", line 402, in __get_result
+    raise self._exception
+  File "C:\Users\Itrai\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\concurrent\futures\thread.py", line 59, in run
+    result = self.fn(*self.args, **self.kwargs)
+  File "D:\HM_AI\HM-AI\jarvis\execution\mt5_client.py", line 61, in _init
+    if not mt5.initialize():
+           ^^^^^^^^^^^^^^
+AttributeError: module 'MetaTrader5' has no attribute 'initialize'
+TimeoutGuard: Error in MT5_Init: module 'MetaTrader5' has no attribute 'initialize'
+Traceback (most recent call last):
+  File "D:\HM_AI\HM-AI\jarvis\application\timeout_guard.py", line 44, in run_sync
+    return future.result(timeout=timeout_sec)
+           ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Itrai\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\concurrent\futures\_base.py", line 460, in result
+    return self.__get_result()
+           ~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\Itrai\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\concurrent\futures\_base.py", line 402, in __get_result
+    raise self._exception
+  File "C:\Users\Itrai\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\concurrent\futures\thread.py", line 59, in run
+    result = self.fn(*self.args, **self.kwargs)
+  File "D:\HM_AI\HM-AI\jarvis\execution\mt5_client.py", line 61, in _init
+    if not mt5.initialize():
+           ^^^^^^^^^^^^^^
+AttributeError: module 'MetaTrader5' has no attribute 'initialize'
+TimeoutGuard: Error in MT5_Init: module 'MetaTrader5' has no attribute 'initialize'
+Traceback (most recent call last):
+  File "D:\HM_AI\HM-AI\jarvis\application\timeout_guard.py", line 44, in run_sync
+    return future.result(timeout=timeout_sec)
+           ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Itrai\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\concurrent\futures\_base.py", line 460, in result
+    return self.__get_result()
+           ~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\Itrai\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\concurrent\futures\_base.py", line 402, in __get_result
+    raise self._exception
+  File "C:\Users\Itrai\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\concurrent\futures\thread.py", line 59, in run
+    result = self.fn(*self.args, **self.kwargs)
+  File "D:\HM_AI\HM-AI\jarvis\execution\mt5_client.py", line 61, in _init
+    if not mt5.initialize():
+           ^^^^^^^^^^^^^^
+AttributeError: module 'MetaTrader5' has no attribute 'initialize'
+TimeoutGuard: Error in MT5_Init: module 'MetaTrader5' has no attribute 'initialize'
+Traceback (most recent call last):
+  File "D:\HM_AI\HM-AI\jarvis\application\timeout_guard.py", line 44, in run_sync
+    return future.result(timeout=timeout_sec)
+           ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Itrai\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\concurrent\futures\_base.py", line 460, in result
+    return self.__get_result()
+           ~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\Itrai\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\concurrent\futures\_base.py", line 402, in __get_result
+    raise self._exception
+  File "C:\Users\Itrai\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\concurrent\futures\thread.py", line 59, in run
+    result = self.fn(*self.args, **self.kwargs)
+  File "D:\HM_AI\HM-AI\jarvis\execution\mt5_client.py", line 61, in _init
+    if not mt5.initialize():
+           ^^^^^^^^^^^^^^
+AttributeError: module 'MetaTrader5' has no attribute 'initialize'
+TimeoutGuard: Error in MT5_Init: module 'MetaTrader5' has no attribute 'initialize'
+Traceback (most recent call last):
+  File "D:\HM_AI\HM-AI\jarvis\application\timeout_guard.py", line 44, in run_sync
+    return future.result(timeout=timeout_sec)
+           ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Itrai\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\concurrent\futures\_base.py", line 460, in result
+    return self.__get_result()
+           ~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\Itrai\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\concurrent\futures\_base.py", line 402, in __get_result
+    raise self._exception
+  File "C:\Users\Itrai\.workbuddy-ai\binaries\python\versions\3.13.12\Lib\concurrent\futures\thread.py", line 59, in run
+    result = self.fn(*self.args, **self.kwargs)
+  File "D:\HM_AI\HM-AI\jarvis\execution\mt5_client.py", line 61, in _init
+    if not mt5.initialize():
+           ^^^^^^^^^^^^^^
+AttributeError: module 'MetaTrader5' has no attribute 'initialize'
+
+============================================================================================
+### NAS100  | bars=1575 spread_median=1.950 candidates=1109 profile_geom=tp0.25_beoff_pcoffx0.5_troff@2_mb24_s0.624168
+============================================================================================
+
+  TRADE COUNT      engine= 141   simulator= 118
+  WIN RATE %        engine= 76.60   simulator= 76.27
+  EXPECTANCY (R)    engine=-0.0374   simulator=-0.0396
+  AVG WIN / LOSS R  engine=0.250 / -0.978   sim=0.250 / -0.971
+  WALK OVERLAP      jaccard=0.480  only_engine=57  only_simulator=34
+  PROFILE OOS (stored)  exp=+0.0628R  WR=82.58%  n=132
+
+  ENGINE exit reasons:   {'SL': 30, 'TP': 108, 'STAGNATION_TIME_STOP_24BAR': 2, 'CLOSE_AT_END': 1}
+  SIM    exit reasons:   {'SL': 25, 'TP': 90, 'TIME_STOP_24B': 2, 'CLOSE_AT_END': 1}
+  PER-REGIME GEOMETRY DIFFERS from base (tp_r, be, max_bars): {'TREND_BEAR': (0.4, None, 24), 'TREND_BULL': (1.5, None, 48), 'BREAKOUT': (0.6, None, 48)}
+
+============================================================================================
+### GER40  | bars=1571 spread_median=1.950 candidates=1235 profile_geom=tp0.25_beoff_pcoffx0.5_troff@2_mb24_s0.728976
+============================================================================================
+
+  TRADE COUNT      engine=  83   simulator=  92
+  WIN RATE %        engine= 74.70   simulator= 77.17
+  EXPECTANCY (R)    engine=-0.0677   simulator=-0.0353
+  AVG WIN / LOSS R  engine=0.250 / -1.006   sim=0.250 / -1.000
+  WALK OVERLAP      jaccard=0.357  only_engine=37  only_simulator=46
+  PROFILE OOS (stored)  exp=+0.0190R  WR=78.90%  n=109
+
+  ENGINE exit reasons:   {'TP': 62, 'SL': 21}
+  SIM    exit reasons:   {'TP': 71, 'SL': 21}
+  PER-REGIME GEOMETRY DIFFERS from base (tp_r, be, max_bars): {'TREND_BEAR': (0.3, None, 24)}

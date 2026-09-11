@@ -53,6 +53,11 @@ class RiskEngine:
         self.circuit_breaker = CircuitBreaker(
             db_path="" if is_backtest else "jarvis_circuit_state.db"
         )
+        # Injectable clock so a backtest can advance on BAR time instead of wall
+        # time (see CircuitBreaker.set_clock). Risk reservations (below) expire on
+        # a real-time TTL; in a backtest that made portfolio-heat gating depend on
+        # machine speed, so it must use the same injected clock.
+        self._now = time.time
         self.position_sizer = PositionSizer()
         self.trade_guard = TradeGuard()
         self.correlation_engine = DynamicCorrelationEngine()
@@ -61,13 +66,22 @@ class RiskEngine:
         self._reserved_risk: Dict[str, tuple] = {}
         self._reserved_lock = threading.Lock()
 
+    def set_clock(self, clock) -> None:
+        """Inject the time source used for pauses and reservation TTLs.
+
+        Backtests pass bar time; with no caller it stays the real wall clock, so
+        live behaviour is unchanged.
+        """
+        self._now = clock if clock is not None else time.time
+        self.circuit_breaker.set_clock(clock)
+
     # ─── Atomic Risk Reservation (Thread-Safe Execution) ───────────────────────
 
     def reserve_risk(self, symbol: str, risk_usd: float, ttl_sec: float = 15.0) -> bool:
         """Atomically reserves monetary risk capacity before placing order to prevent race conditions."""
         canon = resolve_symbol(symbol).canonical
         with self._reserved_lock:
-            now = time.time()
+            now = self._now()
             self._prune_expired_reservations(now)
             self._reserved_risk[canon] = (risk_usd, now + ttl_sec)
             return True
@@ -85,7 +99,7 @@ class RiskEngine:
     def get_total_reserved_risk_usd(self) -> float:
         """Returns total unexpired reserved monetary risk across pending orders."""
         with self._reserved_lock:
-            now = time.time()
+            now = self._now()
             self._prune_expired_reservations(now)
             return sum(r[0] for r in self._reserved_risk.values())
 

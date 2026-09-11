@@ -53,6 +53,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
@@ -397,6 +398,16 @@ def default_geometry_grid(
         # Targets below 0.4R are included so the frontier can show whether a high
         # win rate is reachable at all, and at what expectancy cost. Without them
         # the calibration would sit pinned at the smallest target it was offered.
+        # NOTE: 2.0 was trialled and REMOVED. The frontier sweep says it is the
+        # best-expectancy corner for NAS100/USDJPY, but that sweep is IN-SAMPLE.
+        # Out-of-sample it is a trap: at tp_r=2.0 a trade is held into the
+        # breakeven/trail/time-stop region (trail_activation_r = 2.0), and
+        # there the simulator and BacktestEngine resolve exits differently.
+        # Measured on NAS100 with tp2: the calibrator's OOS predicted 44.2% WR /
+        # +0.125R while the engine realised 23.3% WR / -0.246R -- a 21-point
+        # discrepancy that no win-rate margin can absorb. Geometries that
+        # resolve on a plain TP/SL touch (tp_r comfortably below 2.0) are the
+        # ones verified to match the engine, so the grid stops at 1.5.
         tp_r_values = [0.25, 0.3, 0.4, 0.5, 0.6, 0.75, 1.0, 1.5]
         be_values: List[Optional[float]] = [None, 1.0]
         pc_values: List[Optional[float]] = [None, 0.5]
@@ -426,13 +437,155 @@ def default_geometry_grid(
     return grid
 
 
-def _rank_key(s: Dict[str, float], target_wr: float, min_trades: int) -> Tuple:
-    """Lexicographic selection key.
+# ─────────────────────────────────────────────────────────────────────────────
+# Robustness margins per asset class.
+#
+# ``min_margin`` is how many win-rate points a configuration must clear above its
+# OWN breakeven win rate before it is preferred. It exists to absorb the measured
+# out-of-sample -> engine slippage (2-3 win-rate points on this dataset): a
+# configuration sitting 0.5 points above breakeven in training is a coin flip in
+# production, no matter how good its backtest looks.
+#
+# Noisier asset classes get a larger requirement. Crypto trades 24/7 with gap
+# risk and thin liquidity pockets, so its realised payoff is the least stable and
+# it must clear the most headroom. Major FX is the most stable and can be held to
+# a smaller margin without inviting fragile selections.
+# ─────────────────────────────────────────────────────────────────────────────
+ASSET_CLASS_MIN_MARGIN: Dict[str, float] = {
+    "CRYPTO": 0.08,
+    "INDEX": 0.06,
+    # Precious metals are registered as COMMODITY in the symbol-profile matrix,
+    # so both spellings are listed rather than silently falling to the default.
+    "METAL": 0.05,
+    "METALS": 0.05,
+    "COMMODITY": 0.05,
+    "FOREX": 0.04,
+    "FX": 0.04,
+}
+DEFAULT_MIN_MARGIN = 0.05
 
-    Tier 2: target met with positive expectancy  -> rank by expectancy.
-    Tier 1: positive expectancy, target missed   -> rank by win rate.
-    Tier 0: negative expectancy or too few trades -> rank by win rate only.
+
+def min_margin_for_symbol(symbol: str, default: float = DEFAULT_MIN_MARGIN) -> float:
+    """Asset-class-aware robustness margin for ``symbol``.
+
+    Falls back to ``default`` when the symbol profile cannot be resolved, so an
+    unrecognised instrument is calibrated with the middle-of-the-road
+    requirement rather than crashing the calibration run.
     """
+    try:
+        from jarvis.intelligence.symbol_profile_config import get_symbol_profile_config
+
+        cfg = get_symbol_profile_config(symbol)
+        cls_name = str(getattr(cfg, "asset_class", "") or "").upper()
+        return float(ASSET_CLASS_MIN_MARGIN.get(cls_name, default))
+    except Exception:
+        return default
+
+
+def breakeven_win_rate(s: Dict[str, float]) -> float:
+    """Win rate a configuration needs to break even, from its REALISED payoff.
+
+    expectancy = WR*avg_win - (1-WR)*|avg_loss| is zero at
+
+        WR* = |avg_loss| / (avg_win + |avg_loss|) = 1 / (1 + payoff)
+
+    This is the number that matters. A profile reporting an 80% win rate is
+    worthless if its payoff is 0.25R, because it then needs 80.1% just to break
+    even. Ranking on win rate alone walks the calibrator straight into that
+    trap: smaller ``tp_r`` always raises win rate and always lowers the margin.
+    """
+    aw = abs(float(s.get("avg_win_r", 0.0) or 0.0))
+    al = abs(float(s.get("avg_loss_r", 0.0) or 0.0))
+    if aw <= 0:
+        return 1.0
+    if al <= 0:
+        return 0.0
+    payoff = aw / al
+    return 1.0 / (1.0 + payoff)
+
+
+def expectancy_tstat(s: Dict[str, float]) -> float:
+    """t-statistic of the mean R — expectancy adjusted for estimation noise.
+
+    Raw in-sample expectancy is a trap. Estimated from ~40 trades it is
+    dominated by a handful of large winners, so ranking on it is a textbook
+    winner's curse: XAUUSD's best in-sample configuration reported +0.101R and
+    delivered -0.123R out of sample. Maximising a noisy statistic selects the
+    luckiest sample, not the best configuration.
+
+    The t-statistic divides expectancy by its standard error, so a configuration
+    only wins if its edge is both large and *well supported*. For a two-point
+    outcome (win -> +avg_win_r with probability win_rate, otherwise
+    -|avg_loss_r|):
+
+        E[R^2]  = p*aw^2 + (1-p)*al^2
+        Var(R)  = E[R^2] - E[R]^2
+        t       = expectancy * sqrt(n) / sqrt(Var(R))
+
+    This is the per-trade Sharpe ratio scaled by sqrt(n) — it rewards
+    consistency and sample depth, which is exactly what "avoid overfitting"
+    means operationally.
+    """
+    n = int(s.get("trades", 0) or 0)
+    exp = float(s.get("expectancy_r", 0.0) or 0.0)
+    wr = float(s.get("win_rate", 0.0) or 0.0)
+    aw = abs(float(s.get("avg_win_r", 0.0) or 0.0))
+    al = abs(float(s.get("avg_loss_r", 0.0) or 0.0))
+    if n <= 1 or aw <= 0 or al <= 0 or not (0.0 < wr < 1.0):
+        return 0.0
+    e2 = wr * aw * aw + (1.0 - wr) * al * al
+    var = e2 - exp * exp
+    if var <= 0:
+        return 0.0
+    return exp * math.sqrt(n) / math.sqrt(var)
+
+
+def _rank_key(
+    s: Dict[str, float],
+    target_wr: float,
+    min_trades: int,
+    min_margin: float = 0.05,
+) -> Tuple:
+    """Lexicographic selection key — EXPECTANCY FIRST, with a robustness margin.
+
+    Tier 2: target met with positive expectancy   -> rank by expectancy.
+    Tier 1: positive expectancy, target missed    -> rank by win rate.
+    Tier 0: negative expectancy or too few trades -> rank by win rate only.
+
+    KNOWN WEAKNESS (measured, deliberately not yet changed):
+    because the 75% target is missed far more often than it is met, the
+    calibrator usually lands in Tier 1/0 and therefore usually selects the
+    tightest ``tp_r`` on the grid (0.25) — the highest-win-rate corner of the
+    frontier and the *thinnest-margin* corner. Across 16 symbols it picked
+    ``tp_r=0.25`` 13 times, collapsing realised payoff to ~0.25R, which puts the
+    breakeven win rate at ~80% while the system delivers ~75%.
+
+    Two expectancy-first replacements were built and A/B tested end-to-end
+    (see the comment block below the ranking) and both scored WORSE on the
+    engine. The limiting factor is not this objective — it is that the
+    walk-forward OOS fitted here does not predict the engine. Until the OOS is
+    measured on the engine's own execution path, changing this ranking only
+    optimises harder against the instrument's bias.
+
+    All returned tuples are ``(int, float, float, int)`` so they stay mutually
+    comparable across tiers.
+    """
+    # ── EXPERIMENTAL OBJECTIVES, MEASURED AND REVERTED (2026-09-11) ──────────
+    # Two replacements for the ranking below were implemented and A/B tested
+    # end-to-end (calibrate -> engine backtest): (1) rank by expectancy with a
+    # win-rate margin guard, (2) rank by the t-statistic of expectancy. Both are
+    # sound in principle and both made the portfolio WORSE:
+    #     baseline (below)  : -0.037R, PF 0.93, -$400
+    #     expectancy-max    : -0.089R, PF 0.84, -$692
+    #     t-statistic       : -0.065R, PF 0.82, -$1063
+    # The reason is NOT the objective. It is that the walk-forward OOS number
+    # the objective is fitted on does not predict the engine: measured OOS ->
+    # engine gaps of -0.19R to -0.26R (ETHUSD +0.053 -> -0.202, USDCAD +0.013 ->
+    # -0.175, UK100 +0.042 -> -0.147). Optimising harder against an unfaithful
+    # instrument just selects more precisely for the instrument's bias.
+    # ``breakeven_win_rate`` and ``expectancy_tstat`` are kept as diagnostics;
+    # they become usable for selection only once the OOS is measured on the
+    # engine's own execution path. See reports/expectancy_fix_validation.md.
     if s["trades"] < min_trades or s["expectancy_r"] <= 0:
         return (0, 0.0, s["win_rate"], s["trades"])
     if s["win_rate"] >= target_wr:
@@ -473,7 +626,13 @@ class WRTargetCalibrator:
         enable_regime_policy: bool = True,
         regime_geometry: bool = True,
         commission_per_lot: float = 0.0,
+        slippage_pips: float = 0.5,
+        min_margin: Optional[float] = None,
     ):
+        # ``None`` means "derive per symbol from its asset class" (see
+        # ``min_margin_for_symbol``). An explicit float overrides that for every
+        # symbol, which is what the CLI ``--min-margin`` flag passes through.
+        self.min_margin = None if min_margin is None else float(min_margin)
         self.target_wr = float(target_wr)
         self.min_trades = int(min_trades)
         self.folds = int(folds)
@@ -483,6 +642,11 @@ class WRTargetCalibrator:
         self.enable_regime_policy = enable_regime_policy
         self.regime_geometry = regime_geometry
         self.commission_per_lot = float(commission_per_lot)
+        # Stop slippage applied by BacktestEngine on every protective-stop fill
+        # (actual_slippage_delta = slippage_pips * pip_size). The calibration
+        # instrument must model it too, or OOS expectancy over-promises an edge
+        # that the engine erodes with slippage on every scratch and loss.
+        self.slippage_pips = float(slippage_pips)
 
     # ── internals ──────────────────────────────────────────────────────────
     def _cost_price_equiv(self, symbol: str, money_per_unit: float) -> float:
@@ -497,6 +661,16 @@ class WRTargetCalibrator:
             cfg_comm = 0.0
         comm = self.commission_per_lot or cfg_comm
         return comm / money_per_unit
+
+    def _min_margin_for(self, symbol: str) -> float:
+        """Robustness margin in force for ``symbol``.
+
+        Explicit ``min_margin`` wins; otherwise the asset class decides, because
+        crypto needs more headroom above breakeven than major FX does.
+        """
+        if self.min_margin is not None:
+            return float(self.min_margin)
+        return min_margin_for_symbol(symbol)
 
     def _compute_frontier(
         self,
@@ -623,6 +797,7 @@ class WRTargetCalibrator:
         spec = resolve_symbol(symbol)
         money_per_unit = get_dollar_risk_per_price_unit(symbol)
         cost = self._cost_price_equiv(symbol, money_per_unit)
+        slip = float(self.slippage_pips) * float(getattr(spec, "pip_size", 0.0001) or 0.0001)
 
         if candidates is None or len(candidates) == 0:
             return WRTargetProfile(
@@ -678,7 +853,8 @@ class WRTargetCalibrator:
             for g, thr in combos:
                 s = summarise(self._select_windows(sim_cache[g.key()], train_windows, thr))
                 train_summaries.setdefault((g.key(), thr), []).append(s)
-                key = _rank_key(s, self.target_wr, self.min_trades)
+                key = _rank_key(s, self.target_wr, self.min_trades,
+                                self._min_margin_for(symbol))
                 if f_key is None or key > f_key:
                     f_key, f_choice = key, (g, thr)
             if f_choice is None:
@@ -714,7 +890,8 @@ class WRTargetCalibrator:
                 # Tie-break on THIS configuration's mean TRAIN summary across
                 # folds: honest, and still never touches the test windows.
                 means = _mean_summary(train_summaries.get((gkey, thr), []))
-                key = _rank_key(means, self.target_wr, self.min_trades)
+                key = _rank_key(means, self.target_wr, self.min_trades,
+                                self._min_margin_for(symbol))
                 full_s = summarise(select_sequential(sim_cache[g.key()], min_score=thr))
                 if best_key is None or key > best_key:
                     best_key, best = key, (g, thr, full_s)
@@ -725,7 +902,8 @@ class WRTargetCalibrator:
             best_key = None
             for g, thr in combos:
                 s = summarise(select_sequential(sim_cache[g.key()], min_score=thr))
-                key = _rank_key(s, self.target_wr, self.min_trades)
+                key = _rank_key(s, self.target_wr, self.min_trades,
+                                self._min_margin_for(symbol))
                 if best_key is None or key > best_key:
                     best_key, best = key, (g, thr, s)
 
@@ -812,7 +990,8 @@ class WRTargetCalibrator:
                     sub = [o for o in sim_cache[g.key()] if o.entry_idx in idx_set]
                     picked = select_sequential(sub, min_score=thr)
                     s = summarise(picked)
-                    key = _rank_key(s, self.target_wr, max(4, self.min_trades // 2))
+                    key = _rank_key(s, self.target_wr, max(4, self.min_trades // 2),
+                                    self._min_margin_for(symbol))
                     if r_key is None or key > r_key:
                         r_key, r_best = key, g
                 if r_best is not None:

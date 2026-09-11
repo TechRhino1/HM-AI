@@ -9,10 +9,30 @@ from typing import Dict, Any
 from jarvis.config.paths import resolve_db_path
 
 class CircuitBreaker:
-    def __init__(self, db_path: str = "jarvis_circuit_state.db"):
+    def __init__(self, db_path: str = "jarvis_circuit_state.db", clock=None):
+        # Injectable clock. Live trading uses the real wall clock; a BACKTEST must
+        # advance on BAR TIME (``BacktestEngine`` sets this to the current bar's
+        # epoch seconds each bar). Without it, a 45-minute symbol pause is
+        # measured against real CPU seconds, so whether it has expired depends
+        # on how fast the machine is -- which made backtest trade counts vary
+        # run to run (USDJPY 53 vs 63, XAUUSD 97 vs 84 on identical inputs).
+        self._now = clock if clock is not None else time.time
         # Anchored on the repo data dir — a CWD-relative path let the breaker
         # "forget" it had tripped when launched from a different directory.
         db_path = resolve_db_path(db_path)
+        # Hermetic backtesting: run in memory and persist nothing. Otherwise a
+        # backtest that trips the breaker (or accumulates symbol/regime pauses)
+        # leaves that state behind, and the NEXT run starts already tripped --
+        # silently taking fewer trades. Measured symptom: two identical runs
+        # produced different trade counts (NAS100 107 vs 118) and different
+        # results (-0.037R vs -0.063R). "" is the documented in-memory sentinel.
+        try:
+            from jarvis.config.runtime import is_offline
+
+            if is_offline():
+                db_path = ""
+        except Exception:
+            pass
         self.enabled = True
         self.consecutive_losses = 0
         self.is_tripped = False
@@ -81,8 +101,12 @@ class CircuitBreaker:
     def disable(self):
         self.enabled = False
 
+    def set_clock(self, clock) -> None:
+        """Inject the time source (backtests pass bar time; live passes None -> wall clock)."""
+        self._now = clock if clock is not None else time.time
+
     def record_trade_result(self, is_win: bool, symbol: str = "", regime: str = ""):
-        now = time.time()
+        now = self._now()
         if is_win:
             self.consecutive_losses = 0
             if symbol and symbol in self.symbol_losses:
@@ -112,17 +136,17 @@ class CircuitBreaker:
         if not self.enabled:
             return False
         pause_until = self.symbol_paused_until.get(symbol, 0.0)
-        return time.time() < pause_until
+        return self._now() < pause_until
 
     def is_regime_paused(self, regime: str) -> bool:
         if not self.enabled:
             return False
         pause_until = self.regime_paused_until.get(regime, 0.0)
-        return time.time() < pause_until
+        return self._now() < pause_until
 
     def trip(self, reason: str):
         self.is_tripped = True
-        self.tripped_timestamp = time.time()
+        self.tripped_timestamp = self._now()
         self.trip_reason = reason
         self._save_state()
 
@@ -149,7 +173,7 @@ class CircuitBreaker:
             return {"active": False, "reason": ""}
             
         if self.is_tripped:
-            elapsed = time.time() - self.tripped_timestamp
+            elapsed = self._now() - self.tripped_timestamp
             cooldown_seconds = self._get_adaptive_cooldown()
             
             if elapsed >= cooldown_seconds:

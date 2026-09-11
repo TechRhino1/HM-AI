@@ -13,6 +13,18 @@ class DrawdownGuard:
     def __init__(self, max_daily_loss_pct: float = 4.0, max_total_drawdown_pct: float = 10.0, db_path: str = "jarvis_drawdown_state.db"):
         # Anchored on the repo data dir — see jarvis.config.paths.
         db_path = resolve_db_path(db_path)
+        # Hermetic backtesting: in memory, nothing persisted. A backtest that
+        # ends mid-drawdown otherwise leaves daily_start_equity/peak_equity
+        # behind and the next run starts partially through a drawdown it never
+        # actually had, tripping the daily-loss cap early. See the matching note
+        # in circuit_breaker.py. "" is the documented in-memory sentinel.
+        try:
+            from jarvis.config.runtime import is_offline
+
+            if is_offline():
+                db_path = ""
+        except Exception:
+            pass
         self.max_daily_loss_pct = max_daily_loss_pct
         self.max_total_drawdown_pct = max_total_drawdown_pct
         self.daily_start_equity: float = 0.0

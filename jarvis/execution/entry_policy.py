@@ -143,6 +143,36 @@ def evaluate_entry(
             regime=regime,
         )
 
+    # Refuse symbols with no validated out-of-sample edge.
+    #
+    # The calibrator already computes the purged out-of-sample expectancy
+    # (``oos_expectancy_r``). The module's own design states plainly: "a 75%
+    # profile with negative expectancy is a failure, not a success." Trading a
+    # symbol whose OOS expectancy is non-positive is exactly that failure, and
+    # it was the single largest source of the negative portfolio expectancy:
+    # in the 3-month backtest several symbols (EURUSD, USDCHF, NZDUSD, USDJPY,
+    # SOLUSD, US30) deployed with a *positive in-sample* expectancy that decayed
+    # to a *negative OOS* expectancy, and the engine traded them anyway because
+    # nothing checked the OOS number.
+    #
+    # This is a capital-protection-grade refusal: it can only prevent trading a
+    # proven loser, never add risk. A thin or missing OOS sample (too few
+    # purged-fold trades to trust) falls through to the normal edge gate rather
+    # than refusing on noise.
+    oos_exp = float(getattr(profile, "oos_expectancy_r", 0.0) or 0.0)
+    oos_n = int(getattr(profile, "oos_trades", 0) or 0)
+    if oos_n >= 10 and oos_exp <= 0.0:
+        return EntryDecision(
+            allowed=False,
+            reason=(
+                f"calibrated profile has no validated edge "
+                f"(OOS expectancy {oos_exp:+.3f}R over {oos_n} trades) - refusing symbol"
+            ),
+            score=score,
+            edge_threshold=float(getattr(profile.geometry, "min_score", 0.0) or 0.0),
+            regime=regime,
+        )
+
     threshold = float(getattr(profile.geometry, "min_score", 0.0) or 0.0)
 
     # Regime policy learned from out-of-sample outcomes: a regime with no

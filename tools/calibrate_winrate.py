@@ -58,6 +58,10 @@ def main() -> int:
     ap.add_argument("--target", type=float, default=0.75, help="win-rate target (0-1)")
     ap.add_argument("--min-trades", type=int, default=20)
     ap.add_argument("--folds", type=int, default=4)
+    ap.add_argument(
+        "--min-margin", type=float, default=None,
+        help="required win-rate points above breakeven (default: per asset class)",
+    )
     ap.add_argument("--fine", action="store_true", help="use the fine geometry grid")
     ap.add_argument("--no-regime-geometry", action="store_true")
     args = ap.parse_args()
@@ -76,6 +80,10 @@ def main() -> int:
         folds=args.folds,
         coarse_grid=not args.fine,
         regime_geometry=not args.no_regime_geometry,
+        # Must match BacktestEngine's stop slippage (slippage_pips * pip_size)
+        # so the calibrated OOS expectancy reflects real trading costs.
+        slippage_pips=0.5,
+        min_margin=args.min_margin,
     )
 
     print(f"Calibrating {len(symbols)} symbols | target {args.target:.0%} | "

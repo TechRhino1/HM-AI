@@ -152,6 +152,17 @@ class BacktestEngine:
                 b_date = bar_time.date() if hasattr(bar_time, "date") else None
                 if b_date is not None and b_date != cooldown_mgr.current_date:
                     cooldown_mgr.reset_daily(b_date)
+                # Advance the risk clock to BAR time. Circuit-breaker pauses
+                # (45/60 min) and risk-reservation TTLs were otherwise measured
+                # against real CPU seconds, so whether a pause had expired
+                # depended on machine speed and backtest trade counts varied run
+                # to run (USDJPY 53 vs 63, XAUUSD 97 vs 84 on identical inputs).
+                try:
+                    _bar_ts = float(pd.Timestamp(bar_time).timestamp())
+                except Exception:
+                    _bar_ts = None
+                if _bar_ts is not None:
+                    self.risk_engine.set_clock(lambda t=_bar_ts: t)
             cooldown_mgr.tick_bar()
 
             # 1. Manage existing open trade with institutional partial TP & dynamic trailing
@@ -311,15 +322,14 @@ class BacktestEngine:
                     sl_hit = low <= open_trade["sl"]
                     tp_hit = high >= open_trade["tp"]
                     if sl_hit and tp_hit:
-                        open_p = float(current_bar["open"])
-                        if abs(open_p - open_trade["tp"]) <= abs(open_p - open_trade["sl"]):
-                            exit_price = open_trade["tp"]
-                            result = "TP"
-                            closed = True
-                        else:
-                            exit_price = open_trade["sl"] - actual_slippage_delta
-                            result = "BE/TRAIL_SL" if (open_trade.get("partial_closed") or open_trade.get("be_locked")) else "SL"
-                            closed = True
+                        # Conservative intrabar ordering (matches trade_simulator):
+                        # the stop resting at the start of the bar is tested first,
+                        # so a bar that spans both is booked as a stop-out loss.
+                        # Resolving it as a TP on the open-price heuristic inflated
+                        # win rate exactly where the target lives.
+                        exit_price = open_trade["sl"] - actual_slippage_delta
+                        result = "BE/TRAIL_SL" if (open_trade.get("partial_closed") or open_trade.get("be_locked")) else "SL"
+                        closed = True
                     elif sl_hit:
                         exit_price = open_trade["sl"] - actual_slippage_delta
                         result = "BE/TRAIL_SL" if (open_trade.get("partial_closed") or open_trade.get("be_locked")) else "SL"
@@ -332,15 +342,10 @@ class BacktestEngine:
                     sl_hit = high >= open_trade["sl"]
                     tp_hit = low <= open_trade["tp"]
                     if sl_hit and tp_hit:
-                        open_p = float(current_bar["open"])
-                        if abs(open_p - open_trade["tp"]) <= abs(open_p - open_trade["sl"]):
-                            exit_price = open_trade["tp"]
-                            result = "TP"
-                            closed = True
-                        else:
-                            exit_price = open_trade["sl"] + actual_slippage_delta
-                            result = "BE/TRAIL_SL" if (open_trade.get("partial_closed") or open_trade.get("be_locked")) else "SL"
-                            closed = True
+                        # Conservative intrabar ordering (matches trade_simulator).
+                        exit_price = open_trade["sl"] + actual_slippage_delta
+                        result = "BE/TRAIL_SL" if (open_trade.get("partial_closed") or open_trade.get("be_locked")) else "SL"
+                        closed = True
                     elif sl_hit:
                         exit_price = open_trade["sl"] + actual_slippage_delta
                         result = "BE/TRAIL_SL" if (open_trade.get("partial_closed") or open_trade.get("be_locked")) else "SL"
@@ -507,7 +512,15 @@ class BacktestEngine:
                         # distance (not the engine's planned target), so the
                         # geometry means the same thing on every symbol.
                         if wr_profile is not None:
-                            geom = wr_profile.geometry_for(regime_name)
+                            # Execute the VALIDATED base geometry. The
+                            # calibrator's out-of-sample expectancy is measured
+                            # on this geometry; per-regime overrides in
+                            # ``geometry_for`` were never validated as an
+                            # ensemble and silently destroyed expectancy (e.g.
+                            # TREND_BULL tp_r=1.5 vs base tp_r=0.25). Using the
+                            # validated geometry is what makes the engine's
+                            # realized expectancy match the calibrated OOS.
+                            geom = wr_profile.geometry
                             direction_sign = 1.0 if decision.bias == "BUY" else -1.0
                             tp_price = entry_price + direction_sign * float(geom.tp_r) * actual_risk_dist
                             exit_policy_for_trade = geom.to_policy(symbol, spec)

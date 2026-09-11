@@ -165,6 +165,16 @@ class TradeOutcome:
     is_win: bool
     partial_taken: bool
     be_locked: bool
+    # Scale-out accounting (JARVIS 5.1). These were COMPUTED inside the
+    # simulation loop but then thrown away -- only the ``partial_taken`` flag
+    # survived into the outcome. Without the quantity, the price and the banked
+    # R it is impossible to audit a scale-out: you cannot tell a 33%-at-1.5R
+    # partial from a 75%-at-0.5R one, and you cannot attribute P&L between the
+    # banked leg and the runner. Recorded so the exit-geometry engine can be
+    # evaluated leg by leg.
+    partial_pct: float = 0.0
+    partial_price: float = 0.0
+    partial_r: float = 0.0
     # Context carried through from the candidate so the AI layer can learn
     # conditional edge (symbol x regime x strategy x score) without a re-scan.
     ai_score: float = 0.0
@@ -227,6 +237,7 @@ def simulate_trade(
     df: Optional[pd.DataFrame] = None,
     bars: Optional[BarArrays] = None,
     cost_price_equiv: float = 0.0,
+    slippage_price_equiv: float = 0.0,
     ai_score: float = 0.0,
     calibrated_win_p: float = 0.0,
     regime: str = "UNKNOWN",
@@ -274,28 +285,41 @@ def simulate_trade(
     be_locked = False
     partial_taken = False
     partial_pct = 0.0
+    partial_price = 0.0   # price at which the banked leg was closed (5.1 audit)
     partial_r_gross = 0.0  # banked R from the partial (gross of cost)
     mfe = 0.0
     mae = 0.0
     max_bars = int(geom.max_bars)
 
-    entry_time = bars.time[entry_idx]
+    # The entry fills at the NEXT bar's open (see signal_scan), so the trade
+    # is not live until bar ``entry_idx + 1``. Testing bar ``entry_idx`` (the
+    # signal bar) for SL/TP is a one-bar look-ahead that books phantom target
+    # hits the live engine can never take -- it is the root cause of the
+    # calibration's inflated win rates. Start at +1.
+    entry_time = bars.time[entry_idx + 1]
 
-    for j in range(entry_idx, n):
+    for j in range(entry_idx + 1, n):
         high = high_arr[j]
         low = low_arr[j]
 
         # ── 1. Stop resting at the START of this bar is tested FIRST ────────
         # (conservative intrabar convention — see module docstring)
         if (low <= current_sl) if is_buy else (high >= current_sl):
+            # Protective-stop exits incur the same realised slippage the live
+            # engine charges (BacktestEngine subtracts actual_slippage_delta =
+            # slippage_pips * pip_size from every stop fill). Modelling it here
+            # is what makes the calibrated OOS expectancy honest: without it the
+            # simulator books breakeven scratches that the engine actually
+            # closes as small losses, and the calibration over-promises an edge.
+            sl_exit_price = current_sl - direction * slippage_price_equiv
             return _finalise(
                 symbol=symbol, side=side, bars=bars, entry_idx=entry_idx,
-                exit_idx=j, entry_time=entry_time, fill=fill, exit_price=current_sl,
+                exit_idx=j, entry_time=entry_time, fill=fill, exit_price=sl_exit_price,
                 sl_initial=sl, sl_final=current_sl, tp=tp_price, risk_dist=risk_dist,
                 result=("BE/TRAIL_SL" if (be_locked or partial_taken) else "SL"),
-                mfe=mfe, mae=mae, partial_pct=partial_pct,
+                mfe=mfe, mae=mae, partial_pct=partial_pct, partial_price=partial_price,
                 partial_r_gross=partial_r_gross,
-                remaining_r_gross=(current_sl - fill) * direction * inv_risk,
+                remaining_r_gross=(sl_exit_price - fill) * direction * inv_risk,
                 cost_price_equiv=cost_price_equiv, money_per_unit=money_per_unit,
                 ai_score=ai_score, calibrated_win_p=calibrated_win_p,
                 regime=regime, strategy=strategy, zone=zone,
@@ -308,7 +332,7 @@ def simulate_trade(
                 symbol=symbol, side=side, bars=bars, entry_idx=entry_idx,
                 exit_idx=j, entry_time=entry_time, fill=fill, exit_price=tp_price,
                 sl_initial=sl, sl_final=current_sl, tp=tp_price, risk_dist=risk_dist,
-                result="TP", mfe=mfe, mae=mae, partial_pct=partial_pct,
+                result="TP", mfe=mfe, mae=mae, partial_pct=partial_pct, partial_price=partial_price,
                 partial_r_gross=partial_r_gross,
                 remaining_r_gross=(tp_price - fill) * direction * inv_risk,
                 cost_price_equiv=cost_price_equiv, money_per_unit=money_per_unit,
@@ -334,7 +358,7 @@ def simulate_trade(
                 exit_idx=j, entry_time=entry_time, fill=fill, exit_price=exit_price,
                 sl_initial=sl, sl_final=current_sl, tp=tp_price, risk_dist=risk_dist,
                 result=f"TIME_STOP_{max_bars}B", mfe=mfe, mae=mae,
-                partial_pct=partial_pct, partial_r_gross=partial_r_gross,
+                partial_pct=partial_pct, partial_price=partial_price, partial_r_gross=partial_r_gross,
                 remaining_r_gross=(exit_price - fill) * direction * inv_risk,
                 cost_price_equiv=cost_price_equiv, money_per_unit=money_per_unit,
                 ai_score=ai_score, calibrated_win_p=calibrated_win_p,
@@ -360,6 +384,7 @@ def simulate_trade(
         if dec.partial_close_pct > 0.0 and not partial_taken:
             # Bank the partial at the policy's stated level.
             partial_pct += dec.partial_close_pct
+            partial_price = float(dec.partial_price)
             partial_r_gross += ((dec.partial_price - fill) * direction * inv_risk) * dec.partial_close_pct
             partial_taken = True
 
@@ -380,7 +405,7 @@ def simulate_trade(
         symbol=symbol, side=side, bars=bars, entry_idx=entry_idx, exit_idx=n - 1,
         entry_time=entry_time, fill=fill, exit_price=exit_price, sl_initial=sl,
         sl_final=current_sl, tp=tp_price, risk_dist=risk_dist,
-        result="CLOSE_AT_END", mfe=mfe, mae=mae, partial_pct=partial_pct,
+        result="CLOSE_AT_END", mfe=mfe, mae=mae, partial_pct=partial_pct, partial_price=partial_price,
         partial_r_gross=partial_r_gross,
         remaining_r_gross=(exit_price - fill) * direction * inv_risk,
         cost_price_equiv=cost_price_equiv, money_per_unit=money_per_unit,
@@ -394,7 +419,7 @@ def _finalise(
     symbol: str, side: str, bars: BarArrays, entry_idx: int, exit_idx: int,
     entry_time: Any, fill: float, exit_price: float, sl_initial: float,
     sl_final: float, tp: float, risk_dist: float, result: str, mfe: float,
-    mae: float, partial_pct: float, partial_r_gross: float,
+    mae: float, partial_pct: float, partial_price: float, partial_r_gross: float,
     remaining_r_gross: float, cost_price_equiv: float, money_per_unit: float,
     ai_score: float, calibrated_win_p: float, regime: str, strategy: str,
     zone: str, partial_taken: bool, be_locked: bool,
@@ -421,7 +446,10 @@ def _finalise(
         entry_time=entry_time,
         exit_idx=int(exit_idx),
         exit_time=exit_time,
-        bars_held=int(exit_idx - entry_idx + 1),
+        # The position goes live on the bar AFTER the signal (entry_idx + 1), so
+        # the holding period is exit_idx - entry_idx, not +1. The old expression
+        # overstated every hold by one bar.
+        bars_held=int(exit_idx - entry_idx),
         entry=round(float(fill), 8),
         exit=round(float(exit_price), 8),
         sl_initial=round(float(sl_initial), 8),
@@ -435,6 +463,9 @@ def _finalise(
         pnl_money_per_lot=round(float(pnl_r * risk_dist * money_per_unit), 4),
         is_win=bool(pnl_r > 0),
         partial_taken=bool(partial_taken),
+        partial_pct=round(float(partial_pct), 6),
+        partial_price=round(float(partial_price), 8),
+        partial_r=round(float(partial_r_gross), 6),
         be_locked=bool(be_locked),
         ai_score=float(ai_score),
         calibrated_win_p=float(calibrated_win_p),
@@ -457,6 +488,7 @@ def simulate_all_candidates(
     geom: Geometry,
     money_per_unit: float,
     cost_price_equiv: float = 0.0,
+    slippage_price_equiv: float = 0.0,
     spec: Any = None,
     symbol: Optional[str] = None,
     score_col: str = "score",
@@ -552,6 +584,7 @@ def evaluate_geometry(
     geom: Geometry,
     money_per_unit: float,
     cost_price_equiv: float = 0.0,
+    slippage_price_equiv: float = 0.0,
     spec: Any = None,
     symbol: Optional[str] = None,
     one_position_at_a_time: bool = True,
@@ -566,7 +599,8 @@ def evaluate_geometry(
     """
     outcomes = simulate_all_candidates(
         df=df, candidates=candidates, geom=geom, money_per_unit=money_per_unit,
-        cost_price_equiv=cost_price_equiv, spec=spec, symbol=symbol, score_col=score_col,
+        cost_price_equiv=cost_price_equiv, slippage_price_equiv=slippage_price_equiv,
+        spec=spec, symbol=symbol, score_col=score_col,
     )
     if not one_position_at_a_time:
         return [o for o in outcomes if o.ai_score >= geom.min_score]

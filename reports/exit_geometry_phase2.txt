@@ -1,0 +1,103 @@
+======================================================================================================================
+JARVIS 5.1 — EXIT GEOMETRY COMPARISON  (walk-forward purged OOS, ranked on expectancy/PF/DD)
+gates: min_oos_trades=30  min_oos_pf=1.05  max_oos_dd=15.0%  folds=4
+======================================================================================================================
+
+### XAUUSD  candidates=183  min_score=0.7444
+geometry                  n    WR%    exp_R     PF  payoff  BE_WR%  margin   DD_R    DD%  sharpe
+----------------------------------------------------------------------------------------------------------------------
+D_immediate_tr1.0       183  45.90  +0.1424   1.28   1.513   39.80   +6.10   43.9  21.93  +0.114
+D_immediate_tr1.5       183  45.90  +0.1424   1.28   1.513   39.80   +6.10   43.9  21.93  +0.114
+D_immediate_tr2.0       183  45.90  +0.1424   1.28   1.513   39.80   +6.10   43.9  21.93  +0.114
+D_immediate_tr2.5       183  45.90  +0.1424   1.28   1.513   39.80   +6.10   43.9  21.93  +0.114
+D_delayed_tr1.0         183  45.90  +0.1424   1.28   1.513   39.80   +6.10   43.9  21.93  +0.114
+D_delayed_tr1.5         183  45.90  +0.1424   1.28   1.513   39.80   +6.10   43.9  21.93  +0.114
+D_delayed_tr2.0         183  45.90  +0.1424   1.28   1.513   39.80   +6.10   43.9  21.93  +0.114
+D_delayed_tr2.5         183  45.90  +0.1424   1.28   1.513   39.80   +6.10   43.9  21.93  +0.114
+D_atr_offset_tr1.0      183  45.90  +0.1424   1.28   1.513   39.80   +6.10   43.9  21.93  +0.114
+D_atr_offset_tr1.5      183  45.90  +0.1424   1.28   1.513   39.80   +6.10   43.9  21.93  +0.114
+D_atr_offset_tr2.0      183  45.90  +0.1424   1.28   1.513   39.80   +6.10   43.9  21.93  +0.114
+D_atr_offset_tr2.5      183  45.90  +0.1424   1.28   1.513   39.80   +6.10   43.9  21.93  +0.114
+BE_off_tr1.5            183  43.17  +0.1574   1.31   1.725   36.70   +6.47   40.3  20.16  +0.123
+  -> best on composite: BE_off_tr1.5 (exp +0.1574R, PF 1.31, DD 20.16%)
+
+  WALK-FORWARD OOS: n=183 WR=43.17% exp=+0.1574R PF=1.31 DD=5.51% -> PASS
+  fold picks: {'BE_off_tr1.5': 4}
+
+  REGIME SEGMENTATION (OOS):
+  regime                    n    WR%    exp_R     PF
+  TREND_BULL               89  50.56  +0.3638   1.91
+  TREND_BEAR               94  36.17  -0.0380   0.94   <-- negative, disable
+
+  LOSS CLASSIFICATION (OOS, 104 losses):
+    wrong_regime         60  ( 57.7%)  predictable pre-entry
+    structural_stop      25  ( 24.0%)  predictable pre-entry
+    volatility_stop      13  ( 12.5%)  predictable pre-entry
+    liquidity_sweep       6  (  5.8%)  predictable pre-entry
+
+### USDCAD  candidates=183  min_score=0.7238
+geometry                  n    WR%    exp_R     PF  payoff  BE_WR%  margin   DD_R    DD%  sharpe
+----------------------------------------------------------------------------------------------------------------------
+D_immediate_tr1.0       183  44.81  -0.0666   0.88   1.086   47.94   -3.13   57.4  28.71  -0.056
+D_immediate_tr1.5       183  44.81  -0.0666   0.88   1.086   47.94   -3.13   57.4  28.71  -0.056
+D_immediate_tr2.0       183  44.81  -0.0666   0.88   1.086   47.94   -3.13   57.4  28.71  -0.056
+D_immediate_tr2.5       183  44.81  -0.0666   0.88   1.086   47.94   -3.13   57.4  28.71  -0.056
+D_delayed_tr1.0         183  44.81  -0.0666   0.88   1.086   47.94   -3.13   57.4  28.71  -0.056
+D_delayed_tr1.5         183  44.81  -0.0666   0.88   1.086   47.94   -3.13   57.4  28.71  -0.056
+D_delayed_tr2.0         183  44.81  -0.0666   0.88   1.086   47.94   -3.13   57.4  28.71  -0.056
+D_delayed_tr2.5         183  44.81  -0.0666   0.88   1.086   47.94   -3.13   57.4  28.71  -0.056
+D_atr_offset_tr1.0      183  44.81  -0.0666   0.88   1.086   47.94   -3.13   57.4  28.71  -0.056
+D_atr_offset_tr1.5      183  44.81  -0.0666   0.88   1.086   47.94   -3.13   57.4  28.71  -0.056
+D_atr_offset_tr2.0      183  44.81  -0.0666   0.88   1.086   47.94   -3.13   57.4  28.71  -0.056
+D_atr_offset_tr2.5      183  44.81  -0.0666   0.88   1.086   47.94   -3.13   57.4  28.71  -0.056
+BE_off_tr1.5            183  40.98  -0.0225   0.96   1.383   41.96   -0.98   61.0  30.48  -0.017
+  -> best on composite: D_immediate_tr1.0 (exp -0.0666R, PF 0.88, DD 28.71%)
+
+  WALK-FORWARD OOS: n=183 WR=44.81% exp=-0.0666R PF=0.88 DD=12.65% -> FAIL
+  fold picks: {'D_immediate_tr1.0': 4}
+
+  REGIME SEGMENTATION (OOS):
+  regime                    n    WR%    exp_R     PF
+  LIQUIDITY_SWEEP           1 100.00  +0.1563    inf
+  TREND_BEAR               66  51.52  -0.0295   0.94   <-- negative, disable
+  TREND_BULL              115  40.87  -0.0816   0.86   <-- negative, disable
+  BREAKOUT                  1   0.00  -1.0240   0.00   <-- negative, disable
+
+  LOSS CLASSIFICATION (OOS, 101 losses):
+    wrong_regime         76  ( 75.2%)  predictable pre-entry
+    liquidity_sweep      25  ( 24.8%)  predictable pre-entry
+
+### ETHUSD  candidates=226  min_score=0.6704
+geometry                  n    WR%    exp_R     PF  payoff  BE_WR%  margin   DD_R    DD%  sharpe
+----------------------------------------------------------------------------------------------------------------------
+D_immediate_tr1.0       226  41.15  -0.0031   0.99   1.421   41.31   -0.16   31.8  15.91  -0.002
+D_immediate_tr1.5       226  41.15  -0.0031   0.99   1.421   41.31   -0.16   31.8  15.91  -0.002
+D_immediate_tr2.0       226  41.15  -0.0031   0.99   1.421   41.31   -0.16   31.8  15.91  -0.002
+D_immediate_tr2.5       226  41.15  -0.0031   0.99   1.421   41.31   -0.16   31.8  15.91  -0.002
+D_delayed_tr1.0         226  41.15  -0.0031   0.99   1.421   41.31   -0.16   31.8  15.91  -0.002
+D_delayed_tr1.5         226  41.15  -0.0031   0.99   1.421   41.31   -0.16   31.8  15.91  -0.002
+D_delayed_tr2.0         226  41.15  -0.0031   0.99   1.421   41.31   -0.16   31.8  15.91  -0.002
+D_delayed_tr2.5         226  41.15  -0.0031   0.99   1.421   41.31   -0.16   31.8  15.91  -0.002
+D_atr_offset_tr1.0      226  41.15  -0.0031   0.99   1.421   41.31   -0.16   31.8  15.91  -0.002
+D_atr_offset_tr1.5      226  41.15  -0.0031   0.99   1.421   41.31   -0.16   31.8  15.91  -0.002
+D_atr_offset_tr2.0      226  41.15  -0.0031   0.99   1.421   41.31   -0.16   31.8  15.91  -0.002
+D_atr_offset_tr2.5      226  41.15  -0.0031   0.99   1.421   41.31   -0.16   31.8  15.91  -0.002
+BE_off_tr1.5            226  38.94  +0.0628   1.13   1.774   36.05   +2.89   35.6  17.81  +0.042
+  -> best on composite: BE_off_tr1.5 (exp +0.0628R, PF 1.13, DD 17.81%)
+
+  WALK-FORWARD OOS: n=226 WR=38.94% exp=+0.0628R PF=1.13 DD=7.87% -> PASS
+  fold picks: {'BE_off_tr1.5': 4}
+
+  REGIME SEGMENTATION (OOS):
+  regime                    n    WR%    exp_R     PF
+  COMPRESSION               9 100.00  +1.0919    inf
+  TREND_BULL              161  45.34  +0.2289   1.51
+  TREND_BEAR               54  11.11  -0.5645   0.10   <-- negative, disable
+  BREAKOUT                  1   0.00  -1.0001   0.00   <-- negative, disable
+  LIQUIDITY_SWEEP           1   0.00  -1.0001   0.00   <-- negative, disable
+
+  LOSS CLASSIFICATION (OOS, 138 losses):
+    wrong_regime         50  ( 36.2%)  predictable pre-entry
+    structural_stop      41  ( 29.7%)  predictable pre-entry
+    volatility_stop      31  ( 22.5%)  predictable pre-entry
+    liquidity_sweep      16  ( 11.6%)  predictable pre-entry

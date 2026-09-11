@@ -158,6 +158,48 @@ def test_degenerate_risk_returns_none():
                           geom=Geometry(), money_per_unit=100_000.0, bars=bars) is None
 
 
+def test_stop_slippage_deepens_loss_by_exactly_slippage_over_risk():
+    """The simulator must model the same stop slippage BacktestEngine charges.
+
+    Without it, breakeven scratches the engine closes as small losses are booked
+    as 0R, and OOS expectancy over-promises the edge.
+    """
+    bars = make_bars(highs=[100.0, 98.5], lows=[100.0, 98.5], closes=[100.0, 99.0])
+    base = simulate_trade(symbol="T", side="BUY", entry_idx=0, fill=100.0, sl=99.0,
+                          geom=Geometry(tp_r=5.0), money_per_unit=100_000.0, bars=bars)
+    slipped = simulate_trade(symbol="T", side="BUY", entry_idx=0, fill=100.0, sl=99.0,
+                             geom=Geometry(tp_r=5.0), money_per_unit=100_000.0, bars=bars,
+                             slippage_price_equiv=0.1)
+    assert base is not None and slipped is not None
+    assert base.result == "SL" and slipped.result == "SL"
+    # risk_dist = 1.0, so 0.1 slippage deepens the loss by exactly 0.1R.
+    assert slipped.pnl_r == pytest.approx(base.pnl_r - 0.1, abs=1e-6)
+
+
+def test_slippage_does_not_affect_target_win():
+    bars = make_bars(highs=[100.0, 101.5], lows=[100.0, 99.9], closes=[100.0, 101.4])
+    base = simulate_trade(symbol="T", side="BUY", entry_idx=0, fill=100.0, sl=99.0,
+                          geom=Geometry(tp_r=1.0), money_per_unit=100_000.0, bars=bars)
+    slipped = simulate_trade(symbol="T", side="BUY", entry_idx=0, fill=100.0, sl=99.0,
+                             geom=Geometry(tp_r=1.0), money_per_unit=100_000.0, bars=bars,
+                             slippage_price_equiv=0.1)
+    assert base.result == "TP" and slipped.result == "TP"
+    assert slipped.pnl_r == pytest.approx(base.pnl_r, abs=1e-6)
+
+
+def test_slippage_applies_to_sell_stop_too():
+    bars = make_bars(highs=[100.0, 101.5], lows=[100.0, 101.5], closes=[100.0, 101.0])
+    base = simulate_trade(symbol="T", side="SELL", entry_idx=0, fill=100.0, sl=101.0,
+                          geom=Geometry(tp_r=5.0), money_per_unit=100_000.0, bars=bars)
+    slipped = simulate_trade(symbol="T", side="SELL", entry_idx=0, fill=100.0, sl=101.0,
+                             geom=Geometry(tp_r=5.0), money_per_unit=100_000.0, bars=bars,
+                             slippage_price_equiv=0.1)
+    assert base is not None and slipped is not None
+    assert base.result == "SL" and slipped.result == "SL"
+    # SELL stop is above entry; slippage pushes the exit higher (worse) by 0.1R.
+    assert slipped.pnl_r == pytest.approx(base.pnl_r - 0.1, abs=1e-6)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Geometry / threshold separation
 # ─────────────────────────────────────────────────────────────────────────────
@@ -458,9 +500,15 @@ class _Gate:
 
 
 class _Profile:
-    def __init__(self, min_score=0.0, regime_edge=None):
+    def __init__(self, min_score=0.0, regime_edge=None,
+                 oos_expectancy_r=0.0, oos_trades=0):
         self.geometry = Geometry(tp_r=0.5, min_score=min_score)
         self.regime_edge = regime_edge or {}
+        # Purged out-of-sample expectancy produced by WRTargetCalibrator.
+        # The entry gate refuses to trade a symbol whose validated OOS edge
+        # is non-positive (the root cause of the negative portfolio expectancy).
+        self.oos_expectancy_r = oos_expectancy_r
+        self.oos_trades = oos_trades
 
 
 def test_capital_protection_checked_before_edge_filter():
@@ -499,6 +547,56 @@ def test_entry_allowed_when_all_clear():
     dec = evaluate_entry(quality_gate=gate, score=0.9, regime="TREND",
                          profile=_Profile(min_score=0.5))
     assert dec.allowed is True
+
+
+def test_oos_negative_expectancy_refused():
+    """A symbol whose validated OOS expectancy is non-positive must be refused.
+
+    This is the regression guard for the negative-portfolio-expectancy bug:
+    six symbols (EURUSD, USDCHF, NZDUSD, USDJPY, SOLUSD, US30) deployed with a
+    positive in-sample expectancy that decayed to a negative OOS expectancy,
+    and the engine traded them anyway because nothing checked the OOS number.
+    """
+    gate = _Gate({g: True for g in CAPITAL_PROTECTION_GATES})
+    dec = evaluate_entry(
+        quality_gate=gate, score=0.99, regime="TREND",
+        profile=_Profile(min_score=0.5, oos_expectancy_r=-0.042, oos_trades=40),
+    )
+    assert dec.allowed is False
+    assert "no validated edge" in dec.reason
+    assert "OOS expectancy" in dec.reason
+
+
+def test_oos_positive_expectancy_allowed_past_gate():
+    """A positive validated OOS expectancy must not trip the refusal gate.
+
+    The symbol should still fall through to the normal edge gate, so a high
+    enough score clears it.
+    """
+    gate = _Gate({g: True for g in CAPITAL_PROTECTION_GATES})
+    dec = evaluate_entry(
+        quality_gate=gate, score=0.95, regime="TREND",
+        profile=_Profile(min_score=0.5, oos_expectancy_r=0.09, oos_trades=25),
+    )
+    assert dec.allowed is True
+    assert "calibrated edge filter passed" in dec.reason
+
+
+def test_oos_negative_but_thin_sample_not_refused():
+    """A negative OOS expectancy with too few OOS trades must NOT be refused.
+
+    The gate only refuses when ``oos_trades >= 10`` so it cannot reject a
+    symbol on noise. A thin/missing purged-fold sample falls through to the
+    normal edge gate rather than refusing on an untrustworthy number.
+    """
+    gate = _Gate({g: True for g in CAPITAL_PROTECTION_GATES})
+    dec = evaluate_entry(
+        quality_gate=gate, score=0.95, regime="TREND",
+        profile=_Profile(min_score=0.5, oos_expectancy_r=-0.5, oos_trades=3),
+    )
+    # Not refused by the OOS gate — falls through to the edge filter and passes.
+    assert dec.allowed is True
+    assert "no validated edge" not in dec.reason
 
 
 def test_no_profile_falls_back_to_legacy_verdict():
