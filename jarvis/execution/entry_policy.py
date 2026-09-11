@@ -99,6 +99,11 @@ class EntryDecision:
         }
 
 
+# Minimum out-of-sample sample size before the refusal gate will act on a
+# profile's expectancy, and the bar a profile must clear to be considered
+# statistically meaningful at all. See the note at the refusal check.
+OOS_MIN_TRADES = 30
+
 def capital_protection_failures(quality_gate: Any) -> Tuple[str, ...]:
     """Which capital-protection gates failed, if any."""
     checks = getattr(quality_gate, "checks", None)
@@ -161,7 +166,14 @@ def evaluate_entry(
     # than refusing on noise.
     oos_exp = float(getattr(profile, "oos_expectancy_r", 0.0) or 0.0)
     oos_n = int(getattr(profile, "oos_trades", 0) or 0)
-    if oos_n >= 10 and oos_exp <= 0.0:
+    # Raised from 10 to OOS_MIN_TRADES. Ten trades is far too thin to stake
+    # capital on: the standard error of a 10-trade mean R is roughly a third of
+    # its own standard deviation, so "positive expectancy over 10 trades" is
+    # indistinguishable from luck. Measured consequence at the old threshold:
+    # BTCUSD was admitted on a sample the engine then realised only 3 trades of,
+    # and those 3 trades (+7.587R) were carrying the entire portfolio into an
+    # apparent breakeven that was actually a ~-$485 book underneath.
+    if oos_n >= OOS_MIN_TRADES and oos_exp <= 0.0:
         return EntryDecision(
             allowed=False,
             reason=(
