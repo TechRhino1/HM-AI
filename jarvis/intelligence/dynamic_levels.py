@@ -138,15 +138,25 @@ class DynamicRiskAndLevelsEngine:
                 candidate_anchors.append(st.demand_zone[1])
 
             for ob in st.order_blocks:
-                if ob.get("type") == "BULLISH_ORDER_BLOCK" and 0 < ob.get("low", 0) < entry_price:
+                if ob.get("type") == "BULLISH_ORDER_BLOCK" and 0 < ob.get("low", 0) < entry_price and not ob.get("mitigated", False):
                     candidate_anchors.append(float(ob["low"]))
 
             for fvg in st.fair_value_gaps:
-                if fvg.get("type") == "BULLISH_FVG" and 0 < fvg.get("bottom", 0) < entry_price:
+                if fvg.get("type") == "BULLISH_FVG" and 0 < fvg.get("bottom", 0) < entry_price and not fvg.get("mitigated", False):
                     candidate_anchors.append(float(fvg["bottom"]))
 
-            if 0 < context.liquidity.sell_side_liquidity < entry_price:
-                candidate_anchors.append(float(context.liquidity.sell_side_liquidity))
+            # B2: never anchor a stop AT a liquidity pool. Pools exist so they
+            # CAN be swept -- that sweep is the very entry trigger. If a sweep
+            # has already printed, the stop must sit BEYOND the sweep extreme.
+            _liq = context.liquidity
+            _pool = float(getattr(_liq, "sell_side_liquidity", 0.0) or 0.0)
+            if bool(getattr(_liq, "sweep_detected", False)):
+                _beyond = (float(getattr(_liq, "sweep_level", 0.0) or 0.0)
+                           - max(float(getattr(_liq, "sweep_magnitude", 0.0) or 0.0), 0.5) * atr)
+                if 0 < _beyond < entry_price:
+                    candidate_anchors.append(_beyond)
+            elif 0 < _pool < entry_price:
+                candidate_anchors.append(_pool)
 
             for kl in getattr(st, "key_levels", []):
                 if 0 < kl.get("price", 0) < entry_price:
@@ -209,7 +219,7 @@ class DynamicRiskAndLevelsEngine:
                     opposing_targets.append(float(ob.get("low", 0)))
 
             for fvg in st.fair_value_gaps:
-                if fvg.get("type") == "BEARISH_FVG" and fvg.get("bottom", 0) > entry_price:
+                if fvg.get("type") == "BEARISH_FVG" and fvg.get("bottom", 0) > entry_price and not fvg.get("mitigated", False):
                     opposing_targets.append(float(fvg.get("bottom", 0)))
 
             if context.liquidity.buy_side_liquidity > entry_price:
@@ -254,15 +264,23 @@ class DynamicRiskAndLevelsEngine:
                 candidate_anchors.append(st.supply_zone[0])
 
             for ob in st.order_blocks:
-                if ob.get("type") == "BEARISH_ORDER_BLOCK" and ob.get("high", 0) > entry_price:
+                if ob.get("type") == "BEARISH_ORDER_BLOCK" and ob.get("high", 0) > entry_price and not ob.get("mitigated", False):
                     candidate_anchors.append(float(ob["high"]))
 
             for fvg in st.fair_value_gaps:
-                if fvg.get("type") == "BEARISH_FVG" and fvg.get("top", 0) > entry_price:
+                if fvg.get("type") == "BEARISH_FVG" and fvg.get("top", 0) > entry_price and not fvg.get("mitigated", False):
                     candidate_anchors.append(float(fvg["top"]))
 
-            if context.liquidity.buy_side_liquidity > entry_price:
-                candidate_anchors.append(float(context.liquidity.buy_side_liquidity))
+            # B2 (SELL mirror): stop must sit BEYOND the swept liquidity.
+            _liq = context.liquidity
+            _pool = float(getattr(_liq, "buy_side_liquidity", 0.0) or 0.0)
+            if bool(getattr(_liq, "sweep_detected", False)):
+                _beyond = (float(getattr(_liq, "sweep_level", 0.0) or 0.0)
+                           + max(float(getattr(_liq, "sweep_magnitude", 0.0) or 0.0), 0.5) * atr)
+                if _beyond > entry_price:
+                    candidate_anchors.append(_beyond)
+            elif _pool > entry_price:
+                candidate_anchors.append(_pool)
 
             for kl in getattr(st, "key_levels", []):
                 if kl.get("price", 0) > entry_price:

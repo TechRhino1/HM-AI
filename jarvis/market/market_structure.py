@@ -128,6 +128,29 @@ class MarketStructureEngine:
                     "index": i
                 })
 
+        # B1: mark consumed zones. StructureContext zones feed SL/TP, so an
+        # already-mitigated FVG/OB must not be used as an anchor. Mitigation is
+        # a trade-THROUGH, not a wick touch: bullish FVG is consumed once price
+        # trades at/below its bottom; a bullish order block once price CLOSES
+        # below its low (wick-only does not invalidate an institutional zone).
+        for g in fair_value_gaps:
+            i = g["index"]
+            after_low = lows[i + 1:]
+            after_high = highs[i + 1:]
+            after_close = closes[i + 1:]
+            if g["type"] == "BULLISH_FVG":
+                g["mitigated"] = bool(len(after_low) and (after_low <= g["bottom"]).any())
+            else:
+                g["mitigated"] = bool(len(after_high) and (after_high >= g["top"]).any())
+            _ = after_close
+        for ob in order_blocks:
+            i = ob["index"]
+            after_close = closes[i + 1:]
+            if ob["type"] == "BULLISH_ORDER_BLOCK":
+                ob["mitigated"] = bool(len(after_close) and (after_close < ob["low"]).any())
+            else:
+                ob["mitigated"] = bool(len(after_close) and (after_close > ob["high"]).any())
+
         # Horizontal S/R Clustering (Key Levels)
         all_swings = [s["price"] for s in swing_highs] + [s["price"] for s in swing_lows]
         key_levels = []
