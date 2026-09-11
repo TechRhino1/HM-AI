@@ -1,0 +1,924 @@
+"""
+JARVIS AI 3.0 — High-Performance Telemetry, Trading & Web Terminal Server.
+Provides REST, JSON streaming, manual trading execution, position management, news feed, and static assets.
+"""
+import os
+import json
+import logging
+import mimetypes
+import math
+from datetime import datetime, timezone
+from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
+from urllib.parse import parse_qs, urlparse
+from typing import Any, Optional, Dict, Tuple
+
+from jarvis.application.state_manager import StateManager, GLOBAL_STATE
+import threading
+import time
+from jarvis.market.data_feed import DataFeedEngine
+from jarvis.api.copilot import JarvisCopilot
+from jarvis.execution.mt5_client import MT5Client
+from jarvis.data.schemas import ExecutionMode
+from jarvis.data.symbol_registry import resolve as resolve_symbol
+from jarvis.market.sessions import SessionEngine
+from jarvis.api.remote_auth import RemoteAuthEngine
+from jarvis.config.settings import SETTINGS
+
+logger = logging.getLogger("JARVIS_WebServer")
+
+
+class JarvisRequestHandler(BaseHTTPRequestHandler):
+    state_manager: StateManager = GLOBAL_STATE
+    mt5_client: MT5Client = MT5Client(mode="live")
+    data_feed: DataFeedEngine = DataFeedEngine(mt5_client=mt5_client)
+    copilot: JarvisCopilot = JarvisCopilot(GLOBAL_STATE)
+    _bg_thread_started: bool = False
+    _bg_lock = threading.Lock()
+    _CANDLES_CACHE: Dict[str, Tuple[Dict[str, Any], float]] = {}
+    
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    root_dir = os.path.dirname(base_dir)
+
+    @classmethod
+    def configure_broker(cls, mt5_client: MT5Client):
+        """Use the application's single broker client for API and orchestration work."""
+        cls.mt5_client = mt5_client
+        cls.data_feed = DataFeedEngine(mt5_client=mt5_client)
+
+    def _extract_token(self) -> str:
+        auth_header = self.headers.get("Authorization", "")
+        cookie_header = self.headers.get("Cookie", "")
+        token = ""
+
+        if auth_header.startswith("Bearer "):
+            token = auth_header[7:].strip()
+        elif "jarvis_auth_token=" in cookie_header:
+            try:
+                for c in cookie_header.split(";"):
+                    c = c.strip()
+                    if c.startswith("jarvis_auth_token="):
+                        token = c.split("=", 1)[1].strip()
+                        break
+            except Exception:
+                pass
+
+        return token
+
+    @staticmethod
+    def _allowed_cors_origin(request_origin: str = "") -> str:
+        configured = os.environ.get("JARVIS_CORS_ORIGIN", SETTINGS.server.cors_origin).strip()
+        return configured if configured and request_origin == configured else ""
+
+    def _session_cookie(self, token: str, max_age: int) -> str:
+        attrs = [f"jarvis_auth_token={token}", "Path=/", f"Max-Age={max_age}", "HttpOnly", "SameSite=Strict"]
+        if os.environ.get("JARVIS_COOKIE_SECURE", "").lower() in {"1", "true", "yes"}:
+            attrs.append("Secure")
+        return "; ".join(attrs)
+
+    def _get_auth_user(self) -> Optional[Dict[str, Any]]:
+        token = self._extract_token()
+        if not token:
+            return None
+        return RemoteAuthEngine.validate_token(token)
+
+    def _check_auth(self) -> bool:
+        return self._get_auth_user() is not None
+
+    def _require_role(self, *allowed_roles: str):
+        user = self._get_auth_user()
+        if not user:
+            self._send_json({"status": "UNAUTHORIZED", "error": "Authentication required"}, status_code=401)
+            return False, None
+        if user.get("role") not in allowed_roles:
+            self._send_json({"status": "FORBIDDEN", "error": f"Role '{user.get('role')}' is not permitted to perform this action"}, status_code=403)
+            return False, None
+        return True, user
+
+
+    @classmethod
+    def start_background_syncer(cls):
+        with cls._bg_lock:
+            if cls._bg_thread_started:
+                return
+            cls._bg_thread_started = True
+
+        def _bg_loop():
+            from jarvis.market.market_context import MarketContextEngine
+            from jarvis.intelligence.regime_engine import MarketRegimeClassifier
+            from jarvis.analysts.parallel_runner import ParallelAnalystCluster
+            from jarvis.intelligence.decision_engine import DecisionEngine
+
+            symbols = ["XAUUSD", "EURUSD", "GBPUSD", "BTCUSD", "USDJPY"]
+            ce = MarketContextEngine()
+            rc = MarketRegimeClassifier()
+            ac = ParallelAnalystCluster(parallel=False)
+            de = DecisionEngine()
+
+            while True:
+                try:
+                    # 1. Sync Account & Positions
+                    acc = cls.mt5_client.get_account_snapshot()
+                    pos = cls.mt5_client.get_open_positions()
+                    cls.state_manager.sync_broker_state(acc, pos)
+
+                    # If the main Orchestrator is actively running, let it drive the radar sweeps
+                    if cls.state_manager.is_orchestrator_active():
+                        time.sleep(2.0)
+                        continue
+
+                    # 2. Standalone Fallback: Sweep Multi-Asset Radar across all 3 active styles
+                    radar_results = []
+                    account = cls.state_manager.account or acc
+                    active_styles = ["SWING", "DAY_TRADING", "SCALP"]
+
+                    for t_style in active_styles:
+                        for sym in symbols:
+                            try:
+                                mtf = cls.data_feed.fetch_multi_timeframe(sym, trade_style=t_style)
+                                spec = resolve_symbol(sym)
+                                ctx = ce.build_context(sym, mtf, current_spread_pips=spec.typical_spread_pips, max_allowed_spread_pips=spec.max_spread_pips, trade_style=t_style)
+                                cls.state_manager.update_market_context(sym, ctx)
+                                regime = rc.classify_regime(ctx)
+                                tentative_bias = "BUY" if ctx.structure.bias == "BULLISH" else ("SELL" if ctx.structure.bias == "BEARISH" else ("SELL" if getattr(ctx.momentum, "trend_score", 0.0) < 0 else "BUY"))
+                                reports, devil = ac.run_all_parallel(ctx, regime, tentative_bias)
+                                d = de.evaluate(ctx, regime, reports, devil, account_balance=account.equity if account else 10000.0, mtf_data=mtf, trade_style=t_style)
+                                
+                                active_state_style = getattr(cls.state_manager, "trade_style", "SWING")
+                                if t_style.upper() == active_state_style.upper() or (t_style == "DAY_TRADING" and active_state_style in ("DAY", "INTRADAY")):
+                                    cls.state_manager.record_decision(sym, d)
+
+                                mkt_status = SessionEngine.get_market_trading_status(sym)
+                                is_mkt_open = mkt_status.get("is_open", True)
+
+                                win_p = d.probabilities.get(d.bias.lower(), d.model_confidence) if (d.probabilities and d.bias in ["BUY", "SELL"]) else d.model_confidence
+                                if not is_mkt_open:
+                                    status_label = "MARKET CLOSED"
+                                elif d.decision == "EXECUTE":
+                                    status_label = f"{d.bias} READY"
+                                elif d.decision == "WAIT" and d.bias in ["BUY", "SELL"]:
+                                    status_label = f"WAIT: {d.bias}"
+                                elif d.decision == "NO_TRADE":
+                                    if d.quality_gate and not d.quality_gate.passed and any("Invalid" in r or "Devil" in r or "Adversarial" in r for r in d.quality_gate.failing_reasons):
+                                        status_label = f"INVALID: {d.bias}" if d.bias in ["BUY", "SELL"] else "TRADE INVALIDATED"
+                                    elif d.bias in ["BUY", "SELL"]:
+                                        status_label = f"NO TRADE: {d.bias}"
+                                    else:
+                                        status_label = "NO SETUP"
+                                elif d.bias in ["BUY", "SELL"]:
+                                    status_label = f"WAIT: {d.bias}"
+                                else:
+                                    status_label = "NO SETUP"
+
+                                tf_str = "D1/H4/H1" if t_style == "SWING" else ("H1/M15/M5" if t_style in ("DAY_TRADING", "INTRADAY", "DAY") else "M15/M5/M1")
+
+                                curr_price = d.entry_price
+                                if ctx and hasattr(ctx, "current_price") and ctx.current_price is not None:
+                                    try:
+                                        curr_price = round(float(ctx.current_price), getattr(spec, "digits", 2 if "XAU" in sym or "BTC" in sym else 5))
+                                    except Exception:
+                                        curr_price = d.entry_price
+
+                                radar_results.append({
+                                    "symbol": sym,
+                                    "trade_style": t_style,
+                                    "timeframe": tf_str,
+                                    "current_price": curr_price,
+                                    "entry_price": d.entry_price,
+                                    "stop_loss": d.stop_loss,
+                                    "take_profit": d.take_profit,
+                                    "risk_reward_ratio": round(d.risk_reward_ratio, 2) if d.risk_reward_ratio else 2.50,
+                                    "ev": round(d.expected_value, 2) if d.expected_value else 0.0,
+                                    "bias": d.bias,
+                                    "action": status_label,
+                                    "status_label": status_label,
+                                    "decision": d.decision,
+                                    "score": round(win_p * 100.0, 0),
+                                    "win_prob": round(win_p * 100.0, 0),
+                                    "confluence_score": getattr(d, "master_confluence_score", 0.0),
+                                    "confluence_tier": getattr(d, "master_confluence_tier", "MODERATE"),
+                                    "regime": d.regime.primary_regime.value if (d.regime and hasattr(d.regime, "primary_regime")) else "UNKNOWN",
+                                    "strategy": d.strategy or "STRUCTURE",
+                                    "gate_passed": d.quality_gate.passed if d.quality_gate else False,
+                                    "failing_reasons": d.quality_gate.failing_reasons if d.quality_gate else [],
+                                    "checks": d.quality_gate.checks if d.quality_gate else {},
+                                    "waiting_reasons": getattr(d, "waiting_reasons", []),
+                                    "rejection_reasons": getattr(d, "rejection_reasons", []),
+                                    "risk_factors": d.risk_factors or [],
+                                    "adversarial_penalty": round(d.adversarial_penalty, 1) if d.adversarial_penalty else 0.0,
+                                    "invalidation_levels": d.invalidation_levels or [],
+                                    "mtf_alignment": getattr(ctx, "mtf_alignment", {}),
+                                    "mtf_confluence": getattr(ctx, "mtf_confluence_score", 0.0),
+                                })
+                            except Exception as e_sym:
+                                logger.error(f"Radar sweep error for {sym} ({t_style}): {e_sym}", exc_info=True)
+
+                    if radar_results:
+                        def _radar_sort_key(item):
+                            act = item.get("action", "")
+                            is_open = 0 if "CLOSED" in act else 1
+                            if "READY" in act:
+                                conv = 3
+                            elif "WAIT" in act:
+                                conv = 2
+                            elif "NO TRADE" in act or "INVALID" in act:
+                                conv = 1
+                            else:
+                                conv = 0
+                            prob = item.get("win_prob", 0) or item.get("score", 0) or 0
+                            ev = item.get("ev", 0) or 0
+                            return (is_open, conv, prob, ev)
+
+                        radar_results.sort(key=_radar_sort_key, reverse=True)
+                        cls.state_manager.update_radar(radar_results)
+
+                except Exception as e:
+                    logger.error(f"Background telemetry sync error: {e}", exc_info=True)
+
+                time.sleep(3.0)
+
+        t = threading.Thread(target=_bg_loop, daemon=True, name="web_bg_telemetry_syncer")
+        t.start()
+
+    def log_message(self, format, *args):
+        logger.debug(f"{self.address_string()} - {format % args}")
+
+    def do_GET(self):
+        JarvisRequestHandler.start_background_syncer()
+        parsed = urlparse(self.path)
+        path = parsed.path
+        query = parse_qs(parsed.query)
+
+        try:
+            if path.startswith("/api/") and path not in ("/api/auth/me", "/api/auth/verify") and not self._check_auth():
+                self._send_json({"status": "UNAUTHORIZED", "error": "Authentication required"}, status_code=401)
+                return
+            privileged_gets = {"/api/telemetry_state", "/api/telemetry", "/api/history", "/api/tunnel_info", "/api/diagnostics", "/api/stream/telemetry"}
+            if path in privileged_gets:
+                ok, _ = self._require_role("ADMIN", "TRADER")
+                if not ok:
+                    return
+            if path == "/" or path == "/index.html":
+                self._serve_terminal_ui()
+            elif path in ["/stocks", "/stocks.html", "/screener"]:
+                self._serve_stocks_ui()
+            elif path in ["/india", "/india.html", "/india/stocks", "/nse", "/bse"]:
+                self._serve_india_ui()
+            elif path in ["/options", "/options.html", "/india/options", "/india-options", "/fno"]:
+                self._serve_options_ui()
+            elif path.startswith("/static/"):
+                self._serve_static_file(path)
+            elif path.startswith("/api/stocks/"):
+                from jarvis.stocks.stock_service import STOCK_SERVICE
+                if not STOCK_SERVICE.handle_request(path, query, self):
+                    self.send_error(404, f"Stock API {path} not found")
+            elif path.startswith("/api/india/"):
+                from jarvis.india.india_service import INDIA_SERVICE
+                if not INDIA_SERVICE.handle_request(path, query, self):
+                    self.send_error(404, f"India API {path} not found")
+            elif path in ("/api/telemetry_state", "/api/telemetry"):
+                snap = self.state_manager.get_state_snapshot()
+                if not snap.get("account"):
+                    acc = self.mt5_client.get_account_snapshot()
+                    pos = self.mt5_client.get_open_positions()
+                    self.state_manager.sync_broker_state(acc, pos)
+                    snap = self.state_manager.get_state_snapshot()
+                
+                from jarvis.market.sessions import SessionEngine
+                sym = query.get("symbol", ["XAUUSD"])[0]
+                snap["active_market_status"] = SessionEngine.get_market_trading_status(sym)
+                snap["market_statuses"] = {
+                    s: SessionEngine.get_market_trading_status(s)
+                    for s in ["XAUUSD", "EURUSD", "GBPUSD", "USDJPY", "BTCUSD", "ETHUSD"]
+                }
+                self._send_json(snap)
+            elif path == "/api/market-status":
+                from jarvis.market.sessions import SessionEngine
+                sym = query.get("symbol", ["XAUUSD"])[0]
+                status = SessionEngine.get_market_trading_status(sym)
+                self._send_json(status)
+            elif path == "/api/historical/manifest":
+                from jarvis.historical.historical_engine import HISTORICAL_DATA_ENGINE
+                datasets = HISTORICAL_DATA_ENGINE.list_datasets()
+                stats = HISTORICAL_DATA_ENGINE.get_engine_stats()
+                self._send_json({"datasets": datasets, "stats": stats})
+            elif path == "/api/historical/status":
+                from jarvis.historical.historical_engine import HISTORICAL_DATA_ENGINE
+                self._send_json(HISTORICAL_DATA_ENGINE.get_engine_stats())
+            elif path == "/api/historical/data":
+                from jarvis.historical.historical_engine import HISTORICAL_DATA_ENGINE
+                sym = query.get("symbol", ["XAUUSD"])[0]
+                tf = query.get("timeframe", query.get("tf", ["H1"]))[0]
+                bars = max(1, min(5000, int(query.get("num_bars", query.get("bars", [200]))[0])))
+                with_reg = query.get("with_regimes", ["false"])[0].lower() in ("true", "1")
+                df = HISTORICAL_DATA_ENGINE.get_market_data(sym, tf, num_bars=bars, with_regimes=with_reg)
+                records = df.to_dict(orient="records") if not df.empty else []
+                for r in records:
+                    if "time" in r:
+                        r["time"] = str(r["time"])
+                self._send_json({"symbol": sym, "timeframe": tf, "count": len(records), "data": records})
+            elif path == "/api/tunnel_info":
+                tunnel_url = ""
+                provider = "None"
+                status = "DISCONNECTED"
+                tunnel_file = os.path.join(self.root_dir, "active_tunnel_url.txt")
+                if os.path.exists(tunnel_file):
+                    try:
+                        with open(tunnel_file, "r", encoding="utf-8") as f:
+                            tunnel_url = f.read().strip()
+                        if tunnel_url.startswith("http"):
+                            status = "CONNECTED"
+                            if "trycloudflare" in tunnel_url:
+                                provider = "Cloudflare Tunnel"
+                            elif "lhr.life" in tunnel_url:
+                                provider = "localhost.run"
+                            elif "pinggy" in tunnel_url:
+                                provider = "pinggy.io"
+                            elif "serveo" in tunnel_url:
+                                provider = "serveo.net"
+                    except Exception:
+                        pass
+                from HM_start import get_local_wifi_ip
+                local_ip = get_local_wifi_ip()
+                self._send_json({
+                    "url": tunnel_url,
+                    "status": status,
+                    "provider": provider,
+                    "local_ip": local_ip,
+                    "port": 8501
+                })
+            elif path == "/api/candles":
+                sym = query.get("symbol", ["XAUUSD"])[0]
+                tf = query.get("tf", ["H1"])[0]
+                cache_key = f"{sym}_{tf}"
+                now = time.time()
+                cached = self._CANDLES_CACHE.get(cache_key)
+                if cached and (now - cached[1] < 1.0):
+                    self._send_json(cached[0])
+                    return
+
+                df = self.data_feed.fetch_rates(sym, timeframe=tf, num_bars=150, include_current_bar=True)
+                spec = resolve_symbol(sym)
+                digits = getattr(spec, "digits", 2 if "XAU" in sym or "BTC" in sym else 5)
+                candles = []
+                if df is not None and not df.empty:
+                    records = df.to_dict(orient="records")
+                    for r in records:
+                        t_val = r["time"]
+                        if hasattr(t_val, "tzinfo") and t_val.tzinfo is None:
+                            t_val = t_val.tz_localize("UTC")
+                        ts = int(t_val.timestamp()) if hasattr(t_val, "timestamp") else int(t_val)
+                        candles.append({
+                            "time": ts,
+                            "open": round(float(r["open"]), digits),
+                            "high": round(float(r["high"]), digits),
+                            "low": round(float(r["low"]), digits),
+                            "close": round(float(r["close"]), digits),
+                            "volume": float(r.get("volume", 0.0))
+                        })
+                payload = {"symbol": sym, "timeframe": tf, "candles": candles}
+                self._CANDLES_CACHE[cache_key] = (payload, now)
+                self._send_json(payload)
+            elif path == "/api/rates":
+                sym = query.get("symbol", ["XAUUSD"])[0]
+                tf = query.get("tf", query.get("timeframe", ["H1"]))[0]
+                trade_style = query.get("trade_style", [None])[0]
+                bars = max(1, min(5000, int(query.get("num_bars", query.get("bars", [150]))[0])))
+                if trade_style:
+                    mtf = self.data_feed.fetch_multi_timeframe(sym, trade_style=trade_style, num_bars=bars)
+                    res = {}
+                    for role, df in mtf.items():
+                        res[role] = df.tail(bars).to_dict(orient="records")
+                    self._send_json({"symbol": sym, "trade_style": trade_style, "rates": res})
+                else:
+                    df = self.data_feed.fetch_rates(sym, timeframe=tf, num_bars=bars, include_current_bar=True)
+                    self._send_json({"symbol": sym, "timeframe": tf, "rates": df.to_dict(orient="records")})
+            elif path == "/api/radar":
+                style_filter = query.get("trade_style", query.get("style", [None]))[0]
+                opps = list(self.state_manager.radar_opportunities)
+
+                def _radar_sort_key(item):
+                    act = str(item.get("action", "") or item.get("status_label", ""))
+                    is_open = 0 if "CLOSED" in act else 1
+                    if "READY" in act:
+                        conv = 3
+                    elif "WAIT" in act:
+                        conv = 2
+                    elif "NO TRADE" in act or "INVALID" in act:
+                        conv = 1
+                    else:
+                        conv = 0
+                    prob = item.get("win_prob", 0) or item.get("score", 0) or 0
+                    ev = item.get("ev", 0) or 0
+                    return (is_open, conv, prob, ev)
+
+                if style_filter and style_filter.strip().upper() not in ("ALL", "", "NONE"):
+                    s_norm = style_filter.strip().upper()
+                    if s_norm in ("DAY", "DAY_TRADING", "INTRADAY"):
+                        target_styles = {"DAY_TRADING", "DAY", "INTRADAY"}
+                    elif s_norm in ("SCALP", "SCALPING"):
+                        target_styles = {"SCALP", "SCALPING"}
+                    elif s_norm == "SWING":
+                        target_styles = {"SWING"}
+                    else:
+                        target_styles = {s_norm}
+                    opps = [o for o in opps if str(o.get("trade_style", "")).upper() in target_styles]
+
+                opps.sort(key=_radar_sort_key, reverse=True)
+                self._send_json({"opportunities": opps})
+            elif path == "/api/history":
+                try:
+                    from jarvis.data.database import TRADE_DB
+                    trades = TRADE_DB.fetch_recent_trades(limit=50) or []
+                    
+                    # Also fetch live closed deals from MT5 broker account
+                    if hasattr(self, "mt5_client") and self.mt5_client and getattr(self.mt5_client, "is_connected", False):
+                        import MetaTrader5 as _mt5
+                        from datetime import datetime, timedelta, timezone
+                        mt5_deals = _mt5.history_deals_get(datetime.now() - timedelta(days=60), datetime.now())
+                        if mt5_deals:
+                            existing_tickets = {int(t.get("ticket", 0)) for t in trades if t.get("ticket")}
+                            for d in reversed(list(mt5_deals)):
+                                if getattr(d, "entry", 0) == 1 and getattr(d, "symbol", ""):
+                                    if int(d.ticket) not in existing_tickets:
+                                        sym_clean = str(d.symbol).replace("#", "").replace(".m", "").replace("m", "")
+                                        comm = str(getattr(d, "comment", "") or "")
+                                        if "[sl" in comm.lower():
+                                            exec_tag = "SL EXIT"
+                                        elif "[tp" in comm.lower():
+                                            exec_tag = "TP EXIT"
+                                        elif "jarvis" in comm.lower():
+                                            exec_tag = "BOT (AI)"
+                                        else:
+                                            exec_tag = "MT5 BROKER"
+                                            
+                                        # In MT5: entry 1 with type 1 (SELL) closed a BUY position; type 0 (BUY) closed a SELL position
+                                        orig_action = "BUY" if d.type == 1 else ("SELL" if d.type == 0 else "CLOSE")
+                                        trades.append({
+                                            "id": int(d.ticket),
+                                            "ticket": int(d.ticket),
+                                            "symbol": sym_clean,
+                                            "action": orig_action,
+                                            "type": orig_action,
+                                            "entry_price": float(d.price),
+                                            "volume": float(d.volume),
+                                            "timestamp": datetime.fromtimestamp(d.time, tz=timezone.utc).isoformat(),
+                                            "executor": exec_tag,
+                                            "realized_pnl": round(float(d.profit), 2),
+                                            "profit": round(float(d.profit), 2)
+                                        })
+                    # Sort newest first
+                    trades.sort(key=lambda x: str(x.get("timestamp", "")), reverse=True)
+                    self._send_json(trades[:50])
+                except Exception as e:
+                    logger.error(f"Error fetching trade history: {e}")
+                    self._send_json({"error": str(e)})
+            elif path == "/api/news":
+                # Real-Time Institutional Macro News & Economic Calendar
+                from jarvis.market.news import GLOBAL_NEWS_ENGINE
+                news_items = GLOBAL_NEWS_ENGINE.get_news_calendar()
+                self._send_json({"news": news_items, "timestamp": datetime.now(timezone.utc).isoformat()})
+            elif path == "/api/pending_orders":
+                ok, _ = self._require_role("ADMIN", "TRADER")
+                if not ok:
+                    return
+                pending = self.mt5_client.get_pending_orders()
+                self._send_json(pending)
+            elif path in ["/api/auth/me", "/api/auth/verify"]:
+                user = self._get_auth_user()
+                if user:
+                    self._send_json({"status": "AUTHENTICATED", "valid": True, "user": user})
+                else:
+                    self._send_json({"status": "UNAUTHORIZED", "valid": False, "error": "Not authenticated"}, status_code=401)
+            elif path == "/api/stream/telemetry":
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.send_header("Cache-Control", "no-cache")
+                self.send_header("Connection", "keep-alive")
+                cors_origin = self._allowed_cors_origin(self.headers.get("Origin", ""))
+                if cors_origin:
+                    self.send_header("Access-Control-Allow-Origin", cors_origin)
+                self.end_headers()
+
+                # Stream initial state snapshot
+                snap = self.state_manager.get_state_snapshot()
+                init_msg = f"event: telemetry\ndata: {json.dumps(snap, default=str)}\n\n"
+                try:
+                    self.wfile.write(init_msg.encode("utf-8"))
+                    self.wfile.flush()
+                except Exception:
+                    return
+
+                # SSE Event Loop
+                last_ver = self.state_manager.get_state_version()
+                for _ in range(60): # 60 iterations (approx 1-2 mins before clean client reconnect)
+                    time.sleep(1.0)
+                    cur_ver = self.state_manager.get_state_version()
+                    try:
+                        if cur_ver != last_ver:
+                            last_ver = cur_ver
+                            cur_snap = self.state_manager.get_state_snapshot()
+                            msg = f"event: telemetry\ndata: {json.dumps(cur_snap, default=str)}\n\n"
+                            self.wfile.write(msg.encode("utf-8"))
+                            self.wfile.flush()
+                        else:
+                            self.wfile.write(b": ping\n\n")
+                            self.wfile.flush()
+                    except Exception:
+                        break
+                return
+            elif path == "/api/diagnostics":
+                snap = self.state_manager.get_state_snapshot()
+                self._send_json({
+                    "status": "SAFE_MODE" if snap["safe_mode"] else "OPERATIONAL",
+                    "services": snap["services"],
+                    "account": snap["account"],
+                    "timestamp": snap["timestamp"]
+                })
+            else:
+                self.send_error(404, "Endpoint not found")
+        except (ConnectionResetError, ConnectionAbortedError, BrokenPipeError):
+            pass
+        except Exception as e:
+            logger.error(f"Error handling GET {path}: {e}", exc_info=True)
+            try:
+                self._send_json({"error": str(e)}, status_code=500)
+            except Exception:
+                pass
+
+    def do_OPTIONS(self):
+        try:
+            self.send_response(200)
+            cors_origin = self._allowed_cors_origin(self.headers.get("Origin", ""))
+            if cors_origin:
+                self.send_header("Access-Control-Allow-Origin", cors_origin)
+                self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+                self.send_header("Access-Control-Allow-Headers", "Authorization, Content-Type")
+                self.send_header("Access-Control-Max-Age", "86400")
+            self.end_headers()
+        except (ConnectionResetError, ConnectionAbortedError, BrokenPipeError):
+            pass
+
+    def do_POST(self):
+        parsed = urlparse(self.path)
+        path = parsed.path
+
+        try:
+            content_length = int(self.headers.get("Content-Length", 0))
+            if content_length < 0 or content_length > 1_048_576:
+                self._send_json({"status": "FAILED", "error": "Request body is too large"}, status_code=413)
+                return
+            body = self.rfile.read(content_length).decode("utf-8") if content_length > 0 else "{}"
+            try:
+                data = json.loads(body)
+            except Exception:
+                data = {}
+
+            if path == "/api/auth/login":
+                username = data.get("username", "").strip()
+                password = data.get("password", "").strip()
+                client_ip = self.client_address[0] if hasattr(self, "client_address") and self.client_address else ""
+                user_info, err_msg = RemoteAuthEngine.verify_credentials(username, password, client_ip=client_ip)
+                if user_info:
+                    session_info = RemoteAuthEngine.create_session_token(username)
+                    token = session_info["token"]
+                    cookie_header = self._session_cookie(token, int(RemoteAuthEngine._token_ttl))
+                    public_session = {k: v for k, v in session_info.items() if k != "token"}
+                    self._send_json(public_session, cookies=[cookie_header])
+                else:
+                    status_code = 429 if "locked" in (err_msg or "").lower() else 401
+                    self._send_json({"status": "UNAUTHORIZED" if status_code == 401 else "LOCKED", "error": err_msg or "Invalid username or password"}, status_code=status_code)
+                return
+            elif path == "/api/auth/logout":
+                token = self._extract_token()
+                RemoteAuthEngine.revoke_token(token)
+                logout_cookie = self._session_cookie("", 0) + "; Expires=Thu, 01 Jan 1970 00:00:00 GMT"
+                self._send_json({"status": "LOGGED_OUT", "message": "Session terminated successfully"}, cookies=[logout_cookie])
+                return
+            elif path == "/api/auth/verify":
+                user = self._get_auth_user()
+                if user:
+                    token = user.get("token") or self._extract_token()
+                    refresh_cookie = self._session_cookie(token, int(RemoteAuthEngine._token_ttl)) if token else None
+                    cookies = [refresh_cookie] if refresh_cookie else None
+                    public_user = {k: v for k, v in user.items() if k != "token"}
+                    self._send_json({"status": "AUTHENTICATED", "valid": True, "user": public_user}, cookies=cookies)
+                else:
+                    self._send_json({"status": "UNAUTHORIZED", "valid": False, "error": "Invalid or expired session"}, status_code=401)
+                return
+            elif path == "/api/auth/change_password":
+                user = self._get_auth_user()
+                if not user:
+                    self._send_json({"status": "UNAUTHORIZED", "error": "Authentication required"}, status_code=401)
+                    return
+                old_pwd = data.get("old_password", "")
+                new_pwd = data.get("new_password", "")
+                success, msg = RemoteAuthEngine.change_password(user["username"], old_pwd, new_pwd)
+                if success:
+                    self._send_json({"status": "SUCCESS", "message": msg})
+                else:
+                    self._send_json({"status": "FAILED", "error": msg}, status_code=400)
+                return
+
+            # Protected Action Endpoints — Require Authentication + appropriate role
+            if path.startswith("/api/action/") or path.startswith("/api/historical/"):
+                ok, _ = self._require_role("ADMIN", "TRADER")
+                if not ok:
+                    return
+            if path == "/api/action/set_mode":
+                ok, _ = self._require_role("ADMIN")
+                if not ok:
+                    return
+            elif path.startswith("/api/copilot/"):
+                if not self._check_auth():
+                    self._send_json({"status": "UNAUTHORIZED", "error": "Authentication required"}, status_code=401)
+                    return
+
+            if path == "/api/copilot/ask":
+                query = data.get("query", "")
+                response_text = self.copilot.ask(query)
+                self._send_json({"query": query, "response": response_text})
+            elif path == "/api/action/toggle_safe_mode":
+                is_safe = self.state_manager.toggle_safe_mode()
+                self._send_json({"safe_mode": is_safe})
+            elif path == "/api/action/set_trade_style":
+                style = data.get("trade_style", "SWING").upper()
+                self.state_manager.set_trade_style(style)
+                if hasattr(self, "orchestrator") and self.orchestrator:
+                    self.orchestrator.trade_style = style
+                self._send_json({"status": "SUCCESS", "trade_style": style})
+            elif path == "/api/historical/download":
+                from jarvis.historical.historical_engine import HISTORICAL_DATA_ENGINE
+                sym = data.get("symbol", "XAUUSD").upper()
+                tf = data.get("timeframe", "H1").upper()
+                months = int(data.get("months", 6))
+                from datetime import datetime, timezone, timedelta
+                end = datetime.now(timezone.utc)
+                start = end - timedelta(days=months * 30)
+                res = HISTORICAL_DATA_ENGINE.download(sym, tf, start=start, end=end, force=data.get("force", False))
+                self._send_json(res)
+            elif path == "/api/historical/replay":
+                from jarvis.historical.historical_engine import HISTORICAL_DATA_ENGINE
+                from jarvis.historical.replay_engine import MarketReplayEngine, RealisticExecutionSimulator
+                sym = data.get("symbol", "XAUUSD").upper()
+                tf = data.get("timeframe", "H1").upper()
+                bars = int(data.get("bars", 150))
+                df = HISTORICAL_DATA_ENGINE.get_market_data(sym, tf, num_bars=bars)
+                sim = RealisticExecutionSimulator()
+                engine = MarketReplayEngine(df, symbol=sym, timeframe=tf, simulator=sim)
+                def dummy_strat(b, h, s):
+                    pass
+                res = engine.run_replay(dummy_strat, start_idx=20)
+                self._send_json(res)
+            elif path == "/api/action/set_mode":
+                mode_str = data.get("mode", "PAPER").upper()
+                try:
+                    mode = ExecutionMode(mode_str)
+                    self.state_manager.set_execution_mode(mode)
+                    self.mt5_client.mode = mode.value.lower()
+                    self._send_json({"status": "SUCCESS", "mode": mode.value})
+                except Exception as e:
+                    self._send_json({"status": "FAILED", "error": str(e)}, status_code=400)
+            elif path == "/api/action/close_position":
+                ticket = int(data.get("ticket", 0))
+                if ticket <= 0:
+                    self._send_json({"status": "FAILED", "error": "Invalid ticket number"}, status_code=400)
+                    return
+                res = self.mt5_client.close_position(ticket)
+                # Re-sync positions in state manager immediately
+                fresh_pos = self.mt5_client.get_open_positions()
+                fresh_acc = self.mt5_client.get_account_snapshot()
+                self.state_manager.sync_broker_state(fresh_acc, fresh_pos)
+                self._send_json(res)
+            elif path == "/api/action/close_all_positions":
+                results = self.mt5_client.close_all_positions()
+                fresh_pos = self.mt5_client.get_open_positions()
+                fresh_acc = self.mt5_client.get_account_snapshot()
+                self.state_manager.sync_broker_state(fresh_acc, fresh_pos)
+                self._send_json({"status": "SUCCESS", "closed_count": len(results), "details": results})
+            elif path == "/api/action/cancel_pending_order":
+                ticket = int(data.get("ticket", 0))
+                if ticket <= 0:
+                    self._send_json({"status": "FAILED", "error": "Invalid ticket number"}, status_code=400)
+                    return
+                res = self.mt5_client.cancel_pending_order(ticket)
+                self._send_json(res)
+            elif path in ("/api/action/manual_trade", "/api/action/place_order"):
+                sym = data.get("symbol", "XAUUSD")
+                action = data.get("action", data.get("order_type", data.get("side", "BUY"))).upper()
+                lots = float(data.get("lots", data.get("volume", 0.01)))
+                sl = float(data.get("sl", data.get("sl_price", 0.0)))
+                tp = float(data.get("tp", data.get("tp_price", 0.0)))
+                comment = data.get("comment", "JARVIS_ManualDesk")
+                current_price = float(data.get("price", data.get("current_price", 0.0)))
+                if action not in {"BUY", "SELL"}:
+                    self._send_json({"status": "FAILED", "error": "action must be BUY or SELL"}, status_code=400)
+                    return
+                if not math.isfinite(lots) or lots <= 0:
+                    self._send_json({"status": "FAILED", "error": "lots must be a positive finite number"}, status_code=400)
+                    return
+
+                # If sl <= 0 or tp <= 0, compute AI structural levels
+                if sl <= 0 or tp <= 0:
+                    try:
+                        from jarvis.intelligence.dynamic_levels import DYNAMIC_LEVELS_ENGINE
+                        ai_levels = DYNAMIC_LEVELS_ENGINE.calculate_manual_trade_levels(
+                            symbol=sym,
+                            action=action,
+                            current_price=current_price if current_price > 0 else None
+                        )
+                        if sl <= 0:
+                            sl = float(ai_levels.get("sl", 0.0))
+                        if tp <= 0:
+                            tp = float(ai_levels.get("tp", 0.0))
+                    except Exception as ex:
+                        logger.error(f"Error computing AI structural levels for {sym}: {ex}")
+                if not all(math.isfinite(v) and v > 0 for v in (sl, tp)):
+                    self._send_json({"status": "FAILED", "error": "Valid stop-loss and take-profit are required"}, status_code=400)
+                    return
+
+                res = self.mt5_client.send_market_order(
+                    symbol=sym,
+                    order_type=action,
+                    volume=lots,
+                    sl_price=sl,
+                    tp_price=tp,
+                    comment=comment
+                )
+                if res and res.get("status") == "FILLED":
+                    try:
+                        from jarvis.data.database import TRADE_DB
+                        TRADE_DB.log_trade(
+                            ticket=res.get("ticket", 0),
+                            symbol=sym,
+                            action=action,
+                            entry=float(res.get("price", 0.0)),
+                            sl=sl,
+                            tp=tp,
+                            volume=lots,
+                            score=100.0,
+                            regime="MANUAL_EXECUTION",
+                            ev=0.0,
+                            executor="MANUAL_AI_ASSISTED"
+                        )
+                    except Exception as ex:
+                        logger.error(f"Error logging manual trade to DB: {ex}")
+
+                fresh_pos = self.mt5_client.get_open_positions()
+                fresh_acc = self.mt5_client.get_account_snapshot()
+                self.state_manager.sync_broker_state(fresh_acc, fresh_pos)
+                self._send_json(res)
+            else:
+                self.send_error(404, "Endpoint not found")
+        except (ConnectionResetError, ConnectionAbortedError, BrokenPipeError):
+            pass
+        except Exception as e:
+            logger.error(f"Error handling POST {path}: {e}", exc_info=True)
+            try:
+                self._send_json({"error": str(e)}, status_code=500)
+            except Exception:
+                pass
+
+    def _send_json(self, data: Any, status_code: int = 200, cookies: Optional[list] = None):
+        try:
+            payload = json.dumps(data, default=str).encode("utf-8")
+            self.send_response(status_code)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(payload)))
+            cors_origin = self._allowed_cors_origin(self.headers.get("Origin", ""))
+            if cors_origin:
+                self.send_header("Access-Control-Allow-Origin", cors_origin)
+                self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+                self.send_header("Access-Control-Allow-Headers", "Authorization, Content-Type")
+            if cookies:
+                for c in cookies:
+                    if c:
+                        self.send_header("Set-Cookie", c)
+            self.end_headers()
+            self.wfile.write(payload)
+        except (ConnectionResetError, ConnectionAbortedError, BrokenPipeError):
+            pass
+        except Exception as e:
+            logger.debug(f"Socket write exception (non-fatal): {e}")
+
+    _STATIC_CACHE = {}
+
+    def _serve_static_file(self, req_path: str):
+        now = time.time()
+        is_vendor = "vendor" in req_path
+        cache_ttl = 3600.0 if is_vendor else 5.0
+
+        if req_path in self._STATIC_CACHE:
+            content, mime_type, ts = self._STATIC_CACHE[req_path]
+            if now - ts < cache_ttl:
+                try:
+                    self.send_response(200)
+                    self.send_header("Content-Type", mime_type)
+                    self.send_header("Content-Length", str(len(content)))
+                    if is_vendor:
+                        self.send_header("Cache-Control", "public, max-age=604800, immutable")
+                    else:
+                        self.send_header("Cache-Control", "no-cache, must-revalidate")
+                    self.end_headers()
+                    self.wfile.write(content)
+                except (ConnectionResetError, ConnectionAbortedError, BrokenPipeError):
+                    pass
+                return
+
+        static_dir = os.path.abspath(os.path.join(self.base_dir, "ui", "static"))
+        rel = req_path.lstrip("/").replace("static/", "", 1)
+        target_path = os.path.abspath(os.path.join(static_dir, rel))
+        found_path = None
+        if target_path.startswith(static_dir) and os.path.exists(target_path) and os.path.isfile(target_path):
+            found_path = target_path
+
+        if found_path:
+            mime_type, _ = mimetypes.guess_type(found_path)
+            if not mime_type:
+                mime_type = "text/plain"
+            if found_path.endswith(".css"):
+                mime_type = "text/css"
+            elif found_path.endswith(".js"):
+                mime_type = "application/javascript"
+
+            with open(found_path, "rb") as f:
+                content = f.read()
+
+            self._STATIC_CACHE[req_path] = (content, mime_type, now)
+
+            try:
+                self.send_response(200)
+                self.send_header("Content-Type", mime_type)
+                self.send_header("Content-Length", str(len(content)))
+                if is_vendor:
+                    self.send_header("Cache-Control", "public, max-age=604800, immutable")
+                else:
+                    self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+                    self.send_header("Pragma", "no-cache")
+                    self.send_header("Expires", "0")
+                self.end_headers()
+                self.wfile.write(content)
+            except (ConnectionResetError, ConnectionAbortedError, BrokenPipeError):
+                pass
+        else:
+            self.send_error(404, f"Static file {req_path} not found")
+
+    def _serve_template(self, template_name: str):
+        templates_dir = os.path.abspath(os.path.join(self.base_dir, "ui", "templates"))
+        clean_name = os.path.basename(template_name)
+        ui_path = os.path.abspath(os.path.join(templates_dir, clean_name))
+        if ui_path.startswith(templates_dir) and os.path.exists(ui_path) and os.path.isfile(ui_path):
+            with open(ui_path, "r", encoding="utf-8") as f:
+                content = f.read()
+            content_bytes = content.encode("utf-8")
+
+            try:
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(content_bytes)))
+                self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+                self.send_header("Pragma", "no-cache")
+                self.send_header("Expires", "0")
+                self.end_headers()
+                self.wfile.write(content_bytes)
+            except (ConnectionResetError, ConnectionAbortedError, BrokenPipeError):
+                pass
+        else:
+            self.send_error(404, f"Template {template_name} not found")
+
+    def _serve_terminal_ui(self):
+        self._serve_template("index.html")
+
+    def _serve_stocks_ui(self):
+        self._serve_template("stocks.html")
+
+    def _serve_india_ui(self):
+        self._serve_template("india.html")
+
+    def _serve_options_ui(self):
+        self._serve_template("india_options.html")
+
+def start_server(host: str = "127.0.0.1", port: int = 8501, mt5_client: Optional[MT5Client] = None) -> ThreadingHTTPServer:
+    if host not in {"127.0.0.1", "::1", "localhost"} and os.environ.get("JARVIS_COOKIE_SECURE", "").lower() not in {"1", "true", "yes"}:
+        raise ValueError("Remote binding requires HTTPS session cookies: set JARVIS_COOKIE_SECURE=1 behind TLS.")
+    if mt5_client:
+        JarvisRequestHandler.configure_broker(mt5_client)
+    ThreadingHTTPServer.allow_reuse_address = True
+    server = ThreadingHTTPServer((host, port), JarvisRequestHandler)
+    JarvisRequestHandler.start_background_syncer()
+    logger.info(f"JARVIS AI 3.0 Web Terminal Server running at http://{host}:{port}")
+    return server
+
+def run_web_server(port: int = 8501, host: str = "127.0.0.1", mt5_client: Optional[MT5Client] = None):
+    if host not in {"127.0.0.1", "::1", "localhost"} and os.environ.get("JARVIS_COOKIE_SECURE", "").lower() not in {"1", "true", "yes"}:
+        raise ValueError("Remote binding requires HTTPS session cookies: set JARVIS_COOKIE_SECURE=1 behind TLS.")
+    if mt5_client:
+        JarvisRequestHandler.configure_broker(mt5_client)
+    ThreadingHTTPServer.allow_reuse_address = True
+    server = ThreadingHTTPServer((host, port), JarvisRequestHandler)
+    JarvisRequestHandler.start_background_syncer()
+    logger.info(f"JARVIS AI 3.0 Web Terminal Server running at http://{host}:{port}")
+    try:
+        server.serve_forever()
+    except Exception as e:
+        logger.error(f"Web server serve_forever error: {e}", exc_info=True)
+

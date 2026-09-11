@@ -1,0 +1,75 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+ENV/
+env/
+.venv/
+
+# IDE files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Local runtime data & logs
+logs/
+*.log
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+dashboard.log
+trades_log.db
+jarvis_trade_memory.db
+jarvis.lock
+jarvis_bandit_state.json
+active_tunnel_url.txt
+.jarvis_secret_key
+*.secret_key
+.jarvis_admin_pass
+system_diagnostics.json
+opportunities.json
+trade_plans.json
+scratch/
+
+# AntiGravity system files
+.system_generated/
+jarvis_online_ml_weights.json
+scratch_*.json
+
+# Historical market data lake
+data/market/
+data/raw/
+data/snapshots/
+data/manifests/
+data/metadata/
+
+# Canonical runtime database directory (see jarvis/config/paths.py)
+data/*.db
+data/*.db-shm
+data/*.db-wal

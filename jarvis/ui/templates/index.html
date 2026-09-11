@@ -1,0 +1,1060 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>HM AI 4.0 — Institutional Financial Trading Terminal</title>
+    <!-- Google Fonts: Inter & JetBrains Mono -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <!-- TradingView Lightweight Charts Library (Local Fast Cache + CDN Fallback) -->
+    <script src="/static/js/vendor/lightweight-charts.standalone.production.js"></script>
+    <script>if(typeof LightweightCharts==='undefined'){document.write('<script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"><\/script>');}</script>
+    <script src="https://s3.tradingview.com/tv.js" defer></script>
+    <!-- Terminal Stylesheet -->
+    <link rel="stylesheet" href="/static/css/terminal.css?v=20260907_v1">
+    <link rel="stylesheet" href="/static/css/auth.css?v=20260907_v1">
+</head>
+<body>
+
+    <!-- ==========================================================================
+         TOP INSTITUTIONAL HUD HEADER
+         ========================================================================== -->
+    <header class="terminal-hud" id="terminal-hud">
+        <!-- LEFT: Brand, Status Badge, Mode, and Trade Style Custom Dropdown -->
+        <div class="hud-left">
+            <a href="/" class="brand-logo" title="HM AI 4.0 Institutional Terminal">
+                <div class="brand-icon">⚡</div>
+                <div class="brand-text">HM <span>AI 4.0</span></div>
+            </a>
+            
+            <div class="hud-status-group">
+                <div id="status-badge" class="badge badge-live">
+                    <span class="pulse-dot"></span> OPERATIONAL
+                </div>
+                <div id="exec-mode-badge" class="badge badge-mode">LIVE</div>
+            </div>
+
+            <!-- Real-Time Trade Style Custom Dropdown -->
+            <div class="custom-dropdown" id="trade-style-dropdown">
+                <button class="dropdown-trigger-btn style-trigger-btn" id="trade-style-trigger-btn" onclick="window.toggleStyleDropdown(event)" title="Select Execution Strategy & Horizon">
+                    <span id="current-style-icon" class="dropdown-active-icon">🌊</span>
+                    <div class="dropdown-trigger-text">
+                        <span class="dropdown-trigger-label" id="current-style-label">SWING</span>
+                        <span class="dropdown-trigger-sub" id="current-style-tf">D1/H4/H1</span>
+                    </div>
+                    <span class="dropdown-arrow">▾</span>
+                </button>
+                <div class="dropdown-menu style-dropdown-menu" id="trade-style-menu">
+                    <div class="dropdown-header-title">EXECUTION HORIZON</div>
+                    <button class="dropdown-item style-opt-btn active" data-style="SWING" onclick="window.selectTradeStyle('SWING', event)">
+                        <div class="dropdown-item-left">
+                            <span class="item-icon swing-icon">🌊</span>
+                            <div class="item-text-stack">
+                                <span class="item-main-title">SWING TRADING</span>
+                                <span class="item-sub-desc">Multi-Day Horizon (D1 / H4 / H1)</span>
+                            </div>
+                        </div>
+                        <span class="item-badge swing-badge">D1 · H4 · H1</span>
+                    </button>
+                    <button class="dropdown-item style-opt-btn" data-style="DAY_TRADING" onclick="window.selectTradeStyle('DAY_TRADING', event)">
+                        <div class="dropdown-item-left">
+                            <span class="item-icon day-icon">🎯</span>
+                            <div class="item-text-stack">
+                                <span class="item-main-title">DAY TRADING</span>
+                                <span class="item-sub-desc">Intraday Horizon (H1 / M15 / M5)</span>
+                            </div>
+                        </div>
+                        <span class="item-badge day-badge">H1 · M15 · M5</span>
+                    </button>
+                    <button class="dropdown-item style-opt-btn" data-style="SCALP" onclick="window.selectTradeStyle('SCALP', event)">
+                        <div class="dropdown-item-left">
+                            <span class="item-icon scalp-icon">⚡</span>
+                            <div class="item-text-stack">
+                                <span class="item-main-title">SCALP EXECUTION</span>
+                                <span class="item-sub-desc">Micro Horizon (M15 / M5 / M1)</span>
+                            </div>
+                        </div>
+                        <span class="item-badge scalp-badge">M15 · M5 · M1</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- CENTER: Real-Time Broker Telemetry Metrics Mini-HUD Pill -->
+        <div class="hud-center">
+            <div class="hud-telemetry-pill">
+                <div class="telemetry-item">
+                    <span class="telemetry-label">BALANCE</span>
+                    <span id="hud-balance" class="telemetry-value mono-number">$0.00</span>
+                </div>
+                <div class="telemetry-divider"></div>
+                <div class="telemetry-item">
+                    <span class="telemetry-label">EQUITY</span>
+                    <span id="hud-equity" class="telemetry-value mono-number text-bull">$0.00</span>
+                </div>
+                <div class="telemetry-divider hide-compact"></div>
+                <div class="telemetry-item hide-compact">
+                    <span class="telemetry-label">FREE MARGIN</span>
+                    <span id="hud-free-margin" class="telemetry-value mono-number">$0.00</span>
+                </div>
+                <div class="telemetry-divider hide-medium"></div>
+                <div class="telemetry-item hide-medium">
+                    <span class="telemetry-label">MARGIN LEVEL</span>
+                    <span id="hud-margin-level" class="telemetry-value mono-number text-cyan">--%</span>
+                </div>
+                <div class="telemetry-divider hide-medium"></div>
+                <div class="telemetry-item hide-medium">
+                    <span class="telemetry-label">BROKER</span>
+                    <div class="broker-info-row">
+                        <span id="hud-server" class="telemetry-value">Connecting...</span>
+                        <span id="hud-login" class="telemetry-sub mono-number">#--</span>
+                    </div>
+                </div>
+                <div class="telemetry-divider hide-medium"></div>
+                <div class="telemetry-item hide-medium">
+                    <span class="telemetry-label">FEED</span>
+                    <div class="feed-status-row">
+                        <span id="hud-sync" class="telemetry-value text-bull">ONLINE</span>
+                        <span id="hud-market-status" class="telemetry-tag tag-closed">CLOSED</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- RIGHT: Markets Dropdown, Safe Mode, Copilot, Tools / Profile Dropdown -->
+        <div class="hud-right">
+            <!-- Markets Dropdown -->
+            <div class="custom-dropdown" id="markets-dropdown">
+                <button class="dropdown-trigger-btn markets-trigger-btn" id="markets-trigger-btn" onclick="window.toggleMarketsDropdown(event)" title="Institutional Desks & Market Screeners">
+                    <span class="dropdown-trigger-icon">🌐</span>
+                    <span class="dropdown-trigger-label hide-mobile-text">Markets</span>
+                    <span class="dropdown-arrow">▾</span>
+                </button>
+                <div class="dropdown-menu markets-dropdown-menu" id="markets-menu">
+                    <div class="dropdown-header-title">MULTI-MARKET DESKS</div>
+                    <a href="/stocks" class="dropdown-item market-nav-item">
+                        <div class="dropdown-item-left">
+                            <span class="item-flag">🇺🇸</span>
+                            <div class="item-text-stack">
+                                <span class="item-main-title">US Stocks Screener</span>
+                                <span class="item-sub-desc">NASDAQ & NYSE Institutional Radar</span>
+                            </div>
+                        </div>
+                        <span class="market-status-dot online">LIVE</span>
+                    </a>
+                    <a href="/india" class="dropdown-item market-nav-item">
+                        <div class="dropdown-item-left">
+                            <span class="item-flag">🇮🇳</span>
+                            <div class="item-text-stack">
+                                <span class="item-main-title">India Stocks NSE/BSE</span>
+                                <span class="item-sub-desc">Nifty 500 Equities & Breakouts</span>
+                            </div>
+                        </div>
+                        <span class="market-status-dot online">LIVE</span>
+                    </a>
+                    <a href="/options" class="dropdown-item market-nav-item">
+                        <div class="dropdown-item-left">
+                            <span class="item-flag">📊</span>
+                            <div class="item-text-stack">
+                                <span class="item-main-title">India Options Desk</span>
+                                <span class="item-sub-desc">NIFTY & BANKNIFTY Greeks Desk</span>
+                            </div>
+                        </div>
+                        <span class="market-status-dot options-live">F&O</span>
+                    </a>
+                </div>
+            </div>
+
+            <!-- Safe Mode Toggle Button -->
+            <button id="btn-safe-mode" class="btn-hud-action btn-safe-mode" onclick="window.toggleSafeMode()" title="Toggle Safe Mode Execution Protection">
+                <span class="hud-action-icon">🛡️</span>
+                <span class="hud-action-text hide-compact">Safe Mode</span>
+            </button>
+
+            <!-- Copilot Assistant Button -->
+            <button class="btn-hud-action btn-copilot" onclick="window.toggleCopilotModal()" title="Open HM AI Copilot Assistant (C)">
+                <span class="hud-action-icon">🤖</span>
+                <span class="hud-action-text hide-compact">Copilot</span>
+            </button>
+
+            <!-- Tools / User Dropdown -->
+            <div class="custom-dropdown" id="tools-dropdown">
+                <button class="dropdown-trigger-btn tools-trigger-btn" id="tools-trigger-btn" onclick="window.toggleToolsDropdown(event)" title="Settings, Command Palette & Terminal Profile">
+                    <span class="dropdown-trigger-icon">⚙️</span>
+                    <span class="dropdown-trigger-label hide-compact">Tools</span>
+                    <span class="dropdown-arrow">▾</span>
+                </button>
+                <div class="dropdown-menu tools-dropdown-menu" id="tools-menu">
+                    <div class="dropdown-header-title">TERMINAL TOOLS & ACCESS</div>
+                    <button class="dropdown-item" onclick="window.toggleCommandPalette(true); window.closeAllDropdowns();">
+                        <div class="dropdown-item-left">
+                            <span class="item-icon">⌘</span>
+                            <div class="item-text-stack">
+                                <span class="item-main-title">Spotlight Command Palette</span>
+                                <span class="item-sub-desc">Quick actions & navigation</span>
+                            </div>
+                        </div>
+                        <span class="item-badge">Ctrl+K</span>
+                    </button>
+                    <button class="dropdown-item" onclick="window.refreshData(); window.closeAllDropdowns();">
+                        <div class="dropdown-item-left">
+                            <span class="item-icon">↻</span>
+                            <div class="item-text-stack">
+                                <span class="item-main-title">Force Telemetry Refresh</span>
+                                <span class="item-sub-desc">Poll broker state immediately</span>
+                            </div>
+                        </div>
+                        <span class="item-badge">F5</span>
+                    </button>
+                    <button class="dropdown-item" onclick="if(window.HM_AUTH) window.HM_AUTH.openLoginModal(); window.closeAllDropdowns();">
+                        <div class="dropdown-item-left">
+                            <span class="item-icon">👤</span>
+                            <div class="item-text-stack">
+                                <span class="item-main-title" id="dropdown-user-name">Admin Profile</span>
+                                <span class="item-sub-desc" id="dropdown-user-role">Institutional Trader</span>
+                            </div>
+                        </div>
+                        <span class="item-badge badge-role">AUTH</span>
+                    </button>
+                    <div id="execution-mode-management" class="execution-mode-management" hidden>
+                        <div class="dropdown-header-title">EXECUTION MODE</div>
+                        <button id="btn-user-mode-live" class="dropdown-item" onclick="window.setExecutionMode('LIVE')">
+                            <div class="dropdown-item-left">
+                                <span class="item-icon">🔴</span>
+                                <div class="item-text-stack">
+                                    <span class="item-main-title">Live Account</span>
+                                    <span class="item-sub-desc">Send orders to the connected MT5 account</span>
+                                </div>
+                            </div>
+                            <span class="item-badge">LIVE</span>
+                        </button>
+                        <button id="btn-user-mode-paper" class="dropdown-item" onclick="window.setExecutionMode('PAPER')">
+                            <div class="dropdown-item-left">
+                                <span class="item-icon">🧪</span>
+                                <div class="item-text-stack">
+                                    <span class="item-main-title">Paper Trading</span>
+                                    <span class="item-sub-desc">Simulate orders without broker execution</span>
+                                </div>
+                            </div>
+                            <span class="item-badge">PAPER</span>
+                        </button>
+                    </div>
+                    <div class="dropdown-separator"></div>
+                    <button class="dropdown-item item-danger" onclick="if(window.HM_AUTH) window.HM_AUTH.logout(); else if(window.RemoteAuthUI) window.RemoteAuthUI.logout(); window.closeAllDropdowns();">
+                        <div class="dropdown-item-left">
+                            <span class="item-icon">🚪</span>
+                            <div class="item-text-stack">
+                                <span class="item-main-title">Sign Out / Lock</span>
+                                <span class="item-sub-desc">Terminate terminal session</span>
+                            </div>
+                        </div>
+                    </button>
+                </div>
+            </div>
+
+            <div id="auth-header-widget" class="auth-header-widget" style="display:none;"></div>
+        </div>
+    </header>
+
+    <!-- ==========================================================================
+         MOBILE NAVIGATION TAB BAR (VISIBLE ON TOUCH / MOBILE SCREENS <= 900PX)
+         ========================================================================== -->
+    <nav class="mobile-nav-bar" id="mobile-nav-bar">
+        <button id="mob-btn-radar" class="mob-tab-btn" onclick="window.switchMobileView('radar')">
+            <span class="mob-tab-icon">📡</span>
+            <span class="mob-tab-label">Radar</span>
+        </button>
+        <button id="mob-btn-chart" class="mob-tab-btn active" onclick="window.switchMobileView('chart')">
+            <span class="mob-tab-icon">📈</span>
+            <span class="mob-tab-label">Chart</span>
+        </button>
+        <button id="mob-btn-desk" class="mob-tab-btn" onclick="window.switchMobileView('desk')">
+            <span class="mob-tab-icon">⚡</span>
+            <span class="mob-tab-label">Desk</span>
+        </button>
+        <button id="mob-btn-orders" class="mob-tab-btn" onclick="window.switchMobileView('orders')">
+            <span class="mob-tab-icon">💼</span>
+            <span class="mob-tab-label">Positions</span>
+        </button>
+        <button id="mob-btn-cognition" class="mob-tab-btn" onclick="window.switchMobileView('cognition')">
+            <span class="mob-tab-icon">🛡️</span>
+            <span class="mob-tab-label">AI Gates</span>
+        </button>
+    </nav>
+
+    <!-- ==========================================================================
+         MAIN INSTITUTIONAL GRID WORKSPACE
+         ========================================================================== -->
+    <main class="terminal-workspace" id="terminal-workspace">
+        
+        <!-- LEFT COLUMN: Quick Asset Watchlist + Scanner Radar / News Feed -->
+        <aside id="panel-left" class="terminal-panel left-column">
+            <!-- Sleek Quick Asset Watchlist Ribbon -->
+            <div class="quick-watchlist-ribbon" id="quick-watchlist-ribbon">
+                <div class="watchlist-header">
+                    <span class="watchlist-title">⚡ QUICK WATCHLIST</span>
+                    <span class="watchlist-hint">1-CLICK LOAD</span>
+                </div>
+                <div class="watchlist-items-row" id="watchlist-items-row">
+                    <button class="wl-item-btn active" data-symbol="XAUUSD" onclick="window.setSymbol('XAUUSD')" id="wl-btn-XAUUSD">
+                        <div class="wl-item-top">
+                            <span class="wl-symbol">XAUUSD</span>
+                            <span class="wl-change positive" id="wl-chg-XAUUSD">+0.45%</span>
+                        </div>
+                        <div class="wl-price mono-number" id="wl-prc-XAUUSD">4380.00</div>
+                    </button>
+                    <button class="wl-item-btn" data-symbol="BTCUSD" onclick="window.setSymbol('BTCUSD')" id="wl-btn-BTCUSD">
+                        <div class="wl-item-top">
+                            <span class="wl-symbol">BTCUSD</span>
+                            <span class="wl-change positive" id="wl-chg-BTCUSD">+1.82%</span>
+                        </div>
+                        <div class="wl-price mono-number" id="wl-prc-BTCUSD">77000.00</div>
+                    </button>
+                    <button class="wl-item-btn" data-symbol="ETHUSD" onclick="window.setSymbol('ETHUSD')" id="wl-btn-ETHUSD">
+                        <div class="wl-item-top">
+                            <span class="wl-symbol">ETHUSD</span>
+                            <span class="wl-change positive" id="wl-chg-ETHUSD">+1.25%</span>
+                        </div>
+                        <div class="wl-price mono-number" id="wl-prc-ETHUSD">3400.00</div>
+                    </button>
+                    <button class="wl-item-btn" data-symbol="SOLUSD" onclick="window.setSymbol('SOLUSD')" id="wl-btn-SOLUSD">
+                        <div class="wl-item-top">
+                            <span class="wl-symbol">SOLUSD</span>
+                            <span class="wl-change positive" id="wl-chg-SOLUSD">+2.40%</span>
+                        </div>
+                        <div class="wl-price mono-number" id="wl-prc-SOLUSD">185.00</div>
+                    </button>
+                    <button class="wl-item-btn" data-symbol="EURUSD" onclick="window.setSymbol('EURUSD')" id="wl-btn-EURUSD">
+                        <div class="wl-item-top">
+                            <span class="wl-symbol">EURUSD</span>
+                            <span class="wl-change negative" id="wl-chg-EURUSD">-0.12%</span>
+                        </div>
+                        <div class="wl-price mono-number" id="wl-prc-EURUSD">1.1580</div>
+                    </button>
+                    <button class="wl-item-btn" data-symbol="GBPUSD" onclick="window.setSymbol('GBPUSD')" id="wl-btn-GBPUSD">
+                        <div class="wl-item-top">
+                            <span class="wl-symbol">GBPUSD</span>
+                            <span class="wl-change positive" id="wl-chg-GBPUSD">+0.08%</span>
+                        </div>
+                        <div class="wl-price mono-number" id="wl-prc-GBPUSD">1.3480</div>
+                    </button>
+                    <button class="wl-item-btn" data-symbol="USDJPY" onclick="window.setSymbol('USDJPY')" id="wl-btn-USDJPY">
+                        <div class="wl-item-top">
+                            <span class="wl-symbol">USDJPY</span>
+                            <span class="wl-change negative" id="wl-chg-USDJPY">-0.34%</span>
+                        </div>
+                        <div class="wl-price mono-number" id="wl-prc-USDJPY">158.50</div>
+                    </button>
+                    <button class="wl-item-btn" data-symbol="US500" onclick="window.setSymbol('US500')" id="wl-btn-US500">
+                        <div class="wl-item-top">
+                            <span class="wl-symbol">US500</span>
+                            <span class="wl-change positive" id="wl-chg-US500">+0.35%</span>
+                        </div>
+                        <div class="wl-price mono-number" id="wl-prc-US500">5850.00</div>
+                    </button>
+                    <button class="wl-item-btn" data-symbol="NAS100" onclick="window.setSymbol('NAS100')" id="wl-btn-NAS100">
+                        <div class="wl-item-top">
+                            <span class="wl-symbol">NAS100</span>
+                            <span class="wl-change positive" id="wl-chg-NAS100">+0.55%</span>
+                        </div>
+                        <div class="wl-price mono-number" id="wl-prc-NAS100">20500.00</div>
+                    </button>
+                    <button class="wl-item-btn" data-symbol="WTI" onclick="window.setSymbol('WTI')" id="wl-btn-WTI">
+                        <div class="wl-item-top">
+                            <span class="wl-symbol">WTI OIL</span>
+                            <span class="wl-change positive" id="wl-chg-WTI">+0.90%</span>
+                        </div>
+                        <div class="wl-price mono-number" id="wl-prc-WTI">76.50</div>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Left Panel Tabs: High-Probability Radar vs Macroeconomic Calendar -->
+            <div class="panel-header" style="margin-top:2px;">
+                <div class="tab-switcher">
+                    <button id="tab-btn-radar" class="tab-btn active" onclick="switchLeftTab('radar')">📡 Setups Radar</button>
+                    <button id="tab-btn-news" class="tab-btn" onclick="switchLeftTab('news')">📰 Macro News</button>
+                </div>
+                <span id="left-panel-counter" class="panel-counter">0 Monitored</span>
+            </div>
+
+            <div class="panel-content left-panel-scrollable">
+                <!-- TAB 1: High-Probability Radar Scanner -->
+                <div id="tab-content-radar" class="left-tab-pane active">
+                    <div class="pane-subheader">
+                        <span>High-Probability Radar</span>
+                        <span class="action-hint">AUTO-SYNTHESIZED</span>
+                    </div>
+                    <!-- Quick-Filter Pills for Radar Setups -->
+                    <div class="radar-filter-pills" id="radar-filter-pills">
+                        <button class="radar-filter-pill active" data-filter="ALL" onclick="window.setRadarFilter('ALL')">ALL</button>
+                        <button class="radar-filter-pill" data-filter="SWING" onclick="window.setRadarFilter('SWING')">🌊 SWING</button>
+                        <button class="radar-filter-pill" data-filter="DAY_TRADING" onclick="window.setRadarFilter('DAY_TRADING')">🎯 DAY</button>
+                        <button class="radar-filter-pill" data-filter="SCALP" onclick="window.setRadarFilter('SCALP')">⚡ SCALP</button>
+                    </div>
+                    <div id="radar-list" class="scanner-radar-list">
+                        <!-- Rendered dynamically by terminal.js -->
+                    </div>
+                </div>
+
+                <!-- TAB 2: Live Macroeconomic News & Event Shock Calendar -->
+                <div id="tab-content-news" class="left-tab-pane" style="display:none;">
+                    <div class="pane-subheader amber">
+                        <span>Live Economic Calendar</span>
+                        <span class="action-hint">HIGH-IMPACT</span>
+                    </div>
+                    <div id="news-feed-list" class="news-feed-list">
+                        <!-- Rendered dynamically by terminal.js -->
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- MIDDLE COLUMN: 70% Multi-Pane Chart + Institutional Tabbed Trading Dock -->
+        <div id="panel-middle" class="middle-column-stack">
+            <!-- 1. TradingView Multi-Pane Financial Chart Stage (Spacious High-Focus Canvas) -->
+            <section id="chart-main-panel" class="terminal-panel chart-panel">
+                <div class="panel-header">
+                    <div class="chart-header-bar">
+                        <div class="chart-symbol-info">
+                            <span id="chart-symbol" class="active-symbol-title">XAUUSD</span>
+                            <span id="chart-regime" class="active-regime-pill">TREND_BULL</span>
+                            <span id="chart-live-price" class="chart-live-price">4515.00</span>
+                            <span id="chart-market-status" class="market-status-pill market-closed">🔴 CLOSED (WEEKEND) — Re-opens Mon 02:30 AM IST</span>
+                        </div>
+
+                        <!-- Chart Engine Mode Switcher & Controls -->
+                        <div class="chart-controls-group">
+                            <div class="tab-switcher">
+                                <button id="btn-mode-tv-live" class="tab-btn active" onclick="switchChartMode('tv_live')">⚡ Live MT5</button>
+                                <button id="btn-mode-tv-pro" class="tab-btn" onclick="switchChartMode('tv_pro')">📈 TV Pro</button>
+                            </div>
+                            <div class="timeframe-selector" id="timeframe-selector">
+                                <button class="tf-btn" onclick="setTimeframe('M1')">M1</button>
+                                <button class="tf-btn" onclick="setTimeframe('M5')">M5</button>
+                                <button class="tf-btn" onclick="setTimeframe('M15')">M15</button>
+                                <button class="tf-btn active" onclick="setTimeframe('H1')">H1</button>
+                                <button class="tf-btn" onclick="setTimeframe('H4')">H4</button>
+                                <button class="tf-btn" onclick="setTimeframe('D1')">D1</button>
+                            </div>
+                            <button id="btn-toggle-overlays" class="btn-toggle-overlays active" onclick="toggleChartOverlays()" title="Toggle Trade & S/R Level Overlays">
+                                📍 Levels: ON
+                            </button>
+                            <button id="btn-expand-chart" class="btn-expand-chart" onclick="toggleExpandChart()" title="Toggle Fullscreen Chart">
+                                ⛶ Expand
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- TradingView Multi-Pane Container Area -->
+                <div class="chart-multipane-wrapper" style="position:relative;">
+                    <!-- Institutional Support / Resistance & Overlays Legend -->
+                    <div class="chart-overlay-legend">
+                        <span class="overlay-legend-tag overlay-supply-ob" id="legend-r1">🔴 Resistance: Calculating...</span>
+                        <span class="overlay-legend-tag overlay-demand-ob" id="legend-s1">🟢 Support: Calculating...</span>
+                        <span class="overlay-legend-tag overlay-fvg">📊 Dynamic Volume</span>
+                    </div>
+
+                    <!-- Real-Time Active Trade Floating HUD -->
+                    <div id="chart-active-trade-hud" class="chart-active-trade-hud" style="display:none;">
+                        <span id="chart-hud-ticket" class="chart-hud-tag badge-ready-buy">#-- BUY --L</span>
+                        <span id="chart-hud-entry" class="chart-hud-metric">Entry: --</span>
+                        <span id="chart-hud-sl" class="chart-hud-metric" style="color:var(--neon-bear);">SL: --</span>
+                        <span id="chart-hud-tp" class="chart-hud-metric" style="color:var(--neon-bull);">TP: --</span>
+                        <span id="chart-hud-pnl" class="chart-hud-metric" style="font-weight:800; color:var(--neon-bull);">$0.00</span>
+                    </div>
+
+                    <!-- Mode 1: TradingView Lightweight Charts Canvas Stage (Live MT5 Streaming + S/R + Volume) -->
+                    <div id="tv-lightweight-chart-container" style="width:100%; height:100%; position:absolute; top:0; left:0;"></div>
+
+                    <!-- Mode 2: TradingView Advanced Real-Time Web Widget Container -->
+                    <div id="tv-advanced-widget-container" style="width:100%; height:100%; position:absolute; top:0; left:0; display:none;"></div>
+
+                    <!-- Smart Floating Crosshair Tooltip -->
+                    <div id="smart-chart-tooltip" class="smart-chart-tooltip"></div>
+                </div>
+            </section>
+
+            <!-- 2. Consolidated Institutional Tabbed Trading Dock (Positions, History, Analytics, Arbiter Logs) -->
+            <section id="trading-dock" class="terminal-panel trading-dock-panel">
+                <div class="dock-header">
+                    <div class="dock-tabs-group">
+                        <button id="dock-tab-btn-positions" class="dock-tab-btn active" onclick="window.switchDockTab('positions')">
+                            <span>💼 Open Positions</span>
+                            <span id="pos-count" class="dock-tab-badge">0</span>
+                        </button>
+                        <button id="dock-tab-btn-pending" class="dock-tab-btn" onclick="window.switchDockTab('pending')">
+                            <span>⏳ Pending Orders</span>
+                            <span id="pending-count" class="dock-tab-badge">0</span>
+                        </button>
+                        <button id="dock-tab-btn-history" class="dock-tab-btn" onclick="window.switchDockTab('history')">
+                            <span>📜 Trade History</span>
+                            <span id="history-count" class="dock-tab-badge">0</span>
+                        </button>
+                        <button id="dock-tab-btn-analytics" class="dock-tab-btn" onclick="window.switchDockTab('analytics')">
+                            <span>📊 Analytics & Edge</span>
+                        </button>
+                        <button id="dock-tab-btn-logs" class="dock-tab-btn" onclick="window.switchDockTab('logs')">
+                            <span>⚡ Arbiter Logs</span>
+                            <span class="dock-live-dot"></span>
+                        </button>
+                    </div>
+
+                    <div class="dock-actions-group">
+                        <button class="btn-dock-action btn-danger" onclick="closeAllPositions()" title="Emergency 1-Click Close for All Open Positions">
+                            ✕ Close All
+                        </button>
+                        <button id="btn-toggle-dock" class="btn-dock-action" onclick="window.toggleDockCollapse()" title="Minimize or Maximize Trading Dock">
+                            ↕ Minimize Dock
+                        </button>
+                    </div>
+                </div>
+
+                <div class="dock-content-wrapper">
+                    <!-- DOCK TAB 1: Live Open Positions Table -->
+                    <div id="dock-pane-positions" class="dock-pane active">
+                        <div class="positions-hud-container">
+                            <table class="positions-table">
+                                <thead>
+                                    <tr>
+                                        <th>Ticket</th>
+                                        <th>Symbol</th>
+                                        <th>Side</th>
+                                        <th>Lots</th>
+                                        <th>Entry Price</th>
+                                        <th>Live Price</th>
+                                        <th>Stop Loss (Trail)</th>
+                                        <th>Take Profit</th>
+                                        <th>Floating PnL</th>
+                                        <th>TP / SL Proximity</th>
+                                        <th>Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="positions-tbody">
+                                    <tr><td colspan="11" style="text-align:center; color:var(--text-dim); padding:16px;">No Active Positions Open</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- DOCK TAB: Live Pending Orders Table -->
+                    <div id="dock-pane-pending" class="dock-pane" style="display:none;">
+                        <div class="positions-hud-container">
+                            <table class="positions-table">
+                                <thead>
+                                    <tr>
+                                        <th>Ticket</th>
+                                        <th>Symbol</th>
+                                        <th>Type</th>
+                                        <th>Lots</th>
+                                        <th>Limit Price</th>
+                                        <th>Stop Loss</th>
+                                        <th>Take Profit</th>
+                                        <th>Comment</th>
+                                        <th>Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="pending-tbody">
+                                    <tr><td colspan="9" style="text-align:center; color:var(--text-dim); padding:16px;">No Active Pending Orders</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- DOCK TAB 2: SQLite Closed Trade History -->
+                    <div id="dock-pane-history" class="dock-pane" style="display:none;">
+                        <div class="positions-hud-container">
+                            <table class="positions-table">
+                                <thead>
+                                    <tr>
+                                        <th>Ticket</th>
+                                        <th>Symbol</th>
+                                        <th>Action</th>
+                                        <th>Executor</th>
+                                        <th>Lots</th>
+                                        <th>Entry</th>
+                                        <th>SL</th>
+                                        <th>TP</th>
+                                        <th>Realized PnL</th>
+                                        <th>Execution Time</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="history-tbody">
+                                    <tr><td colspan="10" style="text-align:center; color:var(--text-dim); padding:16px;">Fetching SQLite Trade History...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- DOCK TAB 3: Performance & Real-Time Edge Analytics Grid -->
+                    <div id="dock-pane-analytics" class="dock-pane" style="display:none;">
+                        <div class="dock-analytics-grid">
+                            <div class="analytics-card">
+                                <span class="analytics-lbl">Win Rate</span>
+                                <span id="analytics-win-rate" class="analytics-val text-bull mono-number">--%</span>
+                                <span class="analytics-sub">Profitable closed setups</span>
+                            </div>
+                            <div class="analytics-card">
+                                <span class="analytics-lbl">Profit Factor</span>
+                                <span id="analytics-profit-factor" class="analytics-val text-cyan mono-number">--</span>
+                                <span class="analytics-sub">Gross Win / Gross Loss</span>
+                            </div>
+                            <div class="analytics-card">
+                                <span class="analytics-lbl">Realized Net PnL</span>
+                                <span id="analytics-net-pnl" class="analytics-val text-bull mono-number">$0.00</span>
+                                <span class="analytics-sub">Cumulative account profit</span>
+                            </div>
+                            <div class="analytics-card">
+                                <span class="analytics-lbl">Max Historical Drawdown</span>
+                                <span id="analytics-max-dd" class="analytics-val text-amber mono-number">--%</span>
+                                <span class="analytics-sub">Peak-to-valley variance</span>
+                            </div>
+                            <div class="analytics-card">
+                                <span class="analytics-lbl">Total Executed Trades</span>
+                                <span id="analytics-total-trades" class="analytics-val mono-number">0</span>
+                                <span class="analytics-sub">Database registered trades</span>
+                            </div>
+                            <div class="analytics-card">
+                                <span class="analytics-lbl">Avg Risk/Reward</span>
+                                <span id="analytics-expectancy" class="analytics-val text-cyan mono-number">1 : 2.4</span>
+                                <span class="analytics-sub">Mathematical trade edge</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- DOCK TAB 4: Arbiter & Live System Telemetry Stream -->
+                    <div id="dock-pane-logs" class="dock-pane" style="display:none;">
+                        <div class="system-logs-stream" id="system-logs-stream">
+                            <div class="log-entry">
+                                <span class="log-time">[SYSTEM]</span>
+                                <span class="log-tag tag-info">READY</span>
+                                <span class="log-msg">HM AI 4.0 Institutional Terminal Controller initialized and synchronized.</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </div>
+
+        <!-- RIGHT COLUMN: UNIFIED INSTITUTIONAL ORDER TICKET & AI QUALITY GATES -->
+        <aside id="panel-right" class="terminal-panel devil-panel">
+            <div class="panel-header">
+                <div class="tab-switcher">
+                    <button id="tab-btn-desk" class="tab-btn active" onclick="switchRightTab('desk')">⚡ Order Ticket</button>
+                    <button id="tab-btn-cognition" class="tab-btn" onclick="switchRightTab('cognition')">🛡️ AI Cognition (14 Gates)</button>
+                </div>
+                <span class="devil-header-badge">LIVE AI</span>
+            </div>
+            <div class="panel-content right-panel-scrollable">
+                
+                <!-- TAB 1: UNIFIED INSTITUTIONAL ORDER TICKET & RISK PAYOFF -->
+                <div id="tab-content-desk" class="right-tab-pane active">
+                    
+                    <!-- Market Closed Notification Banner -->
+                    <div id="desk-market-status-banner" class="desk-market-closed-banner" style="display:none;">
+                        <span class="desk-market-icon">🔒</span>
+                        <div class="desk-market-info">
+                            <b id="desk-market-title">MARKET CLOSED FOR WEEKEND</b>
+                            <span id="desk-market-time">Re-opens Mon Aug 24, 02:30 AM IST</span>
+                        </div>
+                    </div>
+
+                    <!-- Section 1: AI Decision Synthesis Strip -->
+                    <section class="order-ticket-synthesis-card">
+                        <div class="ticket-synthesis-top">
+                            <div class="ticket-symbol-wrap">
+                                <span class="ticket-symbol" id="desk-active-symbol">XAUUSD</span>
+                                <span class="ticket-bias-badge" id="plan-bias">BULLISH</span>
+                            </div>
+                            <button id="btn-sync-ai-plan" class="btn-sync-ai" onclick="window.syncAiPlanToDesk()" title="Auto-populate optimal Entry, SL, and TP from AI Decision Engine">
+                                <span>⚡</span> Sync AI Bracket
+                            </button>
+                        </div>
+                        <div class="ticket-strategy-row">
+                            <span class="strategy-label">Strategy:</span>
+                            <span id="plan-strategy-pill" class="strategy-val">SYNTHESIZING...</span>
+                            <span class="win-prob-tag" id="desk-win-prob-badge">Win Prob: --%</span>
+                        </div>
+                    </section>
+
+                    <!-- Section 2: Interactive Dynamic Risk Manager -->
+                    <section class="ticket-risk-manager-card">
+                        <div class="risk-presets-header">
+                            <span class="risk-title">CAPITAL AT RISK PRESET</span>
+                            <span class="risk-hint">AUTO-CALCULATES LOTS</span>
+                        </div>
+                        <div class="risk-presets-grid" id="risk-presets-grid">
+                            <button class="risk-preset-btn" data-pct="0.25" onclick="window.setRiskPreset(0.25)">0.25%</button>
+                            <button class="risk-preset-btn" data-pct="0.50" onclick="window.setRiskPreset(0.50)">0.50%</button>
+                            <button class="risk-preset-btn active" data-pct="1.00" onclick="window.setRiskPreset(1.00)">1.00%</button>
+                            <button class="risk-preset-btn" data-pct="2.00" onclick="window.setRiskPreset(2.00)">2.00%</button>
+                        </div>
+
+                        <!-- Ticket Inputs Grid -->
+                        <div class="desk-inputs-grid" style="margin-top:6px;">
+                            <div class="desk-field">
+                                <span class="desk-field-lbl">Volume (Lots)</span>
+                                <input id="desk-lots" class="desk-input mono-number" type="number" step="0.01" value="0.01" min="0.01" oninput="window.recalculateDeskPayoff()">
+                            </div>
+                            <div class="desk-field">
+                                <span class="desk-field-lbl">Win Probability</span>
+                                <input id="desk-win-prob" class="desk-input mono-number" value="--%" readonly style="color:var(--neon-bull); font-weight:700;">
+                            </div>
+                            <div class="desk-field">
+                                <span class="desk-field-lbl">Stop Loss ($)</span>
+                                <input id="desk-sl" class="desk-input mono-number" type="number" step="0.001" placeholder="Auto SL" oninput="window.recalculateDeskPayoff()">
+                            </div>
+                            <div class="desk-field">
+                                <span class="desk-field-lbl">Take Profit ($)</span>
+                                <input id="desk-tp" class="desk-input mono-number" type="number" step="0.001" placeholder="Auto TP" oninput="window.recalculateDeskPayoff()">
+                            </div>
+                        </div>
+
+                        <!-- Real-Time Payoff & Risk-Reward HUD -->
+                        <div class="payoff-hud-box">
+                            <div class="payoff-metric">
+                                <span class="payoff-lbl">Est. Risk ($)</span>
+                                <span id="payoff-risk-amt" class="payoff-val text-bear mono-number">-$0.00</span>
+                            </div>
+                            <div class="payoff-metric">
+                                <span class="payoff-lbl">Est. Reward ($)</span>
+                                <span id="payoff-reward-amt" class="payoff-val text-bull mono-number">+$0.00</span>
+                            </div>
+                            <div class="payoff-metric">
+                                <span class="payoff-lbl">Live R:R Ratio</span>
+                                <span id="payoff-rr-ratio" class="payoff-val text-cyan mono-number">1 : --</span>
+                            </div>
+                            <div class="payoff-metric">
+                                <span class="payoff-lbl">Account Risk %</span>
+                                <span id="payoff-risk-pct" class="payoff-val mono-number">1.00%</span>
+                            </div>
+                        </div>
+
+                        <!-- 1-Click Execution Action Buttons -->
+                        <div class="desk-action-buttons">
+                            <button id="btn-buy-action" class="btn-desk-buy" onclick="executeManualTrade('BUY')">
+                                <span>▲ BUY / LONG</span>
+                            </button>
+                            <button id="btn-sell-action" class="btn-desk-sell" onclick="executeManualTrade('SELL')">
+                                <span>▼ SELL / SHORT</span>
+                            </button>
+                        </div>
+                    </section>
+
+                    <!-- Section 3: Structural Key Levels Matrix -->
+                    <div class="section-card structure-matrix-card">
+                        <div class="section-card-header cyan">
+                            <span>📐 AI Structural Reference Levels</span>
+                            <span id="decision-rr" class="pill">R:R --</span>
+                        </div>
+                        <div class="plan-grid-3col">
+                            <div class="plan-grid-item">
+                                <span class="plan-grid-lbl">Entry Target</span>
+                                <span id="plan-entry" class="plan-grid-val mono-number">--</span>
+                            </div>
+                            <div class="plan-grid-item">
+                                <span class="plan-grid-lbl">Stop Loss</span>
+                                <span id="plan-sl" class="plan-grid-val text-bear mono-number">--</span>
+                            </div>
+                            <div class="plan-grid-item">
+                                <span class="plan-grid-lbl">Take Profit</span>
+                                <span id="plan-tp" class="plan-grid-val text-bull mono-number">--</span>
+                            </div>
+                            <div class="plan-grid-item">
+                                <span class="plan-grid-lbl">Calculated Lots</span>
+                                <span id="plan-calc-lots" class="plan-grid-val mono-number">--</span>
+                            </div>
+                            <div class="plan-grid-item">
+                                <span class="plan-grid-lbl">Est. Risk ($)</span>
+                                <span id="plan-risk-amt" class="plan-grid-val text-cyan mono-number">--</span>
+                            </div>
+                            <div class="plan-grid-item">
+                                <span class="plan-grid-lbl">Volatility Filter</span>
+                                <span id="plan-volatility" class="plan-grid-val" style="color:var(--text-secondary); font-size:10px;">NORMAL</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- TAB 2: AI COGNITION, 14 QUALITY GATES & DEVIL'S ADVOCATE -->
+                <div id="tab-content-cognition" class="right-tab-pane" style="display:none;">
+                    <!-- SECTION 1: AI COGNITION & VALIDATION METRICS -->
+                    <div class="section-card cognition-hero-card">
+                        <div class="section-card-header emerald">
+                            <span style="display:flex; align-items:center; gap:5px;">
+                                <span>🛡️</span> AI Cognition & Validation
+                            </span>
+                            <span id="decision-gate-badge" class="pill" style="color:var(--text-dim);">EVALUATING...</span>
+                        </div>
+
+                        <!-- 4-Tile High-Conviction AI Telemetry Grid -->
+                        <div class="cognition-telemetry-grid">
+                            <div class="cognition-stat-tile">
+                                <span class="stat-tile-label">Win Probability</span>
+                                <span id="decision-win-prob" class="stat-tile-val mono-number text-bull">--%</span>
+                            </div>
+                            <div class="cognition-stat-tile">
+                                <span class="stat-tile-label">Expected Value</span>
+                                <span id="decision-ev" class="stat-tile-val mono-number text-cyan">--</span>
+                            </div>
+                            <div class="cognition-stat-tile">
+                                <span class="stat-tile-label">Risk/Reward</span>
+                                <span id="cognition-rr" class="stat-tile-val mono-number">--</span>
+                            </div>
+                            <div class="cognition-stat-tile">
+                                <span class="stat-tile-label">Strategy Edge</span>
+                                <span id="cognition-strat" class="stat-tile-val mono-number" style="font-size:9.5px; color:#ffffff;">--</span>
+                            </div>
+                        </div>
+
+                        <!-- Adversarial Penalty & Invalidation Multiplier Gauges -->
+                        <div class="devil-gauges-grid">
+                            <div class="devil-gauge-card">
+                                <div style="display:flex; justify-content:space-between; align-items:center;">
+                                    <span class="gauge-lbl">Devil's Penalty</span>
+                                    <span id="devil-penalty-score" class="gauge-val">0.0 / 50.0</span>
+                                </div>
+                                <div class="gauge-bar-track">
+                                    <div id="devil-penalty-fill" class="gauge-bar-fill" style="width:0%;"></div>
+                                </div>
+                            </div>
+                            <div class="devil-gauge-card">
+                                <div style="display:flex; justify-content:space-between; align-items:center;">
+                                    <span class="gauge-lbl">Invalidation Multiplier</span>
+                                    <span id="devil-risk-coeff" class="gauge-val text-cyan">1.00x</span>
+                                </div>
+                                <div class="gauge-bar-track">
+                                    <div id="devil-risk-fill" class="gauge-bar-fill" style="width:100%; background:linear-gradient(90deg, #38bdf8, #00f59b);"></div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 14-Point Quality Gate Checks Grid -->
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-top:4px; margin-bottom:3px;">
+                            <span style="font-size:8.5px; font-weight:800; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.06em;">14-Point Quality Gate Matrix</span>
+                            <span id="gate-pass-count-tag" style="font-family:var(--font-mono); font-size:8.5px; font-weight:700; color:var(--accent-cyan);">-- / 14</span>
+                        </div>
+                        <div class="decision-gate-summary">
+                            <div id="gate-checks-list">
+                                <!-- Rendered dynamically by terminal.js -->
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- SECTION 2: DECISION RATIONALE -->
+                    <div id="decision-rationale-card" class="section-card">
+                        <div id="decision-rationale-header" class="section-card-header amber">
+                            <span id="decision-rationale-title">🔍 Decision Rationale</span>
+                            <span id="decision-rationale-badge" class="pill">WAITING</span>
+                        </div>
+                        <div id="decision-rationale-content" class="rationale-box">
+                            <div class="rationale-item wait">
+                                <span class="icon">⏳</span>
+                                <span>Awaiting initial market analysis cycle...</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- SECTION 3: WHAT WOULD CHANGE MY MIND -->
+                    <div class="invalidation-box">
+                        <div class="invalidation-box-title">
+                            <span>✕</span> WHAT WOULD CHANGE MY MIND (INVALIDATION)
+                        </div>
+                        <div id="invalidation-trigger-text" class="invalidation-box-content">
+                            • H1 candle close below demand equilibrium.<br>
+                            • Bearish displacement breaking recent swing low.
+                        </div>
+                    </div>
+
+                    <!-- SECTION 4: THREAT ASSESSMENT VECTORS -->
+                    <div class="section-card">
+                        <div class="section-card-header amber">
+                            <span>⚠️ Threat Assessment Vectors</span>
+                        </div>
+                        <div id="threat-vector-list" class="threat-vector-list">
+                            <!-- Rendered dynamically by terminal.js -->
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </aside>
+
+    </main>
+
+    <!-- ==========================================================================
+         FLOATING & DRAGGABLE HM AI 4.0 COPILOT WINDOW
+         ========================================================================== -->
+    <div id="copilot-window" class="copilot-window floating" style="display:none;">
+        <div id="copilot-header" class="copilot-header">
+            <div class="copilot-header-title">
+                <span>🤖</span>
+                <span>HM AI 4.0 Copilot Intelligence</span>
+            </div>
+            <div class="copilot-header-actions">
+                <button class="copilot-action-btn" title="Clear Context" onclick="clearCopilotChat()">🗑️</button>
+                <button class="copilot-action-btn" title="Export Chat (.md)" onclick="exportCopilotChat()">📥</button>
+                <button class="copilot-action-btn" title="Minimize" onclick="toggleCopilotMinimize(true)">−</button>
+                <button class="copilot-action-btn" title="Close" onclick="toggleCopilotModal(false)">✕</button>
+            </div>
+        </div>
+        <div class="copilot-body">
+            <div id="copilot-messages" class="copilot-messages">
+                <div class="copilot-bubble">
+                    🤖 <b>HM AI 4.0:</b> Standing by. Ask me about real-time market regimes, economic news shocks, or click any opportunity in the Radar to trade manually.
+                </div>
+            </div>
+            <div class="copilot-input-bar">
+                <input id="copilot-input" class="copilot-input" placeholder="Ask HM AI (e.g. Analyze Gold pullback setup)..." onkeydown="handleChatKey(event)">
+                <button class="btn-terminal" style="padding:4px 10px;" onclick="sendChatMessage()">Send</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Floating Chat Head FAB -->
+    <div id="copilot-fab" class="copilot-fab" title="Open HM AI Copilot" onclick="toggleCopilotMinimize(false)">
+        🤖
+    </div>
+
+    <!-- ==========================================================================
+         GLOBAL SPOTLIGHT COMMAND PALETTE (CTRL+K / CMD+K)
+         ========================================================================== -->
+    <div id="command-palette-overlay" class="command-palette-overlay" style="display:none;" onclick="if(event.target === this) toggleCommandPalette(false)">
+        <div class="command-palette-modal">
+            <div class="command-palette-search">
+                <span class="command-palette-icon">⚡</span>
+                <input id="command-palette-input" class="command-palette-input" placeholder="Type a command (e.g. /buy, /sell, /close-all, /news, /safe)..." autocomplete="off" spellcheck="false">
+            </div>
+            <div id="command-palette-results" class="command-palette-results">
+                <!-- Rendered by terminal.js -->
+            </div>
+        </div>
+    </div>
+
+    <!-- ==========================================================================
+         MACRO NEWS INTELLIGENCE MODAL (CLICK TO VIEW DEEP EVENT SHOCK DETAILS)
+         ========================================================================== -->
+    <div id="macro-news-modal" class="macro-news-modal-overlay" style="display:none;" onclick="if(event.target === this) closeNewsDetailModal()">
+        <div class="macro-news-modal-content">
+            <div class="macro-news-modal-header">
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <span id="mn-modal-curr" class="news-currency-tag" style="font-size:11px; padding:2px 8px;">USD</span>
+                    <span id="mn-modal-impact" class="news-impact-high" style="font-size:10px;">HIGH</span>
+                    <span id="mn-modal-status" class="news-status-pill news-status-live" style="font-size:10px;">🔴 LIVE NOW</span>
+                </div>
+                <button class="copilot-action-btn" title="Close" onclick="closeNewsDetailModal()">✕</button>
+            </div>
+            
+            <div id="mn-modal-title" class="macro-news-modal-title">Macroeconomic Event</div>
+            <div id="mn-modal-category" class="macro-news-modal-category">Economic Activity</div>
+
+            <!-- Indian Standard Time & UTC Timing Ribbon -->
+            <div class="macro-news-timing-ribbon">
+                <div class="macro-timing-col">
+                    <span class="macro-timing-label">🇮🇳 Indian Standard Time (IST)</span>
+                    <span id="mn-modal-time-ist" class="macro-timing-val">Sat Aug 22, 10:50 PM IST</span>
+                </div>
+                <div class="macro-timing-col">
+                    <span class="macro-timing-label">🌐 UTC Reference Time</span>
+                    <span id="mn-modal-time-utc" class="macro-timing-val">Aug 21, 17:20 UTC</span>
+                </div>
+                <div class="macro-timing-col">
+                    <span class="macro-timing-label">⏳ Countdown / Status</span>
+                    <span id="mn-modal-diff" class="macro-timing-val" style="color:var(--accent-cyan);">⚡ LATEST RELEASE</span>
+                </div>
+            </div>
+
+            <!-- Metrics Matrix Grid (Actual vs Forecast vs Previous vs Deviation) -->
+            <div class="macro-news-metrics-grid">
+                <div class="macro-metric-card">
+                    <div class="macro-metric-title">Actual Outcome</div>
+                    <div id="mn-modal-actual" class="macro-metric-val actual" style="color:var(--accent-cyan);">0.2%</div>
+                </div>
+                <div class="macro-metric-card">
+                    <div class="macro-metric-title">Consensus Forecast</div>
+                    <div id="mn-modal-forecast" class="macro-metric-val">0.2%</div>
+                </div>
+                <div class="macro-metric-card">
+                    <div class="macro-metric-title">Previous Release</div>
+                    <div id="mn-modal-previous" class="macro-metric-val">0.2%</div>
+                </div>
+                <div class="macro-metric-card">
+                    <div class="macro-metric-title">Surprise / Deviation</div>
+                    <div id="mn-modal-deviation" class="macro-metric-val" style="font-size:11px; color:var(--neon-bull);">In Line</div>
+                </div>
+            </div>
+
+            <!-- AI Directional & Shock Breakdown -->
+            <div class="macro-news-section-box">
+                <div class="macro-section-header">🤖 HM AI Directional Bias & Shock Forecast</div>
+                <div id="mn-modal-bias" class="macro-bias-banner">BULLISH USD / BEARISH XAUUSD</div>
+                <div id="mn-modal-impact-desc" class="macro-section-body" style="margin-top:6px;">Impact analysis...</div>
+            </div>
+
+            <!-- Indicator Educational / Institutional Overview -->
+            <div class="macro-news-section-box">
+                <div class="macro-section-header">📖 Institutional Indicator Overview</div>
+                <div id="mn-modal-desc" class="macro-section-body">Indicator overview description...</div>
+            </div>
+
+            <!-- Affected Trading Pairs -->
+            <div class="macro-news-section-box">
+                <div class="macro-section-header">🎯 Impacted Execution Instruments</div>
+                <div id="mn-modal-pairs" class="macro-pairs-row">
+                    <!-- Populated by JS -->
+                </div>
+            </div>
+
+            <!-- Risk & Slippage Advisory -->
+            <div id="mn-modal-warning" class="macro-warning-box">
+                ⚠️ Spread expansion active during high-impact news window.
+            </div>
+        </div>
+    </div>
+
+    <!-- ==========================================================================
+         REMOTE ACCESS AUTHENTICATION LOGIN MODAL OVERLAY
+         ========================================================================== -->
+    <div id="remote-login-modal" class="macro-news-modal-overlay" style="display:none; z-index:99999; background:rgba(4,6,12,0.94); backdrop-filter:blur(20px);">
+        <div class="macro-news-modal-content" style="max-width:390px; padding:28px 24px; text-align:center; border:1px solid rgba(56,189,248,0.4); border-radius:14px; box-shadow:0 20px 60px rgba(0,0,0,0.95);">
+            <div style="font-size:36px; margin-bottom:8px;">🔒</div>
+            <h2 style="color:#ffffff; font-size:18px; font-weight:800; letter-spacing:0.05em; margin-bottom:4px;">REMOTE ACCESS TERMINAL</h2>
+            <p style="color:var(--text-dim); font-size:11px; margin-bottom:18px; text-transform:uppercase; letter-spacing:0.06em;">Secure Authentication — HM AI 4.0 Desk</p>
+            <form id="remote-login-form" onsubmit="handleRemoteLogin(event)" style="display:flex; flex-direction:column; gap:14px;">
+                <div style="text-align:left;">
+                    <span class="desk-field-lbl" style="font-size:10px; font-weight:700; color:var(--accent-cyan); text-transform:uppercase;">Username</span>
+                    <input id="login-username" class="desk-input" type="text" value="" placeholder="Enter username (e.g. admin)" required autocomplete="username" style="width:100%; box-sizing:border-box; margin-top:4px; font-size:12px; padding:9px 12px;">
+                </div>
+                <div style="text-align:left; position:relative;">
+                    <span class="desk-field-lbl" style="font-size:10px; font-weight:700; color:var(--accent-cyan); text-transform:uppercase;">Password</span>
+                    <div style="position:relative; display:flex; align-items:center;">
+                        <input id="login-password" class="desk-input" type="password" value="" placeholder="Enter password" required autocomplete="current-password" style="width:100%; box-sizing:border-box; margin-top:4px; font-size:12px; padding:9px 36px 9px 12px;">
+                        <button type="button" onclick="window.toggleRemotePasswordVisibility()" style="position:absolute; right:8px; top:8px; background:none; border:none; color:var(--text-dim); cursor:pointer; font-size:14px;" title="Toggle Password Visibility">👁️</button>
+                    </div>
+                </div>
+
+                <div style="display:flex; align-items:center; justify-content:space-between; margin-top:-4px; font-size:11px;">
+                    <label style="display:flex; align-items:center; gap:6px; color:var(--text-secondary); cursor:pointer; user-select:none;">
+                        <input type="checkbox" id="login-remember-me" checked style="accent-color:var(--accent-cyan); cursor:pointer;">
+                        <span>Remember this device (30 days)</span>
+                    </label>
+                </div>
+
+                <div id="login-error-msg" style="color:var(--neon-bear); font-size:11px; font-weight:600; display:none; margin-top:-2px; background:rgba(255,59,92,0.1); border:1px solid rgba(255,59,92,0.3); border-radius:5px; padding:6px 10px;">Invalid credentials</div>
+
+                <button type="submit" class="btn-desk-buy" style="margin-top:4px; padding:11px; font-size:12px; font-weight:800; letter-spacing:0.06em; background:linear-gradient(135deg, #00f59b, #00b874); border:none; border-radius:6px; cursor:pointer; box-shadow:0 4px 16px rgba(0,245,155,0.3);">
+                    UNLOCK REMOTE TERMINAL ➔
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Universal Authentication Module & Terminal Controller Script -->
+    <script src="/static/js/auth.js?v=20260907_v1"></script>
+    <script src="/static/js/terminal.js?v=20260907_v1"></script>
+</body>
+</html>
+
