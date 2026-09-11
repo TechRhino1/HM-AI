@@ -1,6 +1,6 @@
-# JARVIS AI 4.0 — Institutional Quantitative MT5 Trading System
+# JARVIS AI 5.0 — Institutional Quantitative MT5 Trading System
 
-An institutional-grade, multi-factor adaptive algorithmic trading architecture built for MetaTrader 5 (MT5). The system integrates Smart Money Concepts (ICT/SMC), Wyckoff accumulation/distribution frameworks, Minervini Trend Templates, Volatility Contraction Patterns (VCP), and dynamic Fractional Kelly risk management to achieve high-expectancy trade execution.
+An institutional-grade, multi-factor adaptive algorithmic trading architecture built for MetaTrader 5 (MT5). The system integrates Smart Money Concepts (ICT/SMC), Wyckoff accumulation/distribution frameworks, Minervini Trend Templates, Volatility Contraction Patterns (VCP), dynamic Fractional Kelly risk management, and a **calibrated win-rate pipeline** to achieve high-expectancy trade execution.
 
 ---
 
@@ -29,7 +29,7 @@ An institutional-grade, multi-factor adaptive algorithmic trading architecture b
 - **Hard Confluence Gate:** Enforces institutional quality hurdles (Score >= 65/100 for Forex, >= 55/100 for Commodities & Crypto).
 
 ### 5. Professional Trade Management & Execution Protocol
-- **Asset-Adaptive Partial Exits:** 
+- **Asset-Adaptive Partial Exits:**
   - Takes 33% profit at 1.5R (Forex) or 1.8R (Gold/Crypto).
   - Automatically moves Stop Loss to true Breakeven (0.0R) to eliminate downside risk on remaining position.
 - **Dynamic ATR Chandelier Trailing Stop:** Trails remaining runner positions with a 1.5x ATR buffer from recent swing extremes, allowing macro trends to run without premature suffocation.
@@ -50,22 +50,43 @@ An institutional-grade, multi-factor adaptive algorithmic trading architecture b
 - **Retracement & Level Routing:** Automatically routes setups to `BUY_LIMIT` or `SELL_LIMIT` pending orders when entry price requires retracement to key structural levels (FVG, Order Block, liquidity sweeps).
 - **Direction & Price Sanity Checks:** Validates limit price geometry (`BUY_LIMIT` < live bid, `SELL_LIMIT` > live ask) and falls back safely to market orders if price has already crossed the level.
 - **Watchdog Stale Cleanup:** Automatically cancels unfilled pending orders exceeding configurable TTL (default 30 mins) during background orchestrator ticks.
-- **Web Terminal UI & API:** Integrated `GET /api/pending_orders` and `POST /api/action/cancel_pending_order` endpoints with dedicated "⏳ Pending Orders" table tab in the Web Terminal.
+- **Web Terminal UI & API:** Integrated `GET /api/pending_orders` and `POST /api/action/cancel_pending_order` endpoints with dedicated "Pending Orders" table tab in the Web Terminal.
 
 ### 9. Secure Cookie Authentication Model
 - **HttpOnly & SameSite=Strict:** Authentication tokens are issued exclusively via secure `HttpOnly`, `SameSite=Strict` cookies, preventing token theft from client-side scripts.
 - **Zero LocalStorage Tokens:** Eliminates client-side JWT token storage in `localStorage` / `sessionStorage`.
 
 ### 10. Asset-Class Specific Strategy Specialization
-- **Commodities (XAUUSD/Gold):** High-momentum trend following and break-of-structure expansion with structure-anchored stops.
-- **Forex Majors (EURUSD, GBPUSD, USDJPY):** Range mean reversion (Bollinger Band 20, 2.0 SD with ADX < 22) and killzone liquidity sweep reversals.
-- **Crypto (BTCUSD):** High-volatility swing momentum and multi-timeframe FVG pullbacks.
+- **Commodities (XAUUSD/Gold, XAGUSD/Silver):** High-momentum trend following and break-of-structure expansion with structure-anchored stops.
+- **Forex Majors (EURUSD, GBPUSD, USDJPY, AUDUSD, USDCAD, USDCHF, NZDUSD):** Range mean reversion (Bollinger Band 20, 2.0 SD with ADX < 22) and killzone liquidity sweep reversals.
+- **Crypto (BTCUSD, ETHUSD, SOLUSD):** High-volatility swing momentum and multi-timeframe FVG pullbacks.
+- **Indices (US30, NAS100, GER40, UK100):** Breakout momentum and session-driven volatility capture.
+
+---
+
+## 🎯 New in v5.0 — Calibrated Win-Rate Pipeline
+
+### Four-Stage Split Architecture
+Win rate is treated as a **constrained objective**: maximise expectancy subject to `win_rate >= target`.
+
+| Stage | Module | Cost | Output |
+|---|---|---|---|
+| 1. Signal scan | `jarvis/backtesting/signal_scan.py` | ~30 s/symbol | Every directional candidate the live pipeline considered |
+| 2. Trade simulation | `jarvis/backtesting/trade_simulator.py` | ~1–2 s/geometry | Outcome in R for one exit geometry |
+| 3. Calibration | `jarvis/intelligence/winrate_targeting.py` | seconds | Per-symbol profile (walk-forward) |
+| 4. Entry selection | `jarvis/execution/entry_policy.py` | — | Allow / deny at runtime |
+
+### Key Pipeline Features
+- **Isotonic Calibration (PAV):** Maps confluence scores to realised win probabilities, making scores interpretable rather than arbitrary indices.
+- **Walk-Forward Cross-Validation:** `PurgedKFold` with embargo ensures geometry selection happens only on training folds, reported honestly on purged out-of-sample data.
+- **Regime-Edge Policy:** Learned per-symbol regime enable/disable decisions, fitted on training folds only to prevent test-set leakage.
+- **Hermetic Backtesting:** All persistent-state reads/writes are disabled during simulation (`jarvis.config.runtime`), guaranteeing reproducible and deterministic results.
 
 ---
 
 ## 📐 Architecture Diagram
 
-`
+```
                 RAW MARKET DATA (MT5 Feed / Tick & Bar OHLCV)
                                      │
                                      ▼
@@ -93,60 +114,90 @@ An institutional-grade, multi-factor adaptive algorithmic trading architecture b
                                      ▼
                      EXECUTION & ACTIVE TRADE MANAGEMENT
               (Partials at 1.5R/1.8R, True BE, ATR Trail, 24-Bar Time Stop)
-`
+```
 
 ---
 
 ## 🛠️ Project Structure
 
-`
-HM-AI-2026/
+```
+HM-AI/
 ├── jarvis/
 │   ├── analysts/               # Specialized AI analyst agents (Structure, Flow, Momentum, etc.)
-│   ├── backtesting/            # Event-driven backtesting engine & performance analytics
+│   ├── backtesting/            # Event-driven backtesting engine, signal scanner & trade simulator
+│   ├── config/                 # Runtime execution mode (hermetic backtesting)
 │   ├── core/                   # Configuration, symbol registry, and regime classifiers
 │   ├── data/                   # Data schemas, database models, and symbol resolvers
-│   ├── intelligence/           # Decision engine, master confluence, mean reversion, strategy selector
+│   ├── execution/              # Entry policy, exit policy, limit order routing
+│   ├── intelligence/           # Decision engine, meta-labeling, win-rate targeting, self-learning
+│   ├── learning/               # Online ML, strategy bandit, walk-forward CV, sample weights
 │   ├── market/                 # FVG engine, session engine, market context, liquidity sweeps
-│   └── risk/                   # Loss cooldown manager, circuit breakers, position sizing
-├── tests/                      # Automated pytest unit and integration test suite
-├── run_multiasset_6m_backtest.py # Real 6-month MT5 historical backtest benchmark suite
+│   └── risk/                   # Loss cooldown manager, circuit breakers, HRP allocation, trade guard
+├── tests/                      # Automated pytest unit and integration test suite (259 tests)
+├── tools/                      # CLI utilities: calibration, signal scan, backtest runners
+├── reports/                    # Generated backtest reports and performance analytics
+├── run_multiasset_6m_backtest.py   # Real 6-month MT5 historical backtest benchmark suite
 └── README.md                   # System documentation
-`
+```
 
 ---
 
 ## 🚀 Installation & Usage
 
 ### 1. Environment Setup
-`ash
+```bash
 # Clone the repository
-git clone https://github.com/TechRhino1/HM-AI_2026.git
-cd HM-AI-2026
+git clone https://github.com/TechRhino1/HM-AI.git
+cd HM-AI
 
 # Install dependencies
 pip install -r requirements.txt
-`
+```
 
 ### 2. Run Test Suite
-Verify that all 109 system tests pass:
-` ash
+Verify that all 259 system tests pass:
+```bash
 python -m pytest tests/ -v
-`
+```
 
-### 3. Run Real MT5 1-Year Multi-Asset Benchmark (43,800 H1 Bars)
+### 3. Calibrate Win-Rate Profiles
+Run the full four-stage calibration pipeline across all symbols:
+```bash
+python tools/calibrate_winrate.py --symbols ALL --target-wr 0.75
+```
+
+### 4. Run Real MT5 Backtests
 Ensure your MetaTrader 5 terminal is open and logged into your broker:
 ```bash
-# Run comprehensive 1-year benchmark across 5 core assets (8,760 H1 bars each)
-python -u run_comprehensive_1y_mt5_backtest.py
+# Run 3-month calibrated benchmark across 16 core assets
+python tools/run_3month_backtest.py
 
 # Or run fast 6-month benchmark
-python -u run_multiasset_6m_backtest.py
+python run_multiasset_6m_backtest.py
+
+# Or run comprehensive 1-year benchmark
+python run_1year_backtest.py
 ```
 
 ---
 
-## 📊 1-Year Multi-Asset Historical Benchmarks (Real MT5 Data: 43,800 H1 Bars)
+## 📊 Backtest Benchmarks (Real MT5 Data)
+
+### 3-Month Calibrated Profile (16 Symbols, 698 Trades)
+
+| Metric | Value |
+| :--- | :--- |
+| **Historical Period** | 3 Months (Real MT5 H1) |
+| **Symbols Traded** | 16 (Forex, Crypto, Commodities, Indices) |
+| **Total Trades** | 698 |
+| **Portfolio Win Rate** | 71.78% |
+| **Expectancy** | -0.036 R per trade |
+| **Payoff Ratio** | 0.341 |
+| **Max Drawdown** | 12.63% |
+| **Sharpe / Sortino** | -0.56 / -0.99 |
+| **Win-Rate Target Met** | 7/16 symbols out-of-sample |
+
+### 1-Year Multi-Asset Historical Benchmarks (43,800 H1 Bars)
 
 | Metric | Baseline (Initial) | Architecture V2 (Staggered 2.0R) | Architecture V3 (Multi-Tier Ratchet) |
 | :--- | :--- | :--- | :--- |
@@ -158,3 +209,28 @@ python -u run_multiasset_6m_backtest.py
 | **Catastrophic SL Exits**| 249 (59.6%) | 185 (70.9%) | **97 (47.1%)** (-61% loss events) |
 | **Top Edge Strategy** | — | — | **`LIQUIDITY_SWEEP_REVERSAL`** (PF 1.07, +$15.65) |
 | **Top Edge Regime** | — | — | **`RANGE`** (PF 1.92, 50.0% Win Rate) |
+
+---
+
+## 🔒 Hermetic Backtesting Guarantee
+
+All persistent-state reads and writes on the decision path are disabled during simulation via `jarvis.config.runtime`:
+
+- `RealtimeOptimizer` reads no live PnL history
+- `OnlineMLPredictor` does not load or save model weights
+- `SelfLearningEngine` starts from neutral priors
+- `MetaLabeler` remains neutral (untrained)
+- `ConfidenceCalibrationEngine` does not influence scores
+
+This guarantees **reproducible, deterministic backtests** that measure the strategy as specified — not as mutated by unrelated live trading history.
+
+---
+
+## 📚 Documentation
+
+- **[Architecture Reference](docs/ARCHITECTURE.md)** — Deep dive into system design, module boundaries, and invariants
+- **[Project Documentation](JARVIS_COMPLETE_PROJECT_DOCUMENTATION.txt)** — Complete feature and module documentation
+
+---
+
+*Built with discipline. Backtested with honesty. Traded with edge.*

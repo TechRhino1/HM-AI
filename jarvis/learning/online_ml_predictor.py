@@ -543,6 +543,11 @@ class OnlineMLPredictor:
             self._save_model_internal()
             
     def _save_model_internal(self):
+        from jarvis.config.runtime import is_offline
+
+        if is_offline():
+            # A backtest must never mutate the live model weights.
+            return
         try:
             data = {
                 "weights": self.weights.tolist(),
@@ -557,6 +562,15 @@ class OnlineMLPredictor:
             pass
 
     def _load_model(self):
+        from jarvis.config.runtime import is_offline
+
+        if is_offline():
+            # Start from the neutral prior so a backtest is deterministic and
+            # does not inherit weights trained on live trades.
+            with self._lock:
+                self.weights = self.DEFAULT_WEIGHTS.copy()
+                self._feature_importance = np.abs(self.weights).copy()
+            return
         with self._lock:
             if os.path.exists(self.model_file):
                 try:

@@ -38,6 +38,14 @@ class RealtimeOptimizer:
             conn.close()
 
     def get_adjustments(self, symbol: str, regime: str = "GLOBAL") -> Dict[str, float]:
+        # In a backtest the optimiser must be inert. Reading the live trade DB
+        # here let *today's* realised results change gate thresholds for bars
+        # dated months ago, and made repeated runs disagree with each other.
+        from jarvis.config.runtime import is_offline
+
+        if is_offline():
+            return {"win_p_delta": 0.0, "score_delta": 0.0, "rr_delta": 0.0}
+
         key = f"{symbol}_{regime}"
         now = time.time()
         with self._lock:

@@ -39,7 +39,9 @@ class HierarchicalRiskParityAllocator:
             return {}
 
         # 1. Inverse variance weights as baseline
-        variances = np.diag(cov)
+        # ``np.diag`` returns a read-only view in modern numpy, so the floor
+        # assignment below raised "assignment destination is read-only".
+        variances = np.diag(cov).copy()
         variances[variances <= 0] = 1e-6
         inv_var = 1.0 / variances
         weights = inv_var / np.sum(inv_var)

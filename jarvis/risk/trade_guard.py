@@ -2,7 +2,7 @@
 JARVIS AI 3.0 — Autonomous Trade Quality Guard.
 Executes hard independent pre-flight checks before approving any trade for execution.
 """
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 from datetime import datetime, timezone
 from jarvis.data.schemas import DecisionObject, AccountSnapshot, PositionSnapshot
 from jarvis.data.symbol_registry import resolve
@@ -14,12 +14,27 @@ class TradeGuard:
         account: AccountSnapshot,
         positions: List[PositionSnapshot],
         max_spread_pips: float = 35.0,
-        current_spread_pips: float = 2.0
+        current_spread_pips: float = 2.0,
+        entry_authorized_override: Optional[bool] = None,
     ) -> Dict[str, Any]:
+        """Validate order geometry and spread before execution.
+
+        ``entry_authorized_override`` exists because entry selection has two
+        legitimate authorities. The legacy path is the 29-check gate stack, whose
+        verdict lands in ``decision.decision``. The calibrated path is
+        ``jarvis.execution.entry_policy``, which deliberately trades setups the
+        legacy stack rejected — so checking ``decision.decision != "EXECUTE"``
+        here silently reimposed the legacy veto and blocked every calibrated
+        trade. Passing an explicit verdict keeps this guard focused on what it
+        actually owns: geometry, spread and account permissions.
+        """
         reasons = []
 
-        if decision.decision != "EXECUTE":
-            reasons.append(f"AI Decision status is '{decision.decision}' (Requires 'EXECUTE').")
+        if entry_authorized_override is None:
+            if decision.decision != "EXECUTE":
+                reasons.append(f"AI Decision status is '{decision.decision}' (Requires 'EXECUTE').")
+        elif not entry_authorized_override:
+            reasons.append("Entry not authorized by the calibrated entry policy.")
 
         if not account.trade_allowed:
             reasons.append("Account trade permissions disabled by broker.")
@@ -31,7 +46,16 @@ class TradeGuard:
         
         # Fix #10: Unified Asian session definition — 01:00 to 04:59 UTC
         # (Consistent with orchestrator.py)
-        current_hour = datetime.now(timezone.utc).hour
+        #
+        # The hour must come from the BAR being evaluated, not from the wall
+        # clock. Using datetime.now() made a backtest's spread allowance depend
+        # on when the backtest was run — a reproducibility defect and, since the
+        # allowance differs between sessions, a form of look-ahead.
+        _bar_ts = getattr(getattr(decision, "context", None), "timestamp", None)
+        if _bar_ts is not None and hasattr(_bar_ts, "hour"):
+            current_hour = int(_bar_ts.hour)
+        else:
+            current_hour = datetime.now(timezone.utc).hour
         is_asian_session = 1 <= current_hour < 5
         
         # Fix #5b: Use correct attribute for crypto detection

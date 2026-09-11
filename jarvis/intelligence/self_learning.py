@@ -17,6 +17,13 @@ class SelfLearningEngine:
         self._lock = threading.Lock()
 
     def get_regime_multiplier(self, regime: str, lookback: int = 50) -> float:
+        # Hermetic in backtests: reading realised-trade statistics from the live
+        # DB made historical simulations depend on unrelated live results.
+        from jarvis.config.runtime import is_offline
+
+        if is_offline():
+            return 1.0
+
         now = time.time()
         cache_key = f"{regime}_{lookback}"
         with self._lock:
@@ -69,6 +76,18 @@ class SelfLearningEngine:
         Queries historical closed trades with similar market conditions (Symbol + Regime + Session)
         to yield empirical win rate, average EV, and sample size for evidence-based decision calibration.
         """
+        # Hermetic in backtests: return the neutral prior instead of live history.
+        from jarvis.config.runtime import is_offline
+
+        if is_offline():
+            return {
+                "sample_size": 0,
+                "avg_ev": 0.0,
+                "win_rate": 0.50,
+                "conviction_multiplier": 1.0,
+                "empirical_edge": False,
+            }
+
         now = time.time()
         cache_key = f"pattern_{symbol}_{regime}_{session_name}_{int(is_prime)}_{lookback}"
         with self._lock:

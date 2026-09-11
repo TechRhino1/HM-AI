@@ -1,0 +1,145 @@
+"""The symbol registry must agree with the broker's own metadata.
+
+Two sources of truth for the same facts is how eight of sixteen symbols ended up
+producing zero trades for an entire quarter. ``GER40``, ``UK100`` and ``XAGUSD``
+were absent from the registry, so ``resolve()`` returned the generic FX fallback
+(``contract_size=100_000``, ``pip_size=0.0001``, ``max_spread_pips=5.0``). For an
+index whose real spread is ~2 index points, an FX-sized spread cap of 5 "pips"
+where a pip is 0.0001 rejects every bar — silently, with no error.
+
+These tests fail the moment the registry drifts from the fetched manifests.
+"""
+from __future__ import annotations
+
+import glob
+import json
+import os
+
+import pytest
+
+from jarvis.data.symbol_registry import (
+    resolve,
+    registry_mismatches,
+    get_max_spread,
+    get_pip_size,
+)
+
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+MANIFEST_GLOB = os.path.join(REPO_ROOT, "data", "market", "real", "*", "*.manifest.json")
+
+
+def _manifests():
+    out = []
+    for path in sorted(glob.glob(MANIFEST_GLOB)):
+        with open(path, encoding="utf-8") as fh:
+            payload = json.load(fh)
+        if payload.get("meta"):
+            out.append((payload["symbol"], payload["meta"]))
+    return out
+
+
+_MANIFESTS = _manifests()
+
+
+@pytest.mark.skipif(not _MANIFESTS, reason="no fetched broker manifests present")
+@pytest.mark.parametrize("symbol,meta", _MANIFESTS, ids=[s for s, _ in _MANIFESTS])
+def test_registry_matches_broker_manifest(symbol, meta):
+    mismatches = registry_mismatches(meta, symbol)
+    assert not mismatches, (
+        f"{symbol}: registry disagrees with the broker manifest on {mismatches}. "
+        f"Fix jarvis/data/symbol_registry.py - a wrong spec does not raise, it just "
+        f"silently makes the symbol untradeable."
+    )
+
+
+@pytest.mark.skipif(not _MANIFESTS, reason="no fetched broker manifests present")
+@pytest.mark.parametrize("symbol,meta", _MANIFESTS, ids=[s for s, _ in _MANIFESTS])
+def test_spread_cap_admits_the_instruments_own_typical_spread(symbol, meta):
+    """A cap below the instrument's typical spread is a prohibition, not a filter.
+
+    This is the exact defect that produced zero trades: the cap must leave room
+    for the spread the instrument actually quotes, otherwise 100% of bars fail
+    the gate and the strategy is blamed for a units error.
+
+    The spread is measured from the **data itself**, not from the manifest's
+    ``typical_spread_pips`` field — that field is unreliable (it claims ETHUSD
+    trades at 190 while the fetched bars quote 345).
+    """
+    import pandas as pd
+
+    data = glob.glob(
+        os.path.join(REPO_ROOT, "data", "market", "real", symbol, "*.parquet")
+    )
+    if not data:
+        pytest.skip("no fetched bars for this symbol")
+
+    spec = resolve(symbol)
+    df = pd.read_parquet(data[0])
+    if "spread" not in df.columns:
+        pytest.skip("no spread column in the fetched bars")
+
+    # Convert MT5 integer points into the registry's pip unit.
+    point = 10.0 ** (-int(meta.get("digits", spec.digits)))
+    spreads = df["spread"].astype(float) * point / spec.pip_size
+    p95 = float(spreads.quantile(0.95))
+
+    assert spec.max_spread_pips >= p95, (
+        f"{symbol}: max_spread_pips={spec.max_spread_pips} is below the 95th-percentile "
+        f"spread actually quoted ({p95:.2f} in {spec.pip_size} units) - the gate would "
+        f"reject a large share of normal bars"
+    )
+
+
+def test_known_index_specs_are_not_the_fx_fallback():
+    """Guard the specific symbols that were missing."""
+    for sym, digits, contract in (
+        ("GER40", 2, 1.0),
+        ("UK100", 2, 1.0),
+        ("NAS100", 2, 1.0),
+        ("US30", 2, 1.0),
+    ):
+        spec = resolve(sym)
+        assert spec.asset_class == "INDEX", f"{sym} should be an INDEX"
+        assert spec.digits == digits, f"{sym} digits={spec.digits}, expected {digits}"
+        assert spec.contract_size == contract, f"{sym} contract={spec.contract_size}"
+        # The FX fallback signature — must never apply to an index.
+        assert spec.pip_size != 0.0001, f"{sym} still has the FX fallback pip size"
+        assert spec.contract_size != 100_000.0, f"{sym} still has the FX fallback contract"
+
+
+def test_silver_is_a_commodity_not_an_fx_pair():
+    spec = resolve("XAGUSD")
+    assert spec.asset_class == "COMMODITY"
+    assert spec.digits == 3
+    assert spec.contract_size == 5000.0
+
+
+def test_broker_aliases_resolve_to_the_canonical_spec():
+    for alias, canonical in (
+        ("GER40Cash#", "GER40"),
+        ("DE40", "GER40"),
+        ("DAX", "GER40"),
+        ("UK100Cash#", "UK100"),
+        ("FTSE100", "UK100"),
+        ("US100Cash#", "NAS100"),
+        ("SILVER.i#", "XAGUSD"),
+        ("GOLD", "XAUUSD"),
+        ("US30Cash#", "US30"),
+    ):
+        assert resolve(alias).canonical == canonical, f"{alias} -> {resolve(alias).canonical}"
+
+
+def test_unknown_symbol_logs_an_error_and_still_returns_a_spec(caplog):
+    """The fallback must be loud, not silent."""
+    import logging
+
+    with caplog.at_level(logging.ERROR, logger="JARVIS_SymbolRegistry"):
+        spec = resolve("TOTALLY_UNKNOWN_INSTRUMENT_XYZ")
+    assert spec is not None
+    assert any("NOT registered" in rec.message for rec in caplog.records)
+
+
+def test_helpers_agree_with_resolve():
+    for sym in ("GER40", "XAUUSD", "EURUSD", "XAGUSD"):
+        assert get_pip_size(sym) == resolve(sym).pip_size
+        assert get_max_spread(sym) == resolve(sym).max_spread_pips

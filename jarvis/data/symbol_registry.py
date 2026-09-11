@@ -3,8 +3,11 @@ JARVIS AI 4.0 — Centralized Symbol Metadata Registry.
 Eliminates all hardcoded "XAU", "GOLD", "JPY", "BTC" string checks scattered across 6+ files.
 Provides contract_size, pip_size, pip_value, spread multiplier, asset class, and margin info per symbol.
 """
+import logging
 from typing import Dict, Any, Optional
 from dataclasses import dataclass, field
+
+logger = logging.getLogger("JARVIS_SymbolRegistry")
 
 @dataclass(frozen=True)
 class SymbolSpec:
@@ -57,7 +60,7 @@ _REGISTRY: Dict[str, SymbolSpec] = {
     "USDCAD": SymbolSpec(
         canonical="USDCAD", asset_class="FOREX",
         contract_size=100_000.0, pip_size=0.0001, pip_value_per_lot=7.50,
-        typical_spread_pips=1.1, max_spread_pips=2.5,
+        typical_spread_pips=2.7, max_spread_pips=8.5,
         typical_atr_pct=0.4, margin_pct=0.1, digits=5
     ),
     "BTCUSD": SymbolSpec(
@@ -69,14 +72,32 @@ _REGISTRY: Dict[str, SymbolSpec] = {
     "US30": SymbolSpec(
         canonical="US30", asset_class="INDEX",
         contract_size=1.0, pip_size=1.0, pip_value_per_lot=1.0,
-        typical_spread_pips=2.5, max_spread_pips=8.0,
-        typical_atr_pct=0.9, margin_pct=0.2, digits=1
+        typical_spread_pips=3.9, max_spread_pips=12.0,
+        typical_atr_pct=0.9, margin_pct=0.2, digits=2
     ),
     "NAS100": SymbolSpec(
         canonical="NAS100", asset_class="INDEX",
         contract_size=1.0, pip_size=1.0, pip_value_per_lot=1.0,
-        typical_spread_pips=2.0, max_spread_pips=7.0,
-        typical_atr_pct=1.2, margin_pct=0.2, digits=1
+        typical_spread_pips=2.0, max_spread_pips=6.0,
+        typical_atr_pct=1.2, margin_pct=0.2, digits=2
+    ),
+    "GER40": SymbolSpec(
+        canonical="GER40", asset_class="INDEX",
+        contract_size=1.0, pip_size=1.0, pip_value_per_lot=1.0,
+        typical_spread_pips=2.0, max_spread_pips=6.0,
+        typical_atr_pct=0.9, margin_pct=0.2, digits=2
+    ),
+    "UK100": SymbolSpec(
+        canonical="UK100", asset_class="INDEX",
+        contract_size=1.0, pip_size=1.0, pip_value_per_lot=1.0,
+        typical_spread_pips=1.6, max_spread_pips=8.5,
+        typical_atr_pct=0.7, margin_pct=0.2, digits=2
+    ),
+    "XAGUSD": SymbolSpec(
+        canonical="XAGUSD", asset_class="COMMODITY",
+        contract_size=5000.0, pip_size=0.01, pip_value_per_lot=50.0,
+        typical_spread_pips=4.0, max_spread_pips=12.0,
+        typical_atr_pct=2.0, margin_pct=0.2, digits=3
     ),
     "WTI": SymbolSpec(
         canonical="WTI", asset_class="COMMODITY",
@@ -87,31 +108,31 @@ _REGISTRY: Dict[str, SymbolSpec] = {
     "ETHUSD": SymbolSpec(
         canonical="ETHUSD", asset_class="CRYPTO",
         contract_size=1.0, pip_size=0.01, pip_value_per_lot=0.01,
-        typical_spread_pips=120.0, max_spread_pips=300.0,
+        typical_spread_pips=345.0, max_spread_pips=450.0,
         typical_atr_pct=3.0, margin_pct=0.5, digits=2, is_crypto=True
     ),
     "SOLUSD": SymbolSpec(
         canonical="SOLUSD", asset_class="CRYPTO",
-        contract_size=1.0, pip_size=0.01, pip_value_per_lot=0.01,
-        typical_spread_pips=15.0, max_spread_pips=50.0,
+        contract_size=10.0, pip_size=0.01, pip_value_per_lot=0.1,
+        typical_spread_pips=35.0, max_spread_pips=105.0,
         typical_atr_pct=4.0, margin_pct=0.5, digits=2, is_crypto=True
     ),
     "US500": SymbolSpec(
         canonical="US500", asset_class="INDEX",
-        contract_size=1.0, pip_size=0.1, pip_value_per_lot=1.0,
-        typical_spread_pips=0.6, max_spread_pips=2.5,
-        typical_atr_pct=0.8, margin_pct=0.2, digits=1
+        contract_size=1.0, pip_size=1.0, pip_value_per_lot=1.0,
+        typical_spread_pips=0.6, max_spread_pips=6.0,
+        typical_atr_pct=0.8, margin_pct=0.2, digits=2
     ),
     "USDCHF": SymbolSpec(
         canonical="USDCHF", asset_class="FOREX",
         contract_size=100_000.0, pip_size=0.0001, pip_value_per_lot=10.0,
-        typical_spread_pips=1.1, max_spread_pips=2.5,
+        typical_spread_pips=2.4, max_spread_pips=4.0,
         typical_atr_pct=0.4, margin_pct=0.1, digits=5
     ),
     "NZDUSD": SymbolSpec(
         canonical="NZDUSD", asset_class="FOREX",
         contract_size=100_000.0, pip_size=0.0001, pip_value_per_lot=10.0,
-        typical_spread_pips=1.2, max_spread_pips=2.5,
+        typical_spread_pips=2.8, max_spread_pips=8.5,
         typical_atr_pct=0.5, margin_pct=0.1, digits=5
     ),
     "EURJPY": SymbolSpec(
@@ -139,9 +160,16 @@ _ALIAS_MAP: Dict[str, str] = {
     "BTCUSD#": "BTCUSD", "BTCUSD.I#": "BTCUSD", "BTCUSD.I": "BTCUSD", "BITCOIN": "BTCUSD",
     "ETHUSD#": "ETHUSD", "ETHUSD.I#": "ETHUSD", "ETHEREUM": "ETHUSD", "ETH": "ETHUSD",
     "SOLUSD#": "SOLUSD", "SOLUSD.I#": "SOLUSD", "SOLANA": "SOLUSD", "SOL": "SOLUSD",
-    "US500#": "US500", "SPX500": "US500", "SP500": "US500", "US500.I#": "US500",
-    "US30#": "US30", "DJ30": "US30", "WALLSTREET": "US30",
+    "US500#": "US500", "SPX500": "US500", "SP500": "US500", "US500.I#": "US500", "US500Cash#": "US500",
+    "US30#": "US30", "DJ30": "US30", "WALLSTREET": "US30", "US30.I#": "US30", "US30Cash#": "US30",
     "NAS100#": "NAS100", "USTECH": "NAS100", "NDX100": "NAS100", "US100": "NAS100",
+    "US100Cash#": "NAS100", "NAS100.I#": "NAS100", "NAS100Cash#": "NAS100",
+    "GER40": "GER40", "GER40#": "GER40", "GER40Cash#": "GER40", "GER40.I#": "GER40",
+    "DE40": "GER40", "DAX40": "GER40", "GER30": "GER40", "DE30": "GER40", "DAX": "GER40",
+    "UK100#": "UK100", "UK100Cash#": "UK100", "UK100.I#": "UK100",
+    "FTSE100": "UK100", "FTSE": "UK100", "UK100.I": "UK100",
+    "XAGUSD#": "XAGUSD", "XAGUSD.I#": "XAGUSD", "SILVER": "XAGUSD", "SILVER.i#": "XAGUSD",
+    "SILVER.I#": "XAGUSD", "XAG": "XAGUSD",
     "USOIL": "WTI", "OIL": "WTI", "CRUDE": "WTI", "USOIL.I#": "WTI", "OIL.I#": "WTI", "CL": "WTI",
     "USDCHF#": "USDCHF", "USDCHF.I#": "USDCHF",
     "NZDUSD#": "NZDUSD", "NZDUSD.I#": "NZDUSD",
@@ -149,9 +177,25 @@ _ALIAS_MAP: Dict[str, str] = {
     "GBPJPY#": "GBPJPY", "GBPJPY.I#": "GBPJPY",
 }
 
+# Broker aliases are written in the broker's own case ("GER40Cash#", "SILVER.i#",
+# "US100Cash#") but ``resolve()`` looks up the upper-cased symbol. Without this
+# normalisation every mixed-case alias silently misses the map and falls through
+# to the fuzzy/generic fallback — so a correctly written alias still produced the
+# wrong spec. Normalise once at import instead of at every lookup.
+_ALIAS_MAP = {k.upper(): v for k, v in _ALIAS_MAP.items()}
+
 
 def resolve(symbol: str) -> SymbolSpec:
-    """Resolves any broker alias to its canonical SymbolSpec."""
+    """Resolves any broker alias to its canonical SymbolSpec.
+
+    Falls back to a generic FX spec for anything unknown. That fallback is
+    *dangerous* and is logged loudly: GER40, UK100 and XAGUSD were once absent
+    from this registry, so they silently resolved to ``contract_size=100_000``,
+    ``pip_size=0.0001``, ``max_spread_pips=5.0``. The FX-sized spread cap then
+    rejected **100 % of bars** for those instruments and the FX contract size
+    corrupted position sizing — eight of sixteen symbols produced zero trades
+    for a whole quarter without a single error being raised.
+    """
     key = symbol.upper().strip()
     if key in _REGISTRY:
         return _REGISTRY[key]
@@ -161,14 +205,67 @@ def resolve(symbol: str) -> SymbolSpec:
     # Fuzzy fallback: check if any known canonical is a substring
     for canon, spec in _REGISTRY.items():
         if canon in key or key in canon:
+            logger.warning(
+                "symbol_registry: %r resolved by fuzzy match to %r - add an explicit "
+                "entry if this instrument is traded", symbol, canon,
+            )
             return spec
-    # Ultimate fallback — generic forex
+    # Ultimate fallback — generic forex. Almost certainly wrong for a non-FX
+    # instrument, so never let it pass silently.
+    logger.error(
+        "symbol_registry: %r is NOT registered; falling back to a generic FX spec "
+        "(contract_size=100000, pip_size=0.0001). Spread gating and position sizing "
+        "will be wrong for anything that is not an FX major. Register it.",
+        symbol,
+    )
     return SymbolSpec(
         canonical=key, asset_class="FOREX",
         contract_size=100_000.0, pip_size=0.0001, pip_value_per_lot=10.0,
         typical_spread_pips=2.0, max_spread_pips=5.0,
         typical_atr_pct=0.5, margin_pct=0.1
     )
+
+
+def registry_mismatches(broker_meta: Dict[str, Any], symbol: str) -> Dict[str, Any]:
+    """Compare the registry spec against real broker metadata from a data manifest.
+
+    Returns a dict of ``{field: (registry_value, broker_value)}`` for every field
+    that disagrees. Empty means the registry matches the broker.
+
+    This exists because the registry and the fetch manifests are two sources of
+    truth for the same facts, and when they drift nothing complains — the wrong
+    spec is simply used, and the symptom (no trades) is attributed to the
+    strategy. Run it after every fetch; ``tests/test_symbol_registry.py`` pins it.
+    """
+    spec = resolve(symbol)
+    out: Dict[str, Any] = {}
+    for field_name, reg_val, key_names in (
+        ("digits", spec.digits, ("digits",)),
+        ("contract_size", spec.contract_size, ("contract_size",)),
+        ("asset_class", spec.asset_class, ("category",)),
+    ):
+        broker_val = next(
+            (broker_meta.get(k) for k in key_names if broker_meta.get(k) is not None), None
+        )
+        if broker_val is None:
+            continue
+        if field_name in ("contract_size",):
+            if abs(float(reg_val) - float(broker_val)) > 1e-9:
+                out[field_name] = (reg_val, broker_val)
+        elif field_name == "asset_class":
+            # The manifest uses MT5 categories (INDEX/METAL/FX_MAJOR/CRYPTO);
+            # the registry uses its own vocabulary. Compare loosely.
+            mapping = {
+                "INDEX": "INDEX", "METAL": "COMMODITY", "COMMODITY": "COMMODITY",
+                "FX_MAJOR": "FOREX", "FX_CROSS": "FOREX", "CRYPTO": "CRYPTO",
+            }
+            expected = mapping.get(str(broker_val).upper(), str(broker_val).upper())
+            if expected != str(reg_val).upper():
+                out[field_name] = (reg_val, expected)
+        else:
+            if int(reg_val) != int(broker_val):
+                out[field_name] = (reg_val, broker_val)
+    return out
 
 
 def is_crypto(symbol: str) -> bool:

@@ -17,6 +17,7 @@ from jarvis.risk.loss_cooldown import LossCooldownManager
 from jarvis.historical.historical_engine import HISTORICAL_DATA_ENGINE
 from jarvis.intelligence.symbol_profile_config import get_symbol_profile_config
 from jarvis.execution.exit_policy import ExitPolicy, evaluate_exit
+from jarvis.execution.entry_policy import evaluate_entry
 
 class BacktestEngine:
     def __init__(
@@ -51,8 +52,24 @@ class BacktestEngine:
         start_bar_idx: int = 50,
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
-        timeframe: str = "H1"
+        timeframe: str = "H1",
+        wr_profile: Optional[Any] = None,
     ) -> Dict[str, Any]:
+        """Run a chronological backtest.
+
+        ``wr_profile`` (a ``jarvis.intelligence.winrate_targeting.WRTargetProfile``)
+        switches entry selection and exit geometry to the calibrated per-symbol
+        configuration:
+
+          * entry selection becomes capital-protection gates + the calibrated
+            score threshold + the learned regime policy, instead of the legacy
+            29-check stack (see ``jarvis.execution.entry_policy``);
+          * the take-profit distance becomes ``tp_r`` R-multiples of the realised
+            risk distance, instead of the engine's own target;
+          * the exit policy and time stop come from the calibrated geometry.
+
+        ``wr_profile=None`` preserves the previous behaviour exactly.
+        """
         balance = self.initial_balance
         equity = self.initial_balance
         trades: List[Dict[str, Any]] = []
@@ -161,15 +178,21 @@ class BacktestEngine:
                 if risk_dist <= 0:
                     risk_dist = max(0.001, abs(open_trade["entry"] - open_trade["sl"]))
 
-                # Master-Trader Stagnation Time Stop: Dynamic regime-aware
-                regime_str = str(open_trade.get("regime", "")).upper()
-                base_stag = 24 if is_crypto else 16
-                if any(r in regime_str for r in ["RANGE", "CONSOLIDATION", "COMPRESSION"]):
-                    stag_limit = max(8, base_stag // 2)
-                elif any(r in regime_str for r in ["TREND", "BREAKOUT"]):
-                    stag_limit = int(base_stag * 1.25)
+                # Master-Trader Stagnation Time Stop: Dynamic regime-aware.
+                # When a calibrated profile is in use the time stop is part of
+                # the calibrated geometry (it bounds how many trades fit in the
+                # sample), so the profile's value takes precedence.
+                if open_trade.get("max_bars"):
+                    stag_limit = int(open_trade["max_bars"])
                 else:
-                    stag_limit = base_stag
+                    regime_str = str(open_trade.get("regime", "")).upper()
+                    base_stag = 24 if is_crypto else 16
+                    if any(r in regime_str for r in ["RANGE", "CONSOLIDATION", "COMPRESSION"]):
+                        stag_limit = max(8, base_stag // 2)
+                    elif any(r in regime_str for r in ["TREND", "BREAKOUT"]):
+                        stag_limit = int(base_stag * 1.25)
+                    else:
+                        stag_limit = base_stag
 
                 if open_trade["bars_held"] >= stag_limit and open_trade["mfe"] < (risk_dist * 0.25):
                     exit_price = float(current_bar["close"])
@@ -189,6 +212,12 @@ class BacktestEngine:
                         "bars_held": open_trade.get("bars_held", stag_limit),
                         "entry": open_trade["entry"], "exit": exit_price,
                         "sl": open_trade["sl"], "tp": open_trade["tp"],
+                        # Immutable initial stop and risk distance. The
+                        # "sl" above is the TRAILED stop, so computing an
+                        # R-multiple from it divides by a shrinking
+                        # denominator and reports absurd R values.
+                        "initial_sl": open_trade.get("initial_sl", open_trade["sl"]),
+                        "risk_dist": open_trade.get("risk_dist", 0.0),
                         "lots": open_trade.get("initial_lots", open_trade["lots"]),
                         "pnl": round(pnl_net, 2), "result": f"STAGNATION_TIME_STOP_{stag_limit}BAR",
                         "strategy": open_trade["strategy"], "regime": open_trade["regime"],
@@ -342,6 +371,8 @@ class BacktestEngine:
                         "entry": open_trade["entry"],
                         "exit": exit_price,
                         "sl": open_trade["sl"],
+                        "initial_sl": open_trade.get("initial_sl", open_trade["sl"]),
+                        "risk_dist": open_trade.get("risk_dist", 0.0),
                         "tp": open_trade["tp"],
                         "lots": open_trade.get("initial_lots", open_trade["lots"]),
                         "pnl": round(pnl_net, 2),
@@ -405,7 +436,41 @@ class BacktestEngine:
                     context, regime, analyst_reports, devil_report, account_balance=balance, risk_per_trade_pct=effective_risk_pct, mtf_data=mtf_dict
                 )
 
-                if decision.decision == "EXECUTE" and decision.bias in ("BUY", "SELL"):
+                regime_name = (
+                    regime.primary_regime.value
+                    if hasattr(regime.primary_regime, "value")
+                    else str(regime.primary_regime)
+                )
+
+                # ── Entry selection ─────────────────────────────────────────
+                # With a calibrated profile, selection is the capital-protection
+                # gates plus the out-of-sample-calibrated score threshold and the
+                # learned regime policy. Without one, the legacy 29-check stack
+                # decides, exactly as before.
+                if wr_profile is not None:
+                    entry_dec = evaluate_entry(
+                        quality_gate=decision.quality_gate,
+                        score=float(getattr(decision, "model_confidence", 0.0) or 0.0),
+                        regime=regime_name,
+                        profile=wr_profile,
+                    )
+                    entry_ok = bool(entry_dec.allowed and decision.bias in ("BUY", "SELL"))
+                    if not entry_ok:
+                        # The entry policy does not see the bias, so a bar whose
+                        # gates and score all pass but which carries no direction
+                        # would otherwise be recorded under the policy's SUCCESS
+                        # reason ("calibrated edge filter passed") — a label that
+                        # says the opposite of what happened.
+                        if entry_dec.allowed and decision.bias not in ("BUY", "SELL"):
+                            reason = f"no directional bias ({decision.bias or 'HOLD'})"
+                        else:
+                            reason = entry_dec.reason
+                        rejection_stats[reason] = rejection_stats.get(reason, 0) + 1
+                else:
+                    entry_dec = None
+                    entry_ok = decision.decision == "EXECUTE" and decision.bias in ("BUY", "SELL")
+
+                if entry_ok:
                     account_snap = AccountSnapshot(
                         login=1, server="Backtest", balance=balance, equity=balance, margin=0, free_margin=balance, margin_level=0, leverage=100
                     )
@@ -417,7 +482,15 @@ class BacktestEngine:
                         "volume_max": 100.0,
                         "volume_step": 0.01
                     }
-                    auth_res = self.risk_engine.authorize_execution(decision, account_snap, [], sym_info, spread_pips)
+                    auth_res = self.risk_engine.authorize_execution(
+                        decision, account_snap, [], sym_info, spread_pips,
+                        # In calibrated mode entry selection is owned by
+                        # entry_policy, which deliberately trades setups the
+                        # legacy gate stack rejected. Without this the risk
+                        # guard would reimpose the legacy veto and block every
+                        # calibrated trade.
+                        entry_authorized_override=(True if wr_profile is not None else None),
+                    )
 
                     if auth_res["authorized"]:
                         entry_price = float(next_bar["open"])
@@ -425,11 +498,24 @@ class BacktestEngine:
                             entry_price += spread_pips * spec.pip_size  # Ask = Bid + Spread
                         price_shift = entry_price - decision.entry_price
                         sl_price = decision.stop_loss + price_shift
-                        tp_price = decision.take_profit + price_shift
                         
                         actual_risk_dist = abs(entry_price - sl_price)
                         if actual_risk_dist <= 0:
                             actual_risk_dist = max(spec.pip_size * 10, decision.sl_distance)
+
+                        # Calibrated target: a multiple of the REALISED risk
+                        # distance (not the engine's planned target), so the
+                        # geometry means the same thing on every symbol.
+                        if wr_profile is not None:
+                            geom = wr_profile.geometry_for(regime_name)
+                            direction_sign = 1.0 if decision.bias == "BUY" else -1.0
+                            tp_price = entry_price + direction_sign * float(geom.tp_r) * actual_risk_dist
+                            exit_policy_for_trade = geom.to_policy(symbol, spec)
+                            trade_max_bars = int(geom.max_bars)
+                        else:
+                            tp_price = decision.take_profit + price_shift
+                            exit_policy_for_trade = ExitPolicy.for_symbol(symbol, spec)
+                            trade_max_bars = None
 
                         # Enforce hard dollar risk cap based on filled entry & SL
                         planned_risk_dollars = balance * (effective_risk_pct / 100.0)
@@ -463,7 +549,7 @@ class BacktestEngine:
                             "partial_closed": False,
                             "partial_close_bar": -1,
                             "strategy": decision.strategy,
-                            "regime": regime.primary_regime.value if hasattr(regime.primary_regime, 'value') else str(regime.primary_regime),
+                            "regime": regime_name,
                             "score": decision.model_confidence,
                             "planned_rr": decision.risk_reward_ratio,
                             "master_score": getattr(decision, "master_confluence_score", 0.0),
@@ -473,11 +559,24 @@ class BacktestEngine:
                             "first_target_volume_pct": getattr(decision, "first_target_volume_pct", 0.50),
                             # Resolved once here and consumed by evaluate_exit(). Previously
                             # this key was written but never read by any exit code path.
-                            "exit_policy": ExitPolicy.for_symbol(symbol, spec),
+                            # With a calibrated profile this is the calibrated geometry
+                            # rather than the symbol default.
+                            "exit_policy": exit_policy_for_trade,
+                            # None => legacy regime-aware stagnation stop.
+                            "max_bars": trade_max_bars,
                         }
                     else:
-                        auth_reason = auth_res.get("reason", "Risk Engine Auth Failed")
-                        rejection_stats[auth_reason] = rejection_stats.get(auth_reason, 0) + 1
+                        # The risk engine reports a LIST of reasons under
+                        # "reasons". Reading "reason" (singular) discarded them
+                        # all and collapsed every veto into one opaque label.
+                        auth_reasons = auth_res.get("reasons") or []
+                        if not auth_reasons:
+                            auth_reasons = [auth_res.get("reason", "Risk Engine Auth Failed")]
+                        for r in auth_reasons:
+                            rejection_stats[r] = rejection_stats.get(r, 0) + 1
+                elif wr_profile is not None:
+                    # Calibrated mode: the reason was already recorded above.
+                    pass
                 else:
                     for r in getattr(decision, "rejection_reasons", []):
                         rejection_stats[r] = rejection_stats.get(r, 0) + 1
@@ -505,6 +604,8 @@ class BacktestEngine:
                 "entry": open_trade["entry"],
                 "exit": exit_price,
                 "sl": open_trade["sl"],
+                "initial_sl": open_trade.get("initial_sl", open_trade["sl"]),
+                "risk_dist": open_trade.get("risk_dist", 0.0),
                 "tp": open_trade["tp"],
                 "lots": open_trade.get("initial_lots", open_trade["lots"]),
                 "pnl": round(pnl_net, 2),

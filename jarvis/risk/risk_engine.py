@@ -239,6 +239,9 @@ class RiskEngine:
         if "spread_pips" in kwargs:
             current_spread_pips = float(kwargs["spread_pips"])
         context: Optional[MarketContext] = kwargs.get("context")
+        # Entry-selection authority: None => read the legacy decision verdict;
+        # True/False => the calibrated entry policy already decided.
+        entry_authorized_override: Optional[bool] = kwargs.get("entry_authorized_override")
 
         with self._lock:
             rejection_reasons = []
@@ -311,7 +314,8 @@ class RiskEngine:
 
             # 7. Pre-Execution Geometry & Gate validation
             guard = self.trade_guard.validate_pre_execution(
-                decision, account, positions, max_allowed_spread_pips, current_spread_pips
+                decision, account, positions, max_allowed_spread_pips, current_spread_pips,
+                entry_authorized_override=entry_authorized_override,
             )
             if not guard.get("passed"):
                 rejection_reasons.extend(guard.get("reasons", []))

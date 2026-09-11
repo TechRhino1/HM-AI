@@ -1,4 +1,4 @@
-# JARVIS AI 4.0 — Architecture Reference
+# JARVIS AI 5.0 — Architecture Reference
 
 > Status: post-refactor. This document is the entry point for anyone modifying
 > the system. Read it before touching execution, learning or configuration.
@@ -12,16 +12,18 @@ The repository historically contained **two parallel implementations**:
 | Tree | Reached from | Status |
 |---|---|---|
 | `jarvis/` | `main.py` → `JarvisOrchestrator` (98 modules) | **LIVE — this is the system** |
-| `engines/`, `core/`, `strategies/` | only `core/jarvis_supervisor.py` + some tests | **DEAD CODE** |
+| `engines/`, `core/`, `strategies/` | only `core/jarvis_supervisor.py` + some tests | **DELETED** |
 
-`core/jarvis_supervisor.py` is imported by **nothing**. It is the only thing that
-imports `engines/`. A static import walk from `main.py` confirms that the live
-system never touches `engines/`, `core/`, or `strategies/`.
+The dead tree has been **removed**: 29 files / 3,667 lines across `core/` (5),
+`engines/` (21), `strategies/` (1) and two test modules that imported only dead
+code. Removal was gated on an AST reachability analysis
+(`tools/dead_code_audit.py`) that walks the import graph from every real entry
+point, plus a scan for dynamic references (`importlib`, `__import__`, module-name
+string literals). Only modules with **zero live importers** were deleted.
 
-**Rule for all future work: modify `jarvis/` only.** The `engines/` tree is
-retained purely because a handful of legacy tests import it. Treat any edit to
-`engines/` as having no effect on production behaviour. If you need to delete it,
-first port `tests/test_system_production.py` and `tests/test_risk_engine.py`.
+**Rule for all future work: modify `jarvis/` only.** If you add a module, add its
+entry point to `tools/dead_code_audit.py::ENTRY_POINTS` or the next audit will
+report it as dead.
 
 ---
 
@@ -147,7 +149,12 @@ Orchestrator scan tick
 | Drift protection | same | Brier-score trigger, **non-destructive** shrink |
 | Strategy bandit | `jarvis/learning/strategy_bandit.py` | Thompson-sampling arm selection |
 | Trade memory | `jarvis/learning/trade_memory.py` | persistent journal |
-| Meta-labeling | `jarvis/intelligence/*` | confidence calibration |
+| Meta-labeling | `jarvis/intelligence/meta_labeler.py` | model-based entry confirmation |
+| Isotonic calibration | `jarvis/intelligence/winrate_targeting.py` | score → realised win probability (PAV) |
+| Regime-edge policy | same | learned symbol×regime enable/disable |
+| Walk-forward CV | `jarvis/learning/walk_forward.py` | `PurgedKFold`, purged OOS folds |
+| Sample uniqueness | `jarvis/learning/sample_weights.py` | overlap-corrected weighting |
+| HRP allocation | `jarvis/risk/hrp_allocator.py` | inverse-variance portfolio weights |
 
 ### Learning-loop invariants
 1. **R-multiple sign must derive from trade direction**, never from win/loss.
@@ -162,10 +169,144 @@ Orchestrator scan tick
 3. **Model file paths must be absolute.** A CWD-relative weights file meant the
    live loop and the backtest could load different models. Resolved via
    `_resolve_model_path`.
+4. **Learning must be disabled during backtests.** See §11.
 
 ---
 
-## 6. Persistence & paths
+## 6. The calibrated win-rate pipeline (the four-stage split)
+
+Win rate is *not* an independent objective:
+
+```
+expectancy (R) = WR × avg_win_R − (1 − WR) × avg_loss_R
+```
+
+so any win rate can be manufactured by shrinking the target relative to the stop.
+The pipeline therefore treats "75 %" as a **constrained** objective — maximise
+expectancy subject to `win_rate >= target` — and is split into four stages so that
+the expensive step runs once and the searchable step stays cheap:
+
+| Stage | Module | Cost | Output |
+|---|---|---|---|
+| 1. Signal scan | `jarvis/backtesting/signal_scan.py` | ~30 s/symbol | every directional candidate the live pipeline considered |
+| 2. Trade simulation | `jarvis/backtesting/trade_simulator.py` | ~1–2 s/geometry | outcome in R for one exit geometry |
+| 3. Calibration | `jarvis/intelligence/winrate_targeting.py` | seconds | per-symbol profile (walk-forward) |
+| 4. Entry selection | `jarvis/execution/entry_policy.py` | — | allow / deny at runtime |
+
+### Why the split exists
+The live decision pipeline costs **~78 ms per bar**. Re-running it once per
+candidate geometry (64 geometries × 16 symbols) would take days. Instead:
+
+* stage 1 runs the real pipeline **once per symbol** and records every candidate
+  (bias, levels, score, regime, failing gates) — ~1,200 candidates per symbol
+  instead of ~4 trades;
+* a trade's outcome depends only on the geometry and the forward path, **never on
+  which other trades were taken**, so stage 2's results are reusable across every
+  entry threshold. That turns a `geometries × thresholds` search into
+  `geometries` simulations plus a cheap filter.
+
+### Hard rules
+1. **`Geometry` must never encode entry thresholds in the simulation.** Thresholds
+   only filter; they must not change a simulated path. `tests/test_winrate_targeting.py::test_threshold_does_not_change_simulated_path` pins this.
+2. **Intrabar ordering is conservative.** A bar spanning both the stop and the
+   target is booked as a **loss**. The live engine previously advanced the stop to
+   breakeven using the bar's favourable excursion and *then* asked whether the stop
+   was hit on the same bar — look-ahead that inflated win rate exactly where the
+   target lives.
+3. **The simulator and the live monitor share `evaluate_exit`.** Never re-derive
+   stop arithmetic here.
+4. **Configuration is selected on training folds only.** Each fold votes; the
+   deployed configuration is the one the folds agree on most often, with ties
+   broken on the *average train* summary. Selecting on the full sample and then
+   reporting folds as "out-of-sample" is selection leakage.
+5. **`target_met` must require positive expectancy.** A 75 % profile with negative
+   expectancy is a failure, not a success.
+6. **A symbol that cannot reach the target must say so.** `binding_constraint`
+   names the cause (sample size / expectancy / selection stability / win rate)
+   rather than tuning to the target in-sample. The `frontier` field records, per
+   target size, the best win rate with and without positive expectancy — the
+   evidence for the verdict.
+7. **The learned regime policy is fitted on training folds only.** It makes a hard
+   include/exclude decision, so fitting it on the same out-of-sample trades it
+   filters lets it delete exactly the losers it has already seen. That is a filter
+   tuned to the test set. Measured on this data it moved the aggregate
+   out-of-sample result from **−33.9 R to +51.8 R** — the size of the artefact.
+   Fitted on train folds instead, the honest figure is **+17.3 R**. The profile
+   publishes both (`oos_pre_policy_*` and `oos_*`) plus `policy_fitted_on`, so the
+   contribution is visible rather than assumed.
+8. **Report the system that ships.** The engine applies the regime policy before
+   choosing a position, so calibration replays the identical per-fold selection
+   with the disabled regimes removed. Filtering *after* the one-position-at-a-time
+   walk would drop later eligible trades too and understate the system — the exact
+   mismatch that once had calibration claim 192 out-of-sample EURUSD trades while
+   the engine produced 7.
+
+### Reporting contract
+`tools/run_3month_backtest.py` renders seven sections; two of them exist purely
+to keep the headline honest:
+
+* **§2a** puts the out-of-sample sample side by side with and without the regime
+  policy. The gap is the policy's entire contribution.
+* **§3** is the win-rate / expectancy frontier, which turns "we did not reach
+  75 %" into "75 % is or is not reachable, and here is what it costs".
+
+### Retraining / self-learning
+`WRProfileStore.merge_realised(symbol, outcomes)` refits the **isotonic
+calibration and the regime policy** from realised trades while holding the
+geometry fixed. The geometry is chosen on a long history; a short run of live
+results must not silently rewrite the strategy.
+
+`score_calibration` is a **telemetry / interpretation artefact, not a gate**.
+Isotonic calibration is monotone, so `score >= threshold` and
+`calibrated_p >= calibrated_p(threshold)` are the same test — it cannot change
+which candidates pass. It exists so the score is interpretable as a probability
+and so the AI layer has one to reason with; §4 of the report prints
+`P(win) @ threshold` and the Brier score from it.
+
+---
+
+## 7. Hermetic execution mode (backtests must be reproducible)
+
+Several components on the decision path are **stateful against disk**:
+
+| Component | Reads / writes |
+|---|---|
+| `RealtimeOptimizer` | reads recent realised PnL from SQLite and shifts `min_score` / `min_rr` / `required_win_p` |
+| `OnlineMLPredictor` | loads **and saves** model weights (JSON) |
+| `SelfLearningEngine` | reads/writes pattern statistics (SQLite) |
+| `MetaLabeler` | loads/saves a fitted model (joblib) |
+
+That is correct for live trading — the system is supposed to adapt. It produced
+two concrete defects in backtests:
+
+1. **Non-reproducibility.** Running the same backtest twice gave different
+   results, because the first run wrote state the second read. Measured directly:
+   the same EURUSD scan reported `executed=3` then `executed=2`.
+2. **Live/history contamination.** A backtest could read the *live* trade
+   database, letting today's realised results change gate thresholds for bars
+   dated months earlier.
+
+`jarvis.config.runtime.offline_mode()` puts the process into a hermetic state:
+each component starts from its neutral prior and writes nothing. **Every
+backtest and every scan must run inside it.**
+
+```python
+from jarvis.config.runtime import offline_mode
+
+with offline_mode():
+    result = engine.run_backtest(...)
+```
+
+`SignalScanner` wraps its pass automatically; `tools/run_3month_backtest.py`
+wraps the whole run. Determinism is verified by hashing the candidate table
+across two consecutive scans.
+
+**Rule: if you add a component that reads or writes persistent state on the
+decision path, it must honour `is_offline()`.**
+
+---
+
+## 8. Persistence & paths
 
 All databases resolve through `jarvis.config.paths.resolve_db_path()`:
 
@@ -187,7 +328,7 @@ Override the location with `JARVIS_DATA_DIR` (used by tests/CI for isolation).
 
 ---
 
-## 7. Configuration
+## 9. Configuration
 
 `jarvis.config.settings.JarvisConfig.load()` reads `config/settings.json`, then
 applies `JARVIS_*` environment overrides.
@@ -202,7 +343,7 @@ invites someone to "fix" it and reintroduce premature breakeven.
 
 ---
 
-## 8. Testing
+## 10. Testing
 
 ```bash
 # Fast focused suite (must pass before any commit)
@@ -238,28 +379,38 @@ the guard working.
 
 ---
 
-## 9. Refactor checklist for a new feature
+## 11. Refactor checklist for a new feature
 
 1. Decide the layer. Only `jarvis/` counts.
 2. If it affects a stop → put the arithmetic in `exit_policy.evaluate_exit`.
-3. If it needs a parameter → add it to `ExitPolicy` / `SymbolProfileConfig`,
+3. If it affects entry selection → put it in `entry_policy.evaluate_entry`, and
+   keep capital protection separate from edge selection.
+4. If it touches win-rate/exit geometry → it belongs in `Geometry`, not as a
+   module constant, and it must be reachable by the calibrator's grid.
+5. If it needs a parameter → add it to `ExitPolicy` / `SymbolProfileConfig`,
    not as a module constant in three files.
-4. If it persists → use `resolve_db_path`.
-5. If it is configurable → add it to `config/settings.json` **and** the loader
+6. If it persists → use `resolve_db_path`, **and honour `is_offline()`**.
+7. If it is configurable → add it to `config/settings.json` **and** the loader
    mapping table.
-6. If it is a value passed between stages → confirm something **reads** it.
-7. Add/extend a test in `tests/test_regression_fixes.py`.
-8. Run the focused suite.
+8. If it is a value passed between stages → confirm something **reads** it.
+9. If it is a new entry point → add it to
+   `tools/dead_code_audit.py::ENTRY_POINTS`, or the next audit reports it dead.
+10. Add/extend a test. For anything touching win rate, prefer
+    `tests/test_winrate_targeting.py`.
+11. Run the focused suite.
 
 ---
 
-## 10. Known remaining debt
+## 12. Known remaining debt
 
 | Item | Impact | Location |
 |---|---|---|
-| `engines/` + `core/` dead tree | Confusion; edits have no effect | repo root |
-| `tests/test_system_production.py` and `tests/test_risk_engine.py` still import `engines/` | Blocks deletion | `tests/` |
+| Per-symbol samples of 20–330 trades | Win rates carry wide confidence intervals | 3-month H1 window |
 | `jarvis/india`, `jarvis/stocks` reachable from orchestrator | Scope creep; unrelated market | `jarvis/` |
 | Optimiser selects on very small samples | Overfit parameters (USDJPY PF 99.0 on 3 trades) | `jarvis/intelligence/realtime_optimizer.py` |
 | `master_score` has no discriminative power | Winners median 47 vs losers 48 | decision engine scoring |
-| `BREAKOUT_EXPANSION` regime 27.8 % WR / `WEAK_TREND` 14.3 % WR | Entry-side problem, not exit | regime routing |
+| Legacy gate stack blocked 10/16 symbols entirely | Resolved for calibrated runs; legacy path remains the default when no profile is supplied | `jarvis/intelligence/gate_policy.py` |
+| `SymbolProfileConfig` duplicates `symbol_registry` metadata | Two sources of truth for pip/contract values; the broker's real values disagree with both (XAGUSD pip value 50 vs 10, GER40 0.01 vs 10) | `jarvis/intelligence/symbol_profile_config.py` vs `jarvis/data/symbol_registry.py` |
+| Swap/financing not modelled | Long-hold results are optimistic | backtest cost model |
+| `data/signals/` cache must be regenerated after data changes | Stale cache silently calibrates on old candidates | `tools/scan_signals.py` |
+

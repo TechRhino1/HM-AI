@@ -182,6 +182,15 @@ class MetaLabeler:
             return None
 
     def _load(self):
+        # Hermetic in backtests: a meta-label model fitted on live trades must
+        # not influence a historical simulation. With model=None the
+        # meta-label gate stays neutral, which is the documented behaviour for
+        # an untrained model.
+        from jarvis.config.runtime import is_offline
+
+        if is_offline():
+            self.model = None
+            return
         if _HAVE_JOBLIB and self.model_path and os.path.exists(self.model_path):
             try:
                 self.model = joblib.load(self.model_path)
@@ -191,6 +200,10 @@ class MetaLabeler:
                 self.model = None
 
     def _save(self):
+        from jarvis.config.runtime import is_offline
+
+        if is_offline():
+            return
         if _HAVE_JOBLIB and self.model is not None:
             try:
                 os.makedirs(os.path.dirname(self.model_path), exist_ok=True)
