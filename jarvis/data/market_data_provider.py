@@ -17,6 +17,8 @@ Live sources (attempted in order):
                    broker data entitlement.
 """
 from typing import Optional, List, Dict, Any
+
+from jarvis.data.broker_symbols import resolve_broker_symbol
 import logging
 import socket
 import re
@@ -232,7 +234,8 @@ def _try_mt5(symbol: str, timeframe: str = "1D", num_bars: int = 120) -> Optiona
             mt5.symbol_select(resolved_sym, True)
 
             mt5_tf = _TF_TO_MT5.get(timeframe.upper(), getattr(mt5, "TIMEFRAME_D1", 16408))
-            rates = mt5.copy_rates_from_pos(resolved_sym, mt5_tf, 0, num_bars)
+            _broker_sym = resolve_broker_symbol(resolved_sym) or resolved_sym
+            rates = mt5.copy_rates_from_pos(_broker_sym, mt5_tf, 0, num_bars)
         if rates is None or len(rates) == 0:
             return None
 

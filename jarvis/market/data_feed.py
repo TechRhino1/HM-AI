@@ -3,6 +3,8 @@ JARVIS AI 3.0 — Multi-Timeframe Data Feed Engine.
 Provides thread-safe, timeout-guarded OHLCV data streaming from MT5 with realistic synthetic fallback generation.
 """
 import time
+
+from jarvis.data.broker_symbols import resolve_broker_symbol
 import logging
 import numpy as np
 import pandas as pd
@@ -58,10 +60,11 @@ class DataFeedEngine:
             mt5_tf = TF_MAP.get(timeframe, 16385)
             start_pos = 0 if include_current_bar else 1
             with DataFeedEngine._mt5_fetch_lock:
-                rates = mt5.copy_rates_from_pos(resolved_sym, mt5_tf, start_pos, num_bars)
+                _broker_sym = resolve_broker_symbol(resolved_sym) or resolved_sym
+                rates = mt5.copy_rates_from_pos(_broker_sym, mt5_tf, start_pos, num_bars)
                 if rates is None or len(rates) == 0:
                     # Fallback to pos 0 if start_pos returns empty
-                    rates = mt5.copy_rates_from_pos(resolved_sym, mt5_tf, 0, num_bars)
+                    rates = mt5.copy_rates_from_pos(_broker_sym, mt5_tf, 0, num_bars)
             if rates is None or len(rates) == 0:
                 logger.warning(f"MT5 returned 0 rates for {symbol} ({timeframe}). Falling back to synthetic rates.")
                 df = self._generate_realistic_rates(symbol, timeframe, num_bars)
