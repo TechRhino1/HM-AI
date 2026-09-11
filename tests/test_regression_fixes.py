@@ -33,7 +33,6 @@ from jarvis.execution.exit_policy import (
     DEFAULT_BE_TRIGGER_R,
     DEFAULT_RUNNER_TRAIL_ATR,
 )
-from engines.dynamic_sl_tp import DynamicSLTPEngine
 from jarvis.risk.position_sizing import PositionSizer
 from jarvis.risk.circuit_breaker import CircuitBreaker
 from jarvis.analysts.devil_advocate import DevilAdvocateAnalyst
@@ -155,16 +154,49 @@ class TestRegressionFixes(unittest.TestCase):
         )
         self.assertTrue(monitor._is_manual_trade(desk_pos))
 
-    def test_a4_dynamic_sl_tp_profile_multiplier(self):
-        """A4: Verify dynamic SL calculation uses sl_atr_multiplier from profile."""
-        engine = DynamicSLTPEngine()
-        profile = {'digits': 2, 'sl_atr_multiplier': 2.0}
-        struct_data = {'demand_zone': (0, 0), 'supply_zone': (0, 0)}
-        vol_data = {'atr': 5.0}
-        
-        res = engine.calculate_sl_tp('XAUUSD', 'BUY', 2400.0, struct_data, vol_data, profile)
-        sl_dist = 2400.0 - res['sl_price']
-        self.assertLessEqual(sl_dist, 10.0 + 1e-4)
+    def test_a4_dynamic_sl_respects_atr_risk_cap(self):
+        """A4: the LIVE level engine must cap SL distance relative to ATR.
+
+        Ported from a test of engines/dynamic_sl_tp.py, which was part of an
+        abandoned parallel implementation (zero production imports). The
+        assertion is preserved against the engine the system actually runs:
+        jarvis.intelligence.dynamic_levels.DynamicRiskAndLevelsEngine.
+        """
+        from jarvis.intelligence.dynamic_levels import DynamicRiskAndLevelsEngine
+        from jarvis.data.schemas import (
+            MarketContext, StructureContext, LiquidityContext,
+            VolatilityContext, MomentumContext, SessionContext,
+        )
+        from jarvis.intelligence.regime_engine import RegimeOutput
+        from jarvis.data.schemas import MarketRegime
+
+        ctx = MarketContext(
+            symbol="XAUUSD",
+            timestamp=datetime.now(timezone.utc),
+            current_price=2400.0,
+            bid=2399.8, ask=2400.2,
+            structure=StructureContext(bias="BULLISH", demand_zone=(2380.0, 2382.0)),
+            liquidity=LiquidityContext(),
+            volatility=VolatilityContext(atr=5.0, current_spread_pips=2.0),
+            momentum=MomentumContext(trend_score=50.0, adx=28.0),
+            session=SessionContext(is_prime_session=True),
+        )
+        regime = RegimeOutput(primary_regime=MarketRegime.TREND_BULL,
+                              probabilities={}, confidence=0.8)
+
+        engine = DynamicRiskAndLevelsEngine()
+        res = engine.calculate_levels(
+            context=ctx, regime=regime, tentative_bias="BUY",
+            account_balance=10000.0, risk_per_trade_pct=0.5, trade_style="SWING",
+        )
+        self.assertIn("sl_price", res)
+        self.assertLess(res["sl_price"], 2400.0, "a BUY stop must sit below entry")
+        sl_dist = 2400.0 - res["sl_price"]
+        # With ATR=5.0 the stop must stay within a sane multiple of volatility,
+        # not be placed arbitrarily far away.
+        self.assertLessEqual(sl_dist, 5.0 * 6.0 + 1e-6,
+                             f"SL distance {sl_dist:.2f} exceeds 6x ATR")
+        self.assertGreater(sl_dist, 0.0)
 
     def test_a1_risk_ceiling_rejection(self):
         """A1-P0: Verify PositionSizer rejects trades (returns 0.0) when min lot size forces risk above ceiling."""

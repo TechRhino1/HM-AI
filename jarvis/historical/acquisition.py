@@ -17,6 +17,7 @@ except ImportError:
     MT5_AVAILABLE = False
 
 from jarvis.data.symbol_registry import resolve as resolve_symbol_registry
+from jarvis.data.mt5_history import SyntheticDataError
 from jarvis.execution.mt5_client import MT5Client
 from jarvis.market.data_feed import DataFeedEngine
 from jarvis.historical.storage import StorageEngine
@@ -215,13 +216,26 @@ class AcquisitionEngine:
     def _generate_calibrated_rates(
         self, symbol: str, timeframe: str, start_dt: datetime, end_dt: datetime
     ) -> pd.DataFrame:
-        """Fallback synthetic rates anchored to 2026 valuations."""
-        feed = DataFeedEngine()
-        hours_diff = max(24, int((end_dt - start_dt).total_seconds() / 3600))
-        bars_count = min(10000, max(50, hours_diff))
-        df = feed.fetch_rates(symbol, timeframe=timeframe, num_bars=bars_count)
-        df["time"] = pd.to_datetime(df["time"], utc=True)
-        return df
+        """REFUSES to fabricate data. Raises instead of returning synthetic bars.
+
+        This method used to return generated bars as a silent fallback whenever
+        MT5 was unreachable. Those bars were then written to the data lake under a
+        manifest claiming they came from the broker, so every backtest that ran
+        afterwards used fabricated prices without anyone being able to tell.
+        Verified on the resulting file: "gold" spanning $4 378-$7 662, spread
+        identically zero, one constant tick_volume, fractional-second timestamps
+        on an H1 series, and 1 216 weekend bars.
+
+        Real data must come from :mod:`jarvis.data.mt5_history`. If MT5 is not
+        available, the correct behaviour is to fail loudly — never to invent a
+        market.
+        """
+        raise SyntheticDataError(
+            f"Refusing to fabricate market data for {symbol} {timeframe} "
+            f"({start_dt} -> {end_dt}). MT5 is unavailable or returned no bars. "
+            f"Real history must be fetched via jarvis.data.mt5_history."
+            f"MT5HistoryFetcher; install/start the MetaTrader 5 terminal and retry."
+        )
 
     def sync_range(
         self,
