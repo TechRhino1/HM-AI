@@ -155,6 +155,11 @@ class WRTargetProfile:
     target_wr: float
     geometry: Geometry
     score_col: str = "score"
+    # 5.1: which exit schedule to EXECUTE (see jarvis.backtesting.exit_geometry).
+    # The engine reads this so live runs the same scale-out the OOS number was
+    # measured on. Defaults to the legacy single fixed target, so existing
+    # profiles behave exactly as before until re-calibrated.
+    geometry_mode: str = "A_fixed_tp"
 
     # In-sample fit (the configuration selection)
     n_trades: int = 0

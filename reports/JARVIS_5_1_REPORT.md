@@ -162,6 +162,35 @@ Swept BE styles × trail widths on the ladder geometry:
   the calibrator so that live execution reproduces these numbers — the same
   OOS-fidelity requirement identified in `expectancy_fix_validation.md`. Until that is
   done, treat §3 as a validated *selection* result, not a validated live expectation.
+
+### 8.1 Engine integration — attempted, and a design flaw found
+
+Wiring the geometry into `BacktestEngine` was started and then **deliberately reverted**
+(`git checkout -- jarvis/backtesting/engine.py`). Scaffolding added: `build_exit_geometry()`
+in `exit_geometry.py` and a `geometry_mode` field on `WRTargetProfile` (both kept — they
+are additive and default to today's behaviour). The execution change itself was rolled
+back because two defects surfaced:
+
+1. **The runner hard cap negates the ladders.** The harness built B/C/D with `tp_r=1.0`
+   as the *runner's* final target. A trade therefore closes its runner at 1.0R **before**
+   the 1.5R / 2.5R rungs can ever fire, so B, C and D silently collapse to mode A. The
+   `tp_r` argument must be `None` for ladder runners (trail carries them), not 1.0.
+2. **Mode A double-closes.** Mode A's schedule is a single 100% leg at `tp_r`, which the
+   new rung loop closes *and* the existing TP check then closes again — double-counting
+   P&L. Rungs must only be built for schedules that actually contain a runner.
+
+Both are fixable, but shipping a half-wired execution path quietly changes `tp_r` for
+every symbol, so the engine was returned to its committed state (62 tests pass).
+
+**Remaining work, in order:**
+1. Build B/C/D with `tp_r=None` for the runner; only create rungs when a runner exists
+   (fixes 1 and 2).
+2. Add a regression test asserting engine-vs-harness parity for the same geometry
+   (this is the test that was missing and would have caught both defects).
+3. Carry `geometry_mode` through `calibrate_winrate.py` so profiles persist the mode.
+4. Re-run `run_3month_backtest.py` and confirm the engine reproduces §3.
+
+Only after step 4 should these numbers be treated as live expectations.
 - **Not yet wired for live:** the geometry engine is currently an evaluation harness.
   Making the engine execute these geometries (so OOS matches live) is the remaining
   integration step — the same fidelity requirement identified in

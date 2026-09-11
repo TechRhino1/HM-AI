@@ -175,6 +175,43 @@ def geometry_modes() -> List[str]:
             "D_ladder_1p5_2p5", "E_atr_trail"]
 
 
+def build_exit_geometry(
+    mode: str,
+    *,
+    tp_r: Optional[float] = 1.0,
+    trail_atr: float = 1.5,
+    be_trigger_r: Optional[float] = None,
+    be_style: str = "immediate",
+    max_bars: int = 48,
+    trail_activation_r: float = 2.0,
+) -> ExitGeometry:
+    """Resolve a mode name into a concrete geometry.
+
+    Used by BacktestEngine so live/backtest execution and the calibration
+    harness run the SAME schedule — that shared schedule is what makes the
+    out-of-sample number predictive of the engine.
+    """
+    geoms = EXIT_GEOMETRIES(
+        tp_r=tp_r if tp_r is not None else 1.0,
+        trail_atr=trail_atr,
+        be_trigger_r=be_trigger_r,
+        be_style=be_style,
+        max_bars=max_bars,
+    )
+    g = geoms.get(mode)
+    if g is None:
+        return geoms["A_fixed_tp"]
+    # Honour a per-profile trail activation override.
+    if trail_activation_r is not None and g.trail_activation_r != trail_activation_r:
+        g = ExitGeometry(
+            mode=g.mode, legs=g.legs, tp_r=g.tp_r,
+            be_trigger_r=g.be_trigger_r, be_style=g.be_style,
+            trail_atr=g.trail_atr, trail_activation_r=trail_activation_r,
+            max_bars=g.max_bars,
+        )
+    return g
+
+
 def simulate_exit_geometry(
     *,
     bars: Any,
