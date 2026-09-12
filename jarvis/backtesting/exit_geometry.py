@@ -196,7 +196,7 @@ def build_exit_geometry(
     mode: str,
     *,
     tp_r: Optional[float] = 1.0,
-    trail_atr: float = 1.5,
+    trail_atr: Optional[float] = 1.5,
     be_trigger_r: Optional[float] = None,
     be_style: str = "immediate",
     max_bars: int = 48,
@@ -207,6 +207,12 @@ def build_exit_geometry(
     Used by BacktestEngine so live/backtest execution and the calibration
     harness run the SAME schedule — that shared schedule is what makes the
     out-of-sample number predictive of the engine.
+
+    ``trail_atr = None`` disables the runner trail. ``ExitGeometry.to_policy``
+    implements that by pushing ``trail_activation_r`` to 1e9, which is the same
+    convention ``jarvis.backtesting.trade_simulator.Geometry.to_policy`` uses.
+    Callers must pass ``None`` through rather than substituting a default, or the
+    engine and the calibrator will trade different exit schedules.
     """
     geoms = EXIT_GEOMETRIES(
         tp_r=tp_r if tp_r is not None else 1.0,

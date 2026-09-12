@@ -383,7 +383,7 @@ def regime_edge_table(
 # Calibrator
 # ─────────────────────────────────────────────────────────────────────────────
 def default_geometry_grid(
-    *, coarse: bool = True, score_col_max: float = 1.0
+    *, coarse: bool = True, score_col_max: float = 1.0, wide: bool = False
 ) -> List[Geometry]:
     """The geometry search space.
 
@@ -398,27 +398,34 @@ def default_geometry_grid(
     assert a 75% win rate. Including a shorter stop lets the calibrator buy
     statistical power when the edge does not need long holds, at the honest cost
     of cutting trades that would have recovered.
+
+    ``wide`` extends the coarse grid past 1.5R. It was previously unsafe to do
+    so: the engine coerced ``trail_atr=None`` into a live 1.5xATR trail while the
+    simulator disabled the trail, so at ``tp_r >= 2.0`` — where
+    ``trail_activation_r = 2.0`` actually engages — the two resolved exits
+    differently (NAS100: calibrator predicted 44.2% WR / +0.125R, engine realised
+    23.3% WR / -0.246R). That divergence is fixed in ``BacktestEngine`` and pinned
+    by ``tests/test_winrate_targeting.py``, so wider targets can be searched
+    again. The grid boundary was binding at the time of the fix: 10 of 16 symbols
+    had piled up on ``tp_r = 1.5``.
     """
     if coarse:
         # Targets below 0.4R are included so the frontier can show whether a high
         # win rate is reachable at all, and at what expectancy cost. Without them
         # the calibration would sit pinned at the smallest target it was offered.
-        # NOTE: 2.0 was trialled and REMOVED. The frontier sweep says it is the
-        # best-expectancy corner for NAS100/USDJPY, but that sweep is IN-SAMPLE.
-        # Out-of-sample it is a trap: at tp_r=2.0 a trade is held into the
-        # breakeven/trail/time-stop region (trail_activation_r = 2.0), and
-        # there the simulator and BacktestEngine resolve exits differently.
-        # Measured on NAS100 with tp2: the calibrator's OOS predicted 44.2% WR /
-        # +0.125R while the engine realised 23.3% WR / -0.246R -- a 21-point
-        # discrepancy that no win-rate margin can absorb. Geometries that
-        # resolve on a plain TP/SL touch (tp_r comfortably below 2.0) are the
-        # ones verified to match the engine, so the grid stops at 1.5.
+        # NOTE: these low targets are NOT selectable — ``_grid_for`` applies the
+        # reachability floor (``min_tp_r_for_target``). They exist for the
+        # frontier scan only.
         tp_r_values = [0.25, 0.3, 0.4, 0.5, 0.6, 0.75, 1.0, 1.5]
+        if wide:
+            tp_r_values = tp_r_values + [2.0, 2.5]
         be_values: List[Optional[float]] = [None, 1.0]
         pc_values: List[Optional[float]] = [None, 0.5]
         max_bars_values = [24, 48]
     else:
-        tp_r_values = [0.4, 0.45, 0.5, 0.55, 0.6, 0.7, 0.8, 0.9, 1.0, 1.25, 1.5, 2.0]
+        tp_r_values = [0.4, 0.45, 0.5, 0.55, 0.6, 0.7, 0.8, 0.9, 1.0, 1.25, 1.5]
+        if wide:
+            tp_r_values = tp_r_values + [2.0, 2.5, 3.0]
         be_values = [None, 0.75, 1.0, 1.5, 2.0]
         pc_values = [None, 0.5, 0.75]
         max_bars_values = [16, 24, 36, 48]
@@ -666,6 +673,7 @@ class WRTargetCalibrator:
         min_margin: Optional[float] = None,
         enforce_reachable_target: bool = True,
         reachability_margin: float = 0.0,
+        wide_grid: bool = False,
     ):
         # ``None`` means "derive per symbol from its asset class" (see
         # ``min_margin_for_symbol``). An explicit float overrides that for every
@@ -692,6 +700,9 @@ class WRTargetCalibrator:
         # this.
         self.enforce_reachable_target = bool(enforce_reachable_target)
         self.reachability_margin = float(reachability_margin)
+        # Search past tp_r = 1.5. Safe only because the engine/simulator
+        # exit-policy divergence at trail_activation_r is fixed.
+        self.wide_grid = bool(wide_grid)
 
     # ── internals ──────────────────────────────────────────────────────────
     def _cost_price_equiv(self, symbol: str, money_per_unit: float) -> float:
@@ -829,7 +840,7 @@ class WRTargetCalibrator:
         diagnostic can still show how much win rate is buyable by shrinking the
         target and what it costs.
         """
-        grid = default_geometry_grid(coarse=self.coarse_grid)
+        grid = default_geometry_grid(coarse=self.coarse_grid, wide=self.wide_grid)
         if self.enforce_reachable_target:
             floor = min_tp_r_for_target(self.target_wr, margin=self.reachability_margin)
             reachable = [g for g in grid if float(g.tp_r) >= floor]
@@ -877,7 +888,7 @@ class WRTargetCalibrator:
         bars_order = [int(b) for b in cands["bar_idx"].tolist()]
 
         # ── Phase 1: simulate every geometry once (the expensive step) ──────
-        grid = default_geometry_grid(coarse=self.coarse_grid)
+        grid = default_geometry_grid(coarse=self.coarse_grid, wide=self.wide_grid)
         sim_cache: Dict[str, List[TradeOutcome]] = {}
         for g in grid:
             sim_cache[g.key()] = simulate_all_candidates(

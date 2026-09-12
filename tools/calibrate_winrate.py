@@ -87,6 +87,16 @@ def main() -> int:
     )
     ap.add_argument("--fine", action="store_true", help="use the fine geometry grid")
     ap.add_argument(
+        "--wide-grid",
+        action="store_true",
+        help="also search targets beyond 1.5R (2.0/2.5, and 3.0 on the fine grid). "
+             "Previously unsafe because the engine coerced trail_atr=None into a "
+             "live 1.5xATR trail while the simulator disabled it, so the two "
+             "resolved exits differently at and above tp_r=2.0. That divergence is "
+             "now fixed; the grid boundary was binding (10/16 symbols pinned at "
+             "1.5) before this option existed.",
+    )
+    ap.add_argument(
         "--allow-unreachable-target",
         action="store_true",
         help="DISABLE the reachability guard. By default the selection space excludes "
@@ -131,12 +141,13 @@ def main() -> int:
         min_margin=args.min_margin,
         enforce_reachable_target=not args.allow_unreachable_target,
         reachability_margin=args.reachability_margin,
+        wide_grid=args.wide_grid,
     )
 
     floor = min_tp_r_for_target(args.target, margin=args.reachability_margin)
     print(f"Calibrating {len(symbols)} symbols | target {args.target:.0%} | "
           f"min_trades {args.min_trades} | folds {args.folds} | "
-          f"grid {'fine' if args.fine else 'coarse'}")
+          f"grid {'fine' if args.fine else 'coarse'}{' +wide' if args.wide_grid else ''}")
     if args.allow_unreachable_target:
         print("  reachability guard OFF (--allow-unreachable-target): selection may "
               "choose a target that cannot break even at the win-rate target")

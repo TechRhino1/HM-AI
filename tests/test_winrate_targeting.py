@@ -770,3 +770,75 @@ def test_reachability_guard_never_empties_the_selection_space():
     assert min_tp_r_for_target(0.35) > widest
     combos = _calibrator(target_wr=0.35)._grid_for(cands, "score")
     assert combos, "guard must not empty the selection space"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Simulator / engine exit-policy parity
+#
+# The calibrator measures out-of-sample expectancy on a geometry, and the engine
+# is supposed to trade that same geometry. If the two resolve ``trail_atr=None``
+# differently they silently trade different exit schedules. The engine used to
+# coerce None to 1.5 ("or 1.5"), turning a disabled trail into a live 1.5xATR
+# trail. That is invisible below tp_r=2.0 -- the trail only engages at
+# trail_activation_r, which a 1.5R trade never reaches -- and severe at and above
+# it: on NAS100 the calibrator predicted 44.2% WR / +0.125R while the engine
+# realised 23.3% WR / -0.246R.
+# ─────────────────────────────────────────────────────────────────────────────
+def _nas100():
+    from jarvis.data.symbol_registry import resolve
+
+    return resolve("NAS100")
+
+
+@pytest.mark.parametrize("trail_atr", [None, 1.5, 2.0])
+def test_engine_and_simulator_resolve_the_same_exit_policy(trail_atr):
+    from jarvis.backtesting.exit_geometry import build_exit_geometry
+
+    spec = _nas100()
+    engine_policy = build_exit_geometry(
+        "A_fixed_tp", tp_r=2.0, trail_atr=trail_atr, trail_activation_r=2.0
+    ).to_policy("NAS100", spec)
+    sim_policy = Geometry(
+        tp_r=2.0, be_trigger_r=None, fast_cash_r=None, max_bars=48,
+        trail_atr=trail_atr, trail_activation_r=2.0,
+    ).to_policy("NAS100", spec)
+
+    assert engine_policy.trail_activation_r == sim_policy.trail_activation_r
+    assert engine_policy.runner_trail_atr == sim_policy.runner_trail_atr
+    assert engine_policy.be_trigger_r == sim_policy.be_trigger_r
+
+
+def test_trail_atr_none_disables_the_trail_on_both_paths():
+    from jarvis.backtesting.exit_geometry import build_exit_geometry
+
+    spec = _nas100()
+    engine_policy = build_exit_geometry(
+        "A_fixed_tp", tp_r=2.0, trail_atr=None, trail_activation_r=2.0
+    ).to_policy("NAS100", spec)
+    sim_policy = Geometry(
+        tp_r=2.0, be_trigger_r=None, fast_cash_r=None, max_bars=48,
+        trail_atr=None, trail_activation_r=2.0,
+    ).to_policy("NAS100", spec)
+
+    # Disabled is expressed as an unreachable activation, not a magic value.
+    for policy in (engine_policy, sim_policy):
+        assert policy.trail_activation_r >= 1e9, "trail must be unreachable when disabled"
+
+
+def test_trail_atr_set_enables_the_trail_on_both_paths():
+    from jarvis.backtesting.exit_geometry import build_exit_geometry
+
+    spec = _nas100()
+    engine_policy = build_exit_geometry(
+        "A_fixed_tp", tp_r=2.0, trail_atr=1.5, trail_activation_r=2.0
+    ).to_policy("NAS100", spec)
+    assert engine_policy.trail_activation_r == pytest.approx(2.0)
+    assert engine_policy.runner_trail_atr == pytest.approx(1.5)
+
+
+def test_calibration_grid_never_enables_a_runner_trail():
+    # The grid is a fixed-TP search space. If a geometry ever shipped with a live
+    # trail, the engine's realised exit schedule would stop matching the one the
+    # out-of-sample expectancy was measured on.
+    for g in default_geometry_grid(coarse=True):
+        assert g.trail_atr is None, f"grid geometry enables a trail: {g.key()}"

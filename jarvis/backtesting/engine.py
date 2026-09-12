@@ -565,14 +565,30 @@ class BacktestEngine:
                             geom = wr_profile.geometry
                             direction_sign = 1.0 if decision.bias == "BUY" else -1.0
                             geom_tp = float(geom.tp_r) if (geom and geom.tp_r is not None) else 1.0
-                            geom_trail = getattr(geom, "trail_atr", 1.5) or 1.5
+                            # ``trail_atr = None`` means "no runner trail". That is
+                            # the same convention the calibration simulator uses:
+                            # ``Geometry.to_policy`` pushes ``trail_activation_r`` to
+                            # 1e9 when ``trail_atr`` is None, which disables the trail
+                            # entirely. The previous ``or 1.5`` coerced None into a
+                            # live 1.5xATR trail, so the engine traded a DIFFERENT
+                            # exit schedule from the one the calibrator measured its
+                            # out-of-sample expectancy on — precisely what the
+                            # comment above is trying to prevent.
+                            #
+                            # The divergence is invisible below tp_r = 2.0, because
+                            # the trail only engages at ``trail_activation_r`` (2.0)
+                            # and a trade targeting 1.5R exits before it gets there.
+                            # At and above 2.0 it is severe: on NAS100 the calibrator
+                            # predicted 44.2% WR / +0.125R while the engine realised
+                            # 23.3% WR / -0.246R. Preserve None so the two agree.
+                            geom_trail = getattr(geom, "trail_atr", None)
                             geom_be = getattr(geom, "be_trigger_r", None)
                             geom_trail_act = getattr(geom, "trail_activation_r", 2.0) or 2.0
                             geom_max_bars = int(geom.max_bars) if geom else 48
                             exit_geom = build_exit_geometry(
                                 getattr(wr_profile, "geometry_mode", "A_fixed_tp"),
                                 tp_r=geom_tp,
-                                trail_atr=float(geom_trail),
+                                trail_atr=None if geom_trail is None else float(geom_trail),
                                 be_trigger_r=geom_be,
                                 trail_activation_r=float(geom_trail_act),
                                 max_bars=geom_max_bars,

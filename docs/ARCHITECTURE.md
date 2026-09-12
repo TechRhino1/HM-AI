@@ -260,6 +260,26 @@ candidate geometry (64 geometries × 16 symbols) would take days. Instead:
    the target win rate equals the break-even win rate, leaving nothing for spread,
    slippage or trailing exits realising less than the nominal target. Use
    `--reachability-margin` to require real headroom (0.17 gives `tp_r >= 0.5`).
+10. **`trail_atr = None` means "no trail" — and it must survive to `to_policy`.**
+   Both `Geometry.to_policy` and `ExitGeometry.to_policy` implement that by pushing
+   `trail_activation_r` to `1e9`. `BacktestEngine` used to write
+   `getattr(geom, "trail_atr", 1.5) or 1.5`, which coerces `None` into a live
+   1.5×ATR trail, so the engine traded a different exit schedule from the one the
+   calibrator measured its out-of-sample expectancy on — the exact mismatch the
+   shared-schedule design exists to prevent. It is dormant below `tp_r = 2.0`
+   because the trail only engages at `trail_activation_r = 2.0`, which a 1.5R
+   trade never reaches; at and above 2.0 it was severe (NAS100: calibrator
+   predicted 44.2% WR / +0.125R, engine realised 23.3% WR / −0.246R). Never
+   substitute a default for `None` on the way to `to_policy`.
+   Pinned by `tests/test_winrate_targeting.py::test_engine_and_simulator_resolve_the_same_exit_policy`.
+11. **A pile-up on the grid boundary is not evidence the optimum lies beyond it.**
+   When 10 of 16 symbols chose `tp_r = 1.5` (the widest coarse-grid value), the
+   obvious inference was that the boundary was binding and should be widened.
+   Tested via `--wide-grid` (to 2.5): the result was **worse by 5.46 R**, and the
+   pile-up simply **moved** — the same 10 symbols pinned at the new boundary. The
+   pile-up reflects an in-sample selection criterion that is monotone in `tp_r`,
+   not an optimum just outside the grid. Extending a grid relocates the artefact.
+   Keep the coarse grid capped at 1.5.
 
 ### Reporting contract
 `tools/run_3month_backtest.py` renders seven sections; two of them exist purely
