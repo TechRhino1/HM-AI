@@ -2,7 +2,10 @@
 Unit and Integration Tests for TradingView Live Data Provider & 2026 Universe Baselines.
 """
 import unittest
+import pytest
 from typing import Dict, Any
+
+pytestmark = pytest.mark.network
 
 from jarvis.data.tradingview_provider import TradingViewDataProvider, TRADINGVIEW_PROVIDER
 from jarvis.data.market_data_provider import fetch_real_candles, get_calibrated_baseline_candles

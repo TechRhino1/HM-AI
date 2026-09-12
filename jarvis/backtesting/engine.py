@@ -319,6 +319,10 @@ class BacktestEngine:
                 # 5.1 scale-out rungs: close every ladder rung whose R level is
                 # reached, with the harness's conservative rule - if the bar
                 # also spans the stop, the stop fills first and no rung fills.
+                closed = False
+                exit_price = 0.0
+                result = ""
+
                 _legs = open_trade.get("legs") or []
                 if _legs and float(open_trade.get("risk_dist") or 0.0) > 0:
                     _rd = float(open_trade["risk_dist"])
@@ -332,7 +336,8 @@ class BacktestEngine:
                                 continue
                             if _r_now < float(_lg["r"]):
                                 continue
-                            _lots = round(open_trade["lots"] * float(_lg["pct"]), 2)
+                            _planned_lots = round(open_trade.get("initial_lots", open_trade["lots"]) * float(_lg["pct"]), 2)
+                            _lots = min(open_trade["lots"], _planned_lots)
                             if _lots < 0.01:
                                 _lg["done"] = True
                                 continue
@@ -346,48 +351,50 @@ class BacktestEngine:
                             open_trade["lots"] = round(open_trade["lots"] - _lots, 2)
                             _lg["done"] = True
                             open_trade["partial_closed"] = True
+                            if open_trade["lots"] <= 0.001:
+                                closed = True
+                                exit_price = _px
+                                result = "LADDER_TP"
+                                break
 
                 # Stage 4: Check SL/TP exit for remaining position
-                closed = False
-                exit_price = 0.0
-                result = ""
-
-                if open_trade["type"] == "BUY":
-                    sl_hit = low <= open_trade["sl"]
-                    tp_hit = (open_trade["tp"] is not None) and (high >= open_trade["tp"])
-                    if sl_hit and tp_hit:
-                        # Conservative intrabar ordering (matches trade_simulator):
-                        # the stop resting at the start of the bar is tested first,
-                        # so a bar that spans both is booked as a stop-out loss.
-                        # Resolving it as a TP on the open-price heuristic inflated
-                        # win rate exactly where the target lives.
-                        exit_price = open_trade["sl"] - actual_slippage_delta
-                        result = "BE/TRAIL_SL" if (open_trade.get("partial_closed") or open_trade.get("be_locked")) else "SL"
-                        closed = True
-                    elif sl_hit:
-                        exit_price = open_trade["sl"] - actual_slippage_delta
-                        result = "BE/TRAIL_SL" if (open_trade.get("partial_closed") or open_trade.get("be_locked")) else "SL"
-                        closed = True
-                    elif tp_hit:
-                        exit_price = open_trade["tp"]
-                        result = "TP"
-                        closed = True
-                elif open_trade["type"] == "SELL":
-                    sl_hit = high >= open_trade["sl"]
-                    tp_hit = (open_trade["tp"] is not None) and (low <= open_trade["tp"])
-                    if sl_hit and tp_hit:
-                        # Conservative intrabar ordering (matches trade_simulator).
-                        exit_price = open_trade["sl"] + actual_slippage_delta
-                        result = "BE/TRAIL_SL" if (open_trade.get("partial_closed") or open_trade.get("be_locked")) else "SL"
-                        closed = True
-                    elif sl_hit:
-                        exit_price = open_trade["sl"] + actual_slippage_delta
-                        result = "BE/TRAIL_SL" if (open_trade.get("partial_closed") or open_trade.get("be_locked")) else "SL"
-                        closed = True
-                    elif tp_hit:
-                        exit_price = open_trade["tp"]
-                        result = "TP"
-                        closed = True
+                if not closed:
+                    if open_trade["type"] == "BUY":
+                        sl_hit = low <= open_trade["sl"]
+                        tp_hit = (open_trade["tp"] is not None) and (high >= open_trade["tp"])
+                        if sl_hit and tp_hit:
+                            # Conservative intrabar ordering (matches trade_simulator):
+                            # the stop resting at the start of the bar is tested first,
+                            # so a bar that spans both is booked as a stop-out loss.
+                            # Resolving it as a TP on the open-price heuristic inflated
+                            # win rate exactly where the target lives.
+                            exit_price = open_trade["sl"] - actual_slippage_delta
+                            result = "BE/TRAIL_SL" if (open_trade.get("partial_closed") or open_trade.get("be_locked")) else "SL"
+                            closed = True
+                        elif sl_hit:
+                            exit_price = open_trade["sl"] - actual_slippage_delta
+                            result = "BE/TRAIL_SL" if (open_trade.get("partial_closed") or open_trade.get("be_locked")) else "SL"
+                            closed = True
+                        elif tp_hit:
+                            exit_price = open_trade["tp"]
+                            result = "TP"
+                            closed = True
+                    elif open_trade["type"] == "SELL":
+                        sl_hit = high >= open_trade["sl"]
+                        tp_hit = (open_trade["tp"] is not None) and (low <= open_trade["tp"])
+                        if sl_hit and tp_hit:
+                            # Conservative intrabar ordering (matches trade_simulator).
+                            exit_price = open_trade["sl"] + actual_slippage_delta
+                            result = "BE/TRAIL_SL" if (open_trade.get("partial_closed") or open_trade.get("be_locked")) else "SL"
+                            closed = True
+                        elif sl_hit:
+                            exit_price = open_trade["sl"] + actual_slippage_delta
+                            result = "BE/TRAIL_SL" if (open_trade.get("partial_closed") or open_trade.get("be_locked")) else "SL"
+                            closed = True
+                        elif tp_hit:
+                            exit_price = open_trade["tp"]
+                            result = "TP"
+                            closed = True
 
                 if closed:
                     pips = ((exit_price - open_trade["entry"]) if open_trade["type"] == "BUY" else (open_trade["entry"] - exit_price)) / spec.pip_size
@@ -557,23 +564,25 @@ class BacktestEngine:
                             # realized expectancy match the calibrated OOS.
                             geom = wr_profile.geometry
                             direction_sign = 1.0 if decision.bias == "BUY" else -1.0
-                            tp_price = entry_price + direction_sign * float(geom.tp_r) * actual_risk_dist
-                            exit_policy_for_trade = geom.to_policy(symbol, spec)
-                            trade_max_bars = int(geom.max_bars)
-                            # 5.1: execute the SAME schedule the OOS number was
-                            # measured on (fixed target 1.0R, 1.5x ATR trail, no
-                            # breakeven). Ladder geometries carry tp_r=None so
-                            # their runner is carried by the trail, not capped.
+                            geom_tp = float(geom.tp_r) if (geom and geom.tp_r is not None) else 1.0
+                            geom_trail = getattr(geom, "trail_atr", 1.5) or 1.5
+                            geom_be = getattr(geom, "be_trigger_r", None)
+                            geom_trail_act = getattr(geom, "trail_activation_r", 2.0) or 2.0
+                            geom_max_bars = int(geom.max_bars) if geom else 48
                             exit_geom = build_exit_geometry(
                                 getattr(wr_profile, "geometry_mode", "A_fixed_tp"),
-                                tp_r=1.0, trail_atr=1.5,
-                                be_trigger_r=None,
-                                max_bars=int(geom.max_bars),
+                                tp_r=geom_tp,
+                                trail_atr=float(geom_trail),
+                                be_trigger_r=geom_be,
+                                trail_activation_r=float(geom_trail_act),
+                                max_bars=geom_max_bars,
                             )
                             if exit_geom.tp_r is None:
                                 tp_price = None      # trail-only / ladder runner
                             else:
                                 tp_price = entry_price + direction_sign * float(exit_geom.tp_r) * actual_risk_dist
+                            exit_policy_for_trade = exit_geom.to_policy(symbol, spec)
+                            trade_max_bars = geom_max_bars
                         else:
                             tp_price = decision.take_profit + price_shift
                             exit_policy_for_trade = ExitPolicy.for_symbol(symbol, spec)

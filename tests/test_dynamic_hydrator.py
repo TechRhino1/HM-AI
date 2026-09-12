@@ -6,7 +6,10 @@ batch hydration, and US/Indian universe integration.
 import concurrent.futures
 import time
 import unittest
+import pytest
 from typing import Dict, Any, List
+
+pytestmark = pytest.mark.network
 
 from jarvis.data.dynamic_hydrator import (
     DynamicMarketDataHydrator,

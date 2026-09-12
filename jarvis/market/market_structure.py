@@ -25,11 +25,13 @@ class MarketStructureEngine:
         swing_lows = []
         w = self.pivot_window
 
-        # Identify swing pivots
+        # Identify swing pivots (deterministic discovery)
         for i in range(w, len(df) - w):
-            if highs[i] == max(highs[i - w:i + w + 1]):
+            window_high = max(highs[i - w:i + w + 1])
+            window_low = min(lows[i - w:i + w + 1])
+            if highs[i] >= window_high and (not swing_highs or swing_highs[-1]["index"] != i):
                 swing_highs.append({"index": i, "price": float(highs[i]), "time": times[i]})
-            if lows[i] == min(lows[i - w:i + w + 1]):
+            if lows[i] <= window_low and (not swing_lows or swing_lows[-1]["index"] != i):
                 swing_lows.append({"index": i, "price": float(lows[i]), "time": times[i]})
 
         if len(swing_highs) < 2 or len(swing_lows) < 2:

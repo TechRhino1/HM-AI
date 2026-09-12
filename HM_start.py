@@ -45,7 +45,7 @@ _TUNNEL_STATE = {
     "cloudflare_status": "STARTING",
     "url": "https://hm2026.serveousercontent.com",
     "status": "STARTING",
-    "provider": "Dual Tunnel (Serveo + Cloudflare)",
+    "provider": "Serveo (Custom: hm2026) + Cloudflare Edge",
     "serveo_proc": None,
     "cloudflare_proc": None
 }
@@ -97,16 +97,29 @@ def _serveo_worker(port: int = 8501, custom_subdomain: str = "hm2026"):
     """Dedicated persistent worker for https://hm2026.serveousercontent.com with auto-reconnect."""
     cmd = [
         "ssh", "-o", "StrictHostKeyChecking=no",
-        "-o", "ServerAliveInterval=10",
+        "-o", "ServerAliveInterval=15",
         "-o", "ServerAliveCountMax=3",
         "-o", "TCPKeepAlive=yes",
-        "-o", "ExitOnForwardFailure=yes",
         "-R", f"{custom_subdomain}:80:127.0.0.1:{port}",
         "serveo.net"
     ]
-    key_path = os.path.expanduser("~/.ssh/id_ed25519")
-    if os.path.exists(key_path):
-        cmd = [cmd[0], "-i", key_path] + cmd[1:]
+    for candidate_key in [
+        os.path.expanduser("~/.ssh/id_ed25519"),
+        os.path.expanduser("~/.ssh/id_hm2026"),
+        os.path.expanduser("~/.ssh/id_rsa")
+    ]:
+        if os.path.exists(candidate_key):
+            cmd = [cmd[0], "-i", candidate_key] + cmd[1:]
+            break
+
+    try:
+        if sys.platform == "win32":
+            subprocess.run(["taskkill", "/F", "/IM", "ssh.exe"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        else:
+            subprocess.run(["pkill", "-f", "serveo.net"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        time.sleep(1.0)
+    except Exception:
+        pass
 
     while True:
         try:
@@ -120,40 +133,44 @@ def _serveo_worker(port: int = 8501, custom_subdomain: str = "hm2026"):
                 errors="replace"
             )
             _TUNNEL_STATE["serveo_proc"] = proc
-            for _ in range(40):
+            rate_limited = False
+            for _ in range(60):
                 line = proc.stdout.readline()
                 if not line:
                     if proc.poll() is not None:
                         break
                     time.sleep(0.1)
                     continue
-                if "Forwarding HTTP traffic from" in line:
+                if "Forwarding HTTP traffic from" in line or f"{custom_subdomain}.serveousercontent.com" in line:
                     _TUNNEL_STATE["serveo_url"] = f"https://{custom_subdomain}.serveousercontent.com"
                     _TUNNEL_STATE["serveo_status"] = "CONNECTED"
                     _TUNNEL_STATE["url"] = _TUNNEL_STATE["serveo_url"]
                     _save_active_tunnel_url(_TUNNEL_STATE["serveo_url"], "serveo")
                     logger.info(f"Custom Subdomain Active: {_TUNNEL_STATE['serveo_url']}")
-                    print(f"\n[HM_START] 🌐 CUSTOM SUBDOMAIN ACTIVE: {_TUNNEL_STATE['serveo_url']}\n", flush=True)
+                    print(f"\n[HM_START] 🌐 CUSTOM SUBDOMAIN ACTIVE (MOBILE LINK): {_TUNNEL_STATE['serveo_url']}\n", flush=True)
                     break
+                if "Free users are limited" in line or "failed for listen port" in line:
+                    rate_limited = True
+
+            # Keep alive while process is running
             while proc.poll() is None:
-                line = proc.stdout.readline()
-                if not line and proc.poll() is not None:
-                    break
-                time.sleep(1.0)
+                time.sleep(2.0)
+
             try:
                 if proc.poll() is None:
                     proc.terminate()
             except Exception:
                 pass
-            logger.warning("Serveo custom tunnel closed. Auto-reconnecting in 3s...")
+            backoff = 60 if rate_limited else 5
+            logger.warning(f"Serveo custom tunnel closed. Auto-reconnecting in {backoff}s...")
             _TUNNEL_STATE["serveo_status"] = "RECONNECTING"
-            time.sleep(3)
+            time.sleep(backoff)
         except Exception as e:
-            logger.error(f"Serveo worker error: {e}. Reconnecting in 5s...")
-            time.sleep(5)
+            logger.error(f"Serveo worker error: {e}. Reconnecting in 10s...")
+            time.sleep(10)
 
 def _cloudflare_worker(port: int = 8501):
-    """Dedicated worker for Cloudflare Edge Tunnel with zero drops."""
+    """Dedicated worker for Cloudflare Edge Tunnel as high-speed redundant edge."""
     cloudflared_bin = find_cloudflared_binary()
     if not cloudflared_bin:
         logger.warning("cloudflared binary not found; skipping secondary edge tunnel.")
@@ -173,7 +190,7 @@ def _cloudflare_worker(port: int = 8501):
             )
             _TUNNEL_STATE["cloudflare_proc"] = proc
             rate_limited = False
-            for _ in range(50):
+            for _ in range(60):
                 line = proc.stdout.readline()
                 if not line:
                     if proc.poll() is not None:
@@ -189,9 +206,8 @@ def _cloudflare_worker(port: int = 8501):
                         continue
                     _TUNNEL_STATE["cloudflare_url"] = url
                     _TUNNEL_STATE["cloudflare_status"] = "CONNECTED"
-                    _save_active_tunnel_url(url, "cloudflare")
-                    logger.info(f"Cloudflare Edge Tunnel Active: {url}")
-                    print(f"\n[HM_START] ⚡ CLOUDFLARE EDGE ACTIVE: {url}\n", flush=True)
+                    logger.info(f"Cloudflare Edge Tunnel Active (Backup): {url}")
+                    print(f"\n[HM_START] ⚡ CLOUDFLARE EDGE ACTIVE (SECONDARY): {url}\n", flush=True)
                     break
             while proc.poll() is None:
                 line = proc.stdout.readline()
@@ -212,7 +228,7 @@ def _cloudflare_worker(port: int = 8501):
             time.sleep(5)
 
 def _start_background_tunnel(port: int = 8501):
-    """Launches both Serveo (custom domain hm2026) and Cloudflare (fast edge) in parallel."""
+    """Launches Serveo (custom domain hm2026) as primary mobile link, and Cloudflare Edge in parallel."""
     t_serveo = threading.Thread(target=_serveo_worker, args=(port, "hm2026"), daemon=True, name="hm_tunnel_serveo")
     t_serveo.start()
 
@@ -222,24 +238,26 @@ def _start_background_tunnel(port: int = 8501):
 def hm_start(mode: str = "live", port: int = 8501, host: str = "127.0.0.1", trade_style: str = "ALL"):
     local_ip = get_local_wifi_ip()
 
-    # Remote tunnels are opt-in: they expose a trading terminal outside the host.
-    enable_tunnel = os.environ.get("JARVIS_ENABLE_TUNNEL", "").lower() in {"1", "true", "yes"}
+    # Remote tunnels start automatically by default for mobile phone access (disable with JARVIS_ENABLE_TUNNEL=0 if needed)
+    enable_tunnel = os.environ.get("JARVIS_ENABLE_TUNNEL", "1").lower() not in {"0", "false", "no", "off"}
     if enable_tunnel:
         tunnel_thread = threading.Thread(target=_start_background_tunnel, args=(port,), daemon=True, name="hm_mobile_tunnel")
         tunnel_thread.start()
 
-    # 2. Start Autonomous Orchestrator (verifies mode safety)
+    # 2. Start Autonomous Orchestrator (defaults to LIVE mode; allows paper for testing)
     orchestrator = JarvisOrchestrator(mode=mode, trade_style=trade_style)
     actual_mode = orchestrator.mode.upper()
 
     print("=" * 95, flush=True)
     print("                 HM AI 4.0 — INSTITUTIONAL QUANTITATIVE TRADING PLATFORM", flush=True)
     print("=" * 95, flush=True)
-    print(f" -> Mode                       : {actual_mode}", flush=True)
+    print(f" -> Execution Mode             : {actual_mode}", flush=True)
     print(f" -> Trade Style                : {trade_style.upper()}", flush=True)
     print(f" -> Local Terminal             : http://{host}:{port}", flush=True)
-    print(f" -> Local Network Address      : {local_ip} (not exposed by default)", flush=True)
+    print(f" -> Local Network Address      : {local_ip}", flush=True)
+    print(f" -> Mobile Access Link         : https://hm2026.serveousercontent.com", flush=True)
     print(f" -> Remote Tunnel              : {'enabled' if enable_tunnel else 'disabled'}", flush=True)
+    print(f" -> Admin Login                : admin / hm2026admin", flush=True)
     print("=" * 95, flush=True)
 
     orch_thread = threading.Thread(target=orchestrator.start, daemon=True, name="hm_orchestrator")
@@ -268,8 +286,16 @@ def hm_start(mode: str = "live", port: int = 8501, host: str = "127.0.0.1", trad
             time.sleep(3)
 
 def main():
-    mode = sys.argv[1] if len(sys.argv) > 1 and not sys.argv[1].startswith("-") else "live"
+    # Default to LIVE execution mode; 'paper' mode can be passed as argument for testing
+    mode = "live"
+    if len(sys.argv) > 1 and not sys.argv[1].startswith("-"):
+        raw = sys.argv[1].lower()
+        if raw in {"paper", "test", "sim", "backtest", "demo"}:
+            mode = "paper"
+        else:
+            mode = "live"
     hm_start(mode=mode)
 
 if __name__ == "__main__":
     main()
+

@@ -65,10 +65,11 @@ class FairValueGapEngine:
             if c1_high < c3_low:
                 top = c3_low
                 bottom = c1_high
-                mitigated = bool(np.any(lows[i + 1:] <= top)) if i + 1 < n_bars else False
+                mitigated = bool(np.any(lows[i + 1:] <= bottom)) if i + 1 < n_bars else False
                 bullish_fvgs.append({
                     'top': top,
                     'bottom': bottom,
+                    'direction': 'BULLISH',
                     'bar_idx': i - 2,
                     'mitigated': mitigated
                 })
@@ -77,10 +78,11 @@ class FairValueGapEngine:
             elif c1_low > c3_high:
                 top = c1_low
                 bottom = c3_high
-                mitigated = bool(np.any(highs[i + 1:] >= bottom)) if i + 1 < n_bars else False
+                mitigated = bool(np.any(highs[i + 1:] >= top)) if i + 1 < n_bars else False
                 bearish_fvgs.append({
                     'top': top,
                     'bottom': bottom,
+                    'direction': 'BEARISH',
                     'bar_idx': i - 2,
                     'mitigated': mitigated
                 })
@@ -88,9 +90,8 @@ class FairValueGapEngine:
         result['bullish_fvgs'] = bullish_fvgs
         result['bearish_fvgs'] = bearish_fvgs
         
-        # 2. OB Detection (Last 30 candles)
-        ob_lookback = min(30, n_bars)
-        ob_start = n_bars - ob_lookback
+        # 2. Institutional Order Block (OB) Detection
+        ob_start = max(1, n_bars - 30)
         bullish_obs = []
         bearish_obs = []
         
@@ -104,14 +105,26 @@ class FairValueGapEngine:
                 if curr_c > curr_o and prev_c < prev_o:
                     # Bullish OB
                     top, bottom = prev_h, prev_l
-                    mitigated = bool(np.any(lows[i + 1:] <= top)) if i + 1 < n_bars else False
-                    bullish_obs.append({'top': top, 'bottom': bottom, 'bar_idx': i - 1, 'mitigated': mitigated})
+                    mitigated = bool(np.any(lows[i + 1:] <= bottom)) if i + 1 < n_bars else False
+                    bullish_obs.append({
+                        'top': top,
+                        'bottom': bottom,
+                        'direction': 'BULLISH',
+                        'bar_idx': i - 1,
+                        'mitigated': mitigated
+                    })
                     
                 elif curr_c < curr_o and prev_c > prev_o:
                     # Bearish OB
                     top, bottom = prev_h, prev_l
-                    mitigated = bool(np.any(highs[i + 1:] >= bottom)) if i + 1 < n_bars else False
-                    bearish_obs.append({'top': top, 'bottom': bottom, 'bar_idx': i - 1, 'mitigated': mitigated})
+                    mitigated = bool(np.any(highs[i + 1:] >= top)) if i + 1 < n_bars else False
+                    bearish_obs.append({
+                        'top': top,
+                        'bottom': bottom,
+                        'direction': 'BEARISH',
+                        'bar_idx': i - 1,
+                        'mitigated': mitigated
+                    })
 
         result['bullish_obs'] = bullish_obs
         result['bearish_obs'] = bearish_obs
@@ -143,7 +156,7 @@ class FairValueGapEngine:
             if result['active_bearish_ob']['bottom'] <= current_price <= result['active_bearish_ob']['top']:
                 result['price_in_ob'] = True
 
-        # 3. Confluence Detection (Active FVG overlaps with Active OB)
+        # 3. Confluence Detection (Active FVG overlaps with Active OB of SAME direction)
         active_fvgs = []
         if result['active_bullish_fvg']: active_fvgs.append(result['active_bullish_fvg'])
         if result['active_bearish_fvg']: active_fvgs.append(result['active_bearish_fvg'])
@@ -154,7 +167,7 @@ class FairValueGapEngine:
         
         for fvg in active_fvgs:
             for ob in active_obs:
-                if fvg['bottom'] <= ob['top'] and fvg['top'] >= ob['bottom']:
+                if fvg.get('direction') == ob.get('direction') and fvg['bottom'] <= ob['top'] and fvg['top'] >= ob['bottom']:
                     result['fvg_ob_confluence'] = True
                     break
 

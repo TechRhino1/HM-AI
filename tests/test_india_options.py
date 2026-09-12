@@ -79,6 +79,7 @@ def test_multi_leg_payoff_curve():
     assert strategy_res["max_loss_inr"] < 0
     assert "strategy_name" in strategy_res
 
+@pytest.mark.network
 def test_single_option_buy_signals():
     signals = OPTION_SIGNALS.generate_single_option_signals(limit=5)
     assert len(signals) > 0

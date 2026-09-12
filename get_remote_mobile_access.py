@@ -15,19 +15,22 @@ def get_public_ip():
     except Exception:
         return "Unknown"
 
+import os
+
 def main():
     public_ip = get_public_ip()
-    tunnel_url = "https://twelve-doors-find.loca.lt"
+    primary_url = "https://hm2026.serveousercontent.com"
 
     print("=" * 80)
     print("      HM AI 4.0 -- WORLDWIDE REMOTE MOBILE ACCESS INSTRUCTIONS")
     print("=" * 80)
     print("\n1. Open this URL on your mobile phone browser from ANYWHERE in the world:\n")
-    print(f"   URL: {tunnel_url}")
-    print("\n2. When localtunnel asks for your 'Endpoint IP' / 'Tunnel Password':\n")
+    print(f"   URL: {primary_url}")
+    print("\n2. If prompted for Endpoint IP / Tunnel Password:")
     print(f"   Enter IP: {public_ip}")
-    print("\n3. Click 'Click to Submit' -- the glassmorphic login modal will open.")
-    print("4. Enter your remote password to log into HM AI 4.0 Dashboard on mobile.")
+    print("\n3. Credentials to log into HM AI 4.0 Dashboard on mobile:")
+    print("   Username: admin")
+    print("   Password: hm2026admin (or hm2026)")
     print("=" * 80)
 
 if __name__ == "__main__":

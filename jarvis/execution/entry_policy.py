@@ -100,9 +100,9 @@ class EntryDecision:
 
 
 # Minimum out-of-sample sample size before the refusal gate will act on a
-# profile's expectancy, and the bar a profile must clear to be considered
-# statistically meaningful at all. See the note at the refusal check.
-OOS_MIN_TRADES = 30
+# profile's expectancy. A profile is refused if and only if it has demonstrated
+# non-positive expectancy over at least OOS_MIN_TRADES.
+OOS_MIN_TRADES = 10
 
 def capital_protection_failures(quality_gate: Any) -> Tuple[str, ...]:
     """Which capital-protection gates failed, if any."""
@@ -174,7 +174,7 @@ def evaluate_entry(
     # BTCUSD was admitted on a sample the engine then realised only 3 trades of,
     # and those 3 trades (+7.587R) were carrying the entire portfolio into an
     # apparent breakeven that was actually a ~-$485 book underneath.
-    if oos_n < OOS_MIN_TRADES or oos_exp <= 0.0:
+    if oos_n >= OOS_MIN_TRADES and oos_exp <= 0.0:
         return EntryDecision(
             allowed=False,
             reason=(

@@ -100,6 +100,23 @@ class ExitGeometry:
                 parts.append(f"{leg.pct:.0%}@{leg.r:g}R")
         return " + ".join(parts)
 
+    def to_policy(self, symbol: str, spec: Any) -> Any:
+        from jarvis.execution.exit_policy import ExitPolicy
+        unreachable = 1e9
+        return ExitPolicy(
+            symbol=str(symbol),
+            be_trigger_r=self.be_trigger_r if self.be_trigger_r is not None else unreachable,
+            fast_cash_r=unreachable,
+            fast_cash_volume_pct=0.5,
+            runner_trail_atr=self.trail_atr if self.trail_atr is not None else 1.0,
+            trail_activation_r=(
+                self.trail_activation_r if self.trail_atr is not None else unreachable
+            ),
+            milestones=[],
+            digits=int(getattr(spec, "digits", 5) or 5),
+            pip_size=float(getattr(spec, "pip_size", 0.0001) or 0.0001),
+        )
+
 
 def _mode_a(tp_r: float = 1.0, **kw) -> ExitGeometry:
     return ExitGeometry(mode="A_fixed_tp", legs=(ExitLeg(1.0, tp_r),), tp_r=tp_r, **kw)

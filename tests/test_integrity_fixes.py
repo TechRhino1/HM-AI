@@ -6,6 +6,7 @@ Regression tests for the integrity fixes applied during remediation:
     silently presenting fabricated candles as real.
 """
 import unittest
+import pytest
 
 from jarvis.analysts.macro_analyst import _parse_metric
 from jarvis.intelligence.confidence import ConfidenceCalibrationEngine
@@ -32,12 +33,14 @@ class TestIntegrityFixes(unittest.TestCase):
         # A known bin centre maps to its empirical value (0.95 -> 0.86 with new less-punitive curve).
         self.assertAlmostEqual(c.calibrate_probability(0.95), 0.86, places=3)
 
+    @pytest.mark.network
     def test_india_data_source_flag(self):
         d = IndiaTechnicalEngine().analyze_india_instrument("RELIANCE", "1D")
         self.assertIn("data_source", d)
         self.assertIn(d["data_source"], ("live", "synthetic_fallback", "calibrated_feed"))
         self.assertEqual(len(d["candles"]), 120)
 
+    @pytest.mark.network
     def test_stock_data_source_flag(self):
         s = StockIntelligenceEngine().analyze_stock("AAPL", "1D")
         self.assertIn("data_source", s)

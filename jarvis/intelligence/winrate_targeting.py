@@ -595,7 +595,7 @@ def _rank_key(
         return (0, 0.0, s["win_rate"], s["trades"])
     if s["win_rate"] >= target_wr:
         return (2, s["expectancy_r"], s["win_rate"], s["trades"])
-    return (1, s["win_rate"], s["expectancy_r"], s["trades"])
+    return (1, s["expectancy_r"], s["win_rate"], s["trades"])
 
 
 def _mean_summary(summaries: Sequence[Dict[str, float]]) -> Dict[str, float]:

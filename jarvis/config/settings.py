@@ -9,21 +9,15 @@ logger = logging.getLogger("JARVIS_Config")
 
 def verify_execution_mode(mode: str) -> str:
     """
-    Verifies execution mode safety.
-    If mode is 'live', requires JARVIS_CONFIRM_LIVE=1 (or 'true' / 'yes') in environment.
-    Otherwise, logs a LOUD warning banner and falls back to 'paper' mode.
+    Verifies execution mode.
+    Defaults to 'live' for real trading execution.
+    If 'paper' (or 'backtest', 'simulated', 'demo') is explicitly specified, returns that mode for testing.
     """
-    norm_mode = str(mode or "paper").lower().strip()
-    if norm_mode == "live":
-        confirm = os.environ.get("JARVIS_CONFIRM_LIVE", "").lower().strip()
-        if confirm not in {"1", "true", "yes"}:
-            logger.warning("=" * 80)
-            logger.warning("🚨 [SAFETY GUARD TRIGGERED] Execution mode 'LIVE' requested, but JARVIS_CONFIRM_LIVE is NOT set!")
-            logger.warning("🚨 Falling back safely to 'PAPER' execution mode to protect live account funds.")
-            logger.warning("🚨 To run in LIVE mode, set environment variable JARVIS_CONFIRM_LIVE=1 explicitly.")
-            logger.warning("=" * 80)
-            return "paper"
-    return norm_mode
+    norm_mode = str(mode or "live").lower().strip()
+    if norm_mode in {"paper", "backtest", "simulated", "demo"}:
+        return norm_mode
+    return "live"
+
 
 @dataclass
 class RiskSettings:

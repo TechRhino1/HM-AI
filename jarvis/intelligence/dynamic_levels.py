@@ -156,7 +156,9 @@ class DynamicRiskAndLevelsEngine:
                 if 0 < _beyond < entry_price:
                     candidate_anchors.append(_beyond)
             elif 0 < _pool < entry_price:
-                candidate_anchors.append(_pool)
+                _beyond = _pool - (0.5 * atr)
+                if 0 < _beyond < entry_price:
+                    candidate_anchors.append(_beyond)
 
             for kl in getattr(st, "key_levels", []):
                 if 0 < kl.get("price", 0) < entry_price:
@@ -280,7 +282,9 @@ class DynamicRiskAndLevelsEngine:
                 if _beyond > entry_price:
                     candidate_anchors.append(_beyond)
             elif _pool > entry_price:
-                candidate_anchors.append(_pool)
+                _beyond = _pool + (0.5 * atr)
+                if _beyond > entry_price:
+                    candidate_anchors.append(_beyond)
 
             for kl in getattr(st, "key_levels", []):
                 if kl.get("price", 0) > entry_price:
@@ -541,8 +545,8 @@ class DynamicRiskAndLevelsEngine:
                 fair_value_gaps=[]
             )
             liq = LiquidityContext(
-                buy_side_liquidity=round(price + (atr * 2.0), digits),
-                sell_side_liquidity=round(price - (atr * 2.0), digits)
+                buy_side_liquidity=0.0,
+                sell_side_liquidity=0.0
             )
             vol = VolatilityContext(
                 atr=atr,

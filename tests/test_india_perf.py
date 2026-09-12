@@ -1,6 +1,9 @@
 import os
 import sys
 import time
+import pytest
+
+pytestmark = pytest.mark.network
 
 repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if repo_root not in sys.path:
