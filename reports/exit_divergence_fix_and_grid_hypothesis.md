@@ -127,8 +127,11 @@ out-of-sample as the arbiter.
   relocation are the reliable signals.
 * Reproduce with:
   `python tools/calibrate_winrate.py --days 95 --reachability-margin 0.17 [--wide-grid]`
-* Artifacts: `config/winrate_profiles.WIDEGRID.json`, `data/signals/calibration_summary.WIDEGRID.json`,
-  `reports/widgrid_calib.log`.
+* Artifacts. Version-controlled: `config/winrate_profiles.WIDEGRID.json` (the wide-grid profiles) and
+  `config/winrate_profiles.MARGIN17.json` (the deployed narrow ones). Local only, because
+  `data/signals/` and `*.log` are gitignored: `data/signals/calibration_summary.WIDEGRID.json` and
+  `reports/widgrid_calib.log`. The aggregate and per-symbol numbers are reproduced in full above, so
+  the result does not depend on those local files surviving.
 
 ---
 
