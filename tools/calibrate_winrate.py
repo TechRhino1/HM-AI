@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import re
 import sys
 import time
 from pathlib import Path
@@ -33,10 +34,14 @@ from jarvis.config.paths import DATA_DIR  # noqa: E402
 from jarvis.intelligence.winrate_targeting import (  # noqa: E402
     WRTargetCalibrator,
     WRProfileStore,
+    min_tp_r_for_target,
 )
 
 logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger("calibrate_winrate")
+
+# A trailing window marker such as ``_183d`` / ``_95d`` in a candidate filename.
+_WINDOW_MARKER = re.compile(r"_\d+d$")
 
 SIGNAL_DIR = Path(DATA_DIR) / "signals"
 REAL_DIR = Path(DATA_DIR) / "market" / "real"
@@ -44,13 +49,25 @@ PROFILE_PATH = REPO_ROOT / "config" / "winrate_profiles.json"
 
 
 def discover(days: int = 95) -> list[str]:
+    """Symbols that have a candidate table for this window.
+
+    The default 95-day tables carry no window suffix, so a bare
+    ``*_candidates.parquet`` glob also matches other windows' tables
+    (``BTCUSD_183d_candidates.parquet``) and would invent a symbol called
+    ``BTCUSD_183d`` that has no price data. Reject any name that still carries a
+    ``_<n>d`` window marker after the expected suffix has been stripped.
+    """
     if not SIGNAL_DIR.exists():
         return []
     suffix = "" if days == 95 else f"_{days}d"
-    return sorted(
-        p.name.replace(f"{suffix}_candidates.parquet", "")
-        for p in SIGNAL_DIR.glob(f"*{suffix}_candidates.parquet")
-    )
+    out: list[str] = []
+    for p in SIGNAL_DIR.glob(f"*{suffix}_candidates.parquet"):
+        name = p.name.replace(f"{suffix}_candidates.parquet", "")
+        if _WINDOW_MARKER.search(name):
+            logger.debug("discover: ignoring %s (belongs to another window)", p.name)
+            continue
+        out.append(name)
+    return sorted(out)
 
 
 def candidate_path(symbol: str, days: int = 95) -> Path:
@@ -69,6 +86,22 @@ def main() -> int:
         help="required win-rate points above breakeven (default: per asset class)",
     )
     ap.add_argument("--fine", action="store_true", help="use the fine geometry grid")
+    ap.add_argument(
+        "--allow-unreachable-target",
+        action="store_true",
+        help="DISABLE the reachability guard. By default the selection space excludes "
+             "geometries whose tp_r cannot break even at the win-rate target "
+             "(tp_r < 1/target - 1). Pass this only to reproduce the unguarded "
+             "behaviour for comparison.",
+    )
+    ap.add_argument(
+        "--reachability-margin",
+        type=float,
+        default=0.0,
+        help="extra tp_r required above the bare break-even floor (default 0.0). "
+             "Use ~0.17 to require tp_r >= 0.5 at a 75%% target, leaving room for "
+             "spread, slippage and trailing exits realising less than the target.",
+    )
     ap.add_argument("--no-regime-geometry", action="store_true")
     ap.add_argument("--days", type=int, default=95,
                     help="history window, matching the *_H1_<days>d.parquet cache")
@@ -96,11 +129,20 @@ def main() -> int:
         # so the calibrated OOS expectancy reflects real trading costs.
         slippage_pips=0.5,
         min_margin=args.min_margin,
+        enforce_reachable_target=not args.allow_unreachable_target,
+        reachability_margin=args.reachability_margin,
     )
 
+    floor = min_tp_r_for_target(args.target, margin=args.reachability_margin)
     print(f"Calibrating {len(symbols)} symbols | target {args.target:.0%} | "
           f"min_trades {args.min_trades} | folds {args.folds} | "
           f"grid {'fine' if args.fine else 'coarse'}")
+    if args.allow_unreachable_target:
+        print("  reachability guard OFF (--allow-unreachable-target): selection may "
+              "choose a target that cannot break even at the win-rate target")
+    else:
+        print(f"  reachability guard ON: selection requires tp_r >= {floor:.4f} "
+              f"(break-even at {args.target:.0%} is {1/(1+floor):.1%} WR)")
     print()
 
     profiles = {}

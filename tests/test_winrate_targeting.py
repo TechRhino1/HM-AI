@@ -37,9 +37,11 @@ from jarvis.execution.entry_policy import (
 )
 from jarvis.intelligence.winrate_targeting import (
     RegimeEdge,
+    WRTargetCalibrator,
     WRTargetProfile,
     default_geometry_grid,
     isotonic_calibrate,
+    min_tp_r_for_target,
     regime_edge_table,
 )
 
@@ -662,3 +664,109 @@ def test_set_offline_roundtrip():
     assert is_offline() is True
     set_offline(False)
     assert is_offline() is False
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Reachability guard
+#
+# The calibrator is asked to *reach* a win-rate target, and the cheapest way to
+# raise a win rate is to move the target closer. Unconstrained, the search walks
+# tp_r down into the region where the target cannot break even: at tp_r=0.25 a
+# strategy needs 80% just to break even, so a 75% win rate loses money. Measured
+# on the 16-symbol portfolio: 7 of 16 symbols were calibrated to tp_r < 0.3333
+# and all 7 lost out of sample. These tests pin the guard that prevents it.
+# ─────────────────────────────────────────────────────────────────────────────
+@pytest.mark.parametrize("target", [0.50, 0.60, 0.6667, 0.75, 0.80, 0.90])
+def test_min_tp_r_for_target_is_exactly_the_breakeven_point(target):
+    floor = min_tp_r_for_target(target)
+    # At the floor, the break-even win rate equals the target exactly.
+    assert 1.0 / (1.0 + floor) == pytest.approx(target, rel=1e-9)
+
+
+def test_min_tp_r_for_target_known_value_for_75_percent():
+    # 1/0.75 - 1 = 1/3. This is the number quoted in the portfolio report.
+    assert min_tp_r_for_target(0.75) == pytest.approx(1.0 / 3.0, rel=1e-12)
+    assert min_tp_r_for_target(0.75) == pytest.approx(0.333333, abs=1e-6)
+
+
+def test_min_tp_r_for_target_margin_raises_the_floor():
+    base = min_tp_r_for_target(0.75)
+    wider = min_tp_r_for_target(0.75, margin=0.17)
+    assert wider > base
+    # 0.3333 + 0.17 == 0.5033, i.e. "require tp_r >= 0.5 at a 75% target".
+    assert wider == pytest.approx(0.503333, abs=1e-5)
+    # A negative margin must not lower the floor below break-even.
+    assert min_tp_r_for_target(0.75, margin=-5.0) == pytest.approx(base)
+
+
+@pytest.mark.parametrize("bad", [0.0, -0.5, 1.0, 1.5, float("nan")])
+def test_min_tp_r_for_target_handles_degenerate_targets(bad):
+    # No meaningful floor can be derived; return 0.0 rather than raising, so a
+    # misconfigured target degrades to "no constraint" instead of crashing.
+    assert min_tp_r_for_target(bad) == 0.0
+
+
+def test_frontier_grid_still_contains_the_unreachable_corner():
+    # The low targets must REMAIN in the grid: the frontier diagnostic needs
+    # them to show how much win rate is buyable by shrinking the target, and
+    # what it costs. Only *selection* is restricted.
+    grid = default_geometry_grid(coarse=True)
+    tps = {float(g.tp_r) for g in grid}
+    assert 0.25 in tps
+    assert 0.3 in tps
+
+
+def _calibrator(**kw):
+    base = dict(target_wr=0.75, min_trades=20, folds=4, coarse_grid=True, slippage_pips=0.5)
+    base.update(kw)
+    return WRTargetCalibrator(**base)
+
+
+def test_reachability_guard_excludes_unbreakable_geometries_from_selection():
+    cands = pd.DataFrame({"score": [0.1, 0.4, 0.6, 0.9], "bar_idx": [1, 2, 3, 4]})
+    combos = _calibrator()._grid_for(cands, "score")
+    tps = {float(g.tp_r) for g, _ in combos}
+    floor = min_tp_r_for_target(0.75)
+    assert tps, "selection space must not be empty"
+    assert all(tp >= floor for tp in tps), f"unbreakable geometry survived: {sorted(tps)}"
+    assert 0.25 not in tps
+    assert 0.3 not in tps
+    # The smallest offered target is the smallest one that can break even.
+    assert min(tps) == pytest.approx(0.4)
+
+
+def test_reachability_guard_can_be_disabled_to_reproduce_the_trap():
+    cands = pd.DataFrame({"score": [0.1, 0.4, 0.6, 0.9], "bar_idx": [1, 2, 3, 4]})
+    combos = _calibrator(enforce_reachable_target=False)._grid_for(cands, "score")
+    tps = {float(g.tp_r) for g, _ in combos}
+    assert 0.25 in tps and 0.3 in tps
+
+
+def test_reachability_guard_scales_with_the_target():
+    cands = pd.DataFrame({"score": [0.1, 0.4, 0.6, 0.9], "bar_idx": [1, 2, 3, 4]})
+    # A LOWER win-rate target demands a WIDER payoff. At 60% the geometry must
+    # clear 1/0.6 - 1 = 0.6667, so a 0.5R target is NOT admissible...
+    tps60 = {float(g.tp_r) for g, _ in _calibrator(target_wr=0.60)._grid_for(cands, "score")}
+    assert 0.5 not in tps60
+    assert 0.75 in tps60
+    # ...whereas at 90% a close target is affordable: 1/0.9 - 1 = 0.1111, so
+    # even 0.25R qualifies.
+    tps90 = {float(g.tp_r) for g, _ in _calibrator(target_wr=0.90)._grid_for(cands, "score")}
+    assert 0.25 in tps90
+    # At 75% it does not.
+    tps75 = {float(g.tp_r) for g, _ in _calibrator(target_wr=0.75)._grid_for(cands, "score")}
+    assert 0.25 not in tps75
+    # The floor is monotonically decreasing in the target.
+    assert min_tp_r_for_target(0.60) > min_tp_r_for_target(0.75) > min_tp_r_for_target(0.90)
+
+
+def test_reachability_guard_never_empties_the_selection_space():
+    # A target low enough that NO grid geometry can clear it (1/0.35 - 1 = 1.857
+    # exceeds the widest grid target of 1.5) must not leave the calibrator with
+    # nothing to search. The guard falls back to the full grid rather than
+    # producing an empty selection space.
+    cands = pd.DataFrame({"score": [0.1, 0.4, 0.6, 0.9], "bar_idx": [1, 2, 3, 4]})
+    widest = max(float(g.tp_r) for g in default_geometry_grid(coarse=True))
+    assert min_tp_r_for_target(0.35) > widest
+    combos = _calibrator(target_wr=0.35)._grid_for(cands, "score")
+    assert combos, "guard must not empty the selection space"

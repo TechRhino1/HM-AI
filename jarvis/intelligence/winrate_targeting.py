@@ -442,6 +442,37 @@ def default_geometry_grid(
     return grid
 
 
+def min_tp_r_for_target(target_wr: float, *, margin: float = 0.0) -> float:
+    """Smallest ``tp_r`` that can break even at ``target_wr``.
+
+    For a stop of 1R and a target of ``tp_r`` the break-even win rate is
+    ``WR_breakeven = 1 / (1 + tp_r)``. Requiring ``WR_breakeven <= target_wr``
+    gives ``tp_r >= 1 / target_wr - 1``.
+
+    This matters because the calibrator is asked to *reach* ``target_wr``, and
+    the cheapest way to raise a win rate is to move the target closer. Left
+    unconstrained the search therefore walks ``tp_r`` downward into the region
+    where the target is unreachable at a profit: at ``tp_r = 0.25`` a strategy
+    needs 80% just to break even, so a 75% win rate is a *losing* outcome. The
+    objective would defeat itself.
+
+    Measured on the 16-symbol portfolio (2026-09-12): 7 of 16 symbols were
+    calibrated to ``tp_r < 0.3333``; all 7 lost money out of sample, with a mean
+    in-sample win rate of 76.5% and a mean in-sample expectancy of -0.0279R.
+    Of the 8 symbols that reached a 75% in-sample win rate, only 1 was
+    profitable out of sample.
+
+    ``margin`` raises the bar above the bare break-even point. Use it to leave
+    room for spread, slippage and the fact that trailing exits realise less than
+    the nominal target. The default of 0.0 is the arithmetic floor, not a safe
+    value.
+    """
+    wr = float(target_wr)
+    if not (0.0 < wr < 1.0):
+        return 0.0
+    return (1.0 / wr - 1.0) + max(0.0, float(margin))
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Robustness margins per asset class.
 #
@@ -633,6 +664,8 @@ class WRTargetCalibrator:
         commission_per_lot: float = 0.0,
         slippage_pips: float = 0.5,
         min_margin: Optional[float] = None,
+        enforce_reachable_target: bool = True,
+        reachability_margin: float = 0.0,
     ):
         # ``None`` means "derive per symbol from its asset class" (see
         # ``min_margin_for_symbol``). An explicit float overrides that for every
@@ -652,6 +685,13 @@ class WRTargetCalibrator:
         # instrument must model it too, or OOS expectancy over-promises an edge
         # that the engine erodes with slippage on every scratch and loss.
         self.slippage_pips = float(slippage_pips)
+        # Refuse to select a geometry whose target cannot break even at
+        # ``target_wr``. The grid still CONTAINS those geometries so the
+        # frontier diagnostic can show the trap, but selection never lands on
+        # one. See ``min_tp_r_for_target`` for the measurement that motivated
+        # this.
+        self.enforce_reachable_target = bool(enforce_reachable_target)
+        self.reachability_margin = float(reachability_margin)
 
     # ── internals ──────────────────────────────────────────────────────────
     def _cost_price_equiv(self, symbol: str, money_per_unit: float) -> float:
@@ -781,8 +821,27 @@ class WRTargetCalibrator:
         return sorted(picked, key=lambda o: o.entry_idx)
 
     def _grid_for(self, candidates: pd.DataFrame, score_col: str) -> List[Tuple[Geometry, float]]:
-        """Cross the geometry grid with candidate score thresholds."""
+        """Cross the geometry grid with candidate score thresholds.
+
+        When ``enforce_reachable_target`` is set, geometries whose ``tp_r``
+        cannot break even at the target win rate are removed from the
+        *selection* space. They stay in the simulation cache, so the frontier
+        diagnostic can still show how much win rate is buyable by shrinking the
+        target and what it costs.
+        """
         grid = default_geometry_grid(coarse=self.coarse_grid)
+        if self.enforce_reachable_target:
+            floor = min_tp_r_for_target(self.target_wr, margin=self.reachability_margin)
+            reachable = [g for g in grid if float(g.tp_r) >= floor]
+            if reachable:
+                dropped = len(grid) - len(reachable)
+                if dropped:
+                    logger.info(
+                        "winrate_targeting: target %.0f%% needs tp_r >= %.4f to break even; "
+                        "excluded %d/%d geometries from selection (kept for the frontier scan)",
+                        self.target_wr * 100.0, floor, dropped, len(grid),
+                    )
+                grid = reachable
         scores = pd.to_numeric(candidates[score_col], errors="coerce").dropna()
         if len(scores) == 0:
             thresholds = [0.0]
@@ -1186,4 +1245,5 @@ __all__ = [
     "isotonic_calibrate",
     "regime_edge_table",
     "default_geometry_grid",
+    "min_tp_r_for_target",
 ]

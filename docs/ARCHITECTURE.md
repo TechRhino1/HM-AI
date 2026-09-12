@@ -240,6 +240,26 @@ candidate geometry (64 geometries × 16 symbols) would take days. Instead:
    walk would drop later eligible trades too and understate the system — the exact
    mismatch that once had calibration claim 192 out-of-sample EURUSD trades while
    the engine produced 7.
+9. **Selection must not use a geometry whose target cannot break even at the
+   win-rate target.** For a 1R stop, `WR_breakeven = 1 / (1 + tp_r)`, so requiring
+   break-even to fall at or below the target gives `tp_r >= 1 / target_wr - 1`
+   (0.3333 at 75 %). The calibrator is asked to *reach* a win rate, and the
+   cheapest way to raise one is to move the target closer — unconstrained, the
+   search walks `tp_r` downward into the region where the target is unreachable at
+   a profit. Measured on the 16-symbol portfolio, **7 of 16 symbols were
+   calibrated to `tp_r < 0.3333` and all 7 lost out of sample**, with a mean
+   in-sample win rate of 76.5 % and a mean in-sample expectancy already negative
+   at −0.0279 R; of the 8 symbols that reached 75 % in-sample, only 1 was
+   profitable out of sample. Enforcing the floor improved aggregate
+   out-of-sample from **−54.74 R to −37.65 R** while *lowering* the win rate by
+   9.5 points — 309 trades removed, every one net-negative. The low-`tp_r`
+   geometries stay in `default_geometry_grid` so the frontier diagnostic can still
+   show what they cost; only `_grid_for` (selection) excludes them. See
+   `min_tp_r_for_target()` and `tests/test_winrate_targeting.py`.
+   The bare floor is a *correctness* bound, not a safety bound: at exactly 0.3333
+   the target win rate equals the break-even win rate, leaving nothing for spread,
+   slippage or trailing exits realising less than the nominal target. Use
+   `--reachability-margin` to require real headroom (0.17 gives `tp_r >= 0.5`).
 
 ### Reporting contract
 `tools/run_3month_backtest.py` renders seven sections; two of them exist purely
