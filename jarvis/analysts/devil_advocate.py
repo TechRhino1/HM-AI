@@ -131,7 +131,7 @@ class DevilAdvocateAnalyst:
             penalty_score += 18.0
             threats.append("Extreme volatility shock in progress — stop loss vulnerability elevated.")
 
-        if not sess.is_prime_session:
+        if not sess.is_prime_session and not getattr(spec, "is_crypto", False):
             penalty_score += 8.0
             threats.append(f"Trading during low-liquidity off-hours ({sess.current_session}) increases false breakout risk.")
 
