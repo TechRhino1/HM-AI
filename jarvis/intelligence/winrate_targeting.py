@@ -893,7 +893,8 @@ class WRTargetCalibrator:
         for g in grid:
             sim_cache[g.key()] = simulate_all_candidates(
                 df=df, candidates=cands, geom=g, money_per_unit=money_per_unit,
-                cost_price_equiv=cost, spec=spec, symbol=symbol, score_col=score_col,
+                cost_price_equiv=cost, slippage_price_equiv=slip,
+                spec=spec, symbol=symbol, score_col=score_col,
             )
 
         combos = self._grid_for(cands, score_col)

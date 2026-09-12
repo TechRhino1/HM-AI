@@ -47,6 +47,14 @@ SIGNAL_DIR = Path(DATA_DIR) / "signals"
 REAL_DIR = Path(DATA_DIR) / "market" / "real"
 PROFILE_PATH = REPO_ROOT / "config" / "winrate_profiles.json"
 
+# Stop slippage the calibration instrument charges on every protective-stop
+# fill. Must match BacktestEngine's ``slippage_pips`` default
+# (``actual_slippage_delta = slippage_pips * pip_size``), otherwise the reported
+# expectancy describes a different cost structure from the one the engine
+# realises. Defined once so the value written to the profile meta cannot drift
+# from the value actually used.
+SLIPPAGE_PIPS = 0.5
+
 
 def discover(days: int = 95) -> list[str]:
     """Symbols that have a candidate table for this window.
@@ -137,7 +145,7 @@ def main() -> int:
         regime_geometry=not args.no_regime_geometry,
         # Must match BacktestEngine's stop slippage (slippage_pips * pip_size)
         # so the calibrated OOS expectancy reflects real trading costs.
-        slippage_pips=0.5,
+        slippage_pips=SLIPPAGE_PIPS,
         min_margin=args.min_margin,
         enforce_reachable_target=not args.allow_unreachable_target,
         reachability_margin=args.reachability_margin,
@@ -208,6 +216,17 @@ def main() -> int:
         "folds": args.folds,
         "grid": "fine" if args.fine else "coarse",
         "days": args.days,
+        # Provenance for the reachability guard. Without these two fields a
+        # deployed file cannot be traced back to the setting that produced it,
+        # and the guard's whole point is that the same target calibrates very
+        # differently at margin 0.0 and margin 0.17.
+        "enforce_reachable_target": not args.allow_unreachable_target,
+        "reachability_margin": args.reachability_margin,
+        "min_tp_r_floor": round(floor, 4),
+        "wide_grid": bool(args.wide_grid),
+        # Material: the calibration instrument charges stop slippage, so this
+        # value changes every reported expectancy in the file.
+        "slippage_pips": SLIPPAGE_PIPS,
         "generated_utc": pd.Timestamp.now("UTC").isoformat(),
         "symbols": list(profiles.keys()),
     })

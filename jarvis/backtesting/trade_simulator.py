@@ -505,6 +505,52 @@ def simulate_all_candidates(
 
     Simulation is strictly causal (each trade walks forward only), so subsetting
     these outcomes by entry index later introduces no look-ahead.
+
+    ``slippage_price_equiv`` MUST reach ``simulate_trade``. This function
+    previously accepted the argument and silently discarded it, so every
+    protective-stop exit was booked at the exact stop price while
+    ``BacktestEngine`` fills it ``slippage_pips * pip_size`` worse
+    (``actual_slippage_delta``). The calibration therefore reported an
+    expectancy the engine could not realise. Measured on EURUSD at the deployed
+    geometry: 793 of 1113 exits are stop exits, the real 0.5-pip charge is
+    0.0220 R per stop, i.e. **-0.0157 R per trade** of systematically omitted
+    cost -- against a per-symbol expectancy of a few hundredths of an R. Target
+    fills pay no slippage on either path, so the two remain symmetric.
+    """
+    return [
+        o for _, o in simulate_all_candidates_with_rows(
+            df=df, candidates=candidates, geom=geom, money_per_unit=money_per_unit,
+            cost_price_equiv=cost_price_equiv,
+            slippage_price_equiv=slippage_price_equiv,
+            spec=spec, symbol=symbol, score_col=score_col,
+        )
+    ]
+
+
+def simulate_all_candidates_with_rows(
+    *,
+    df: pd.DataFrame,
+    candidates: pd.DataFrame,
+    geom: Geometry,
+    money_per_unit: float,
+    cost_price_equiv: float = 0.0,
+    slippage_price_equiv: float = 0.0,
+    spec: Any = None,
+    symbol: Optional[str] = None,
+    score_col: str = "score",
+) -> List[Tuple[int, TradeOutcome]]:
+    """``simulate_all_candidates``, but each outcome keeps its candidate's index.
+
+    Entry-edge attribution has to join every outcome back to the feature row
+    that produced it -- score, regime, confluence count, and so on. Re-deriving
+    that join afterwards by matching on ``(entry_idx, side, fill)`` is fragile:
+    two candidates can share a bar, and ``simulate_all_candidates`` drops the
+    degenerate ones, so position alone does not identify a row either. The
+    pairing is therefore made here, inside the one loop that already exists, so
+    the calibration and the diagnostic cannot drift apart.
+
+    Returns ``(candidate_index, outcome)`` pairs in the same order as
+    ``simulate_all_candidates``, i.e. ascending ``bar_idx``.
     """
     sym = symbol or (str(candidates["symbol"].iloc[0]) if len(candidates) else "UNKNOWN")
     if candidates is None or len(candidates) == 0:
@@ -516,8 +562,8 @@ def simulate_all_candidates(
     # arrays instead of building a pandas Series per bar.
     bars = BarArrays.from_df(df)
 
-    outcomes: List[TradeOutcome] = []
-    for row in candidates.sort_values("bar_idx").itertuples(index=False):
+    paired: List[Tuple[int, TradeOutcome]] = []
+    for row in candidates.sort_values("bar_idx").itertuples(index=True):
         outcome = simulate_trade(
             symbol=sym,
             side=str(getattr(row, "side")),
@@ -528,6 +574,7 @@ def simulate_all_candidates(
             money_per_unit=money_per_unit,
             bars=bars,
             cost_price_equiv=cost_price_equiv,
+            slippage_price_equiv=slippage_price_equiv,
             ai_score=float(getattr(row, score_col, 0.0) or 0.0),
             calibrated_win_p=float(getattr(row, "score", 0.0) or 0.0),
             regime=str(getattr(row, "regime", "UNKNOWN")),
@@ -536,8 +583,8 @@ def simulate_all_candidates(
             spec=spec,
         )
         if outcome is not None:
-            outcomes.append(outcome)
-    return outcomes
+            paired.append((int(row.Index), outcome))
+    return paired
 
 
 def select_sequential(
@@ -653,6 +700,7 @@ __all__ = [
     "BarArrays",
     "simulate_trade",
     "simulate_all_candidates",
+    "simulate_all_candidates_with_rows",
     "select_sequential",
     "evaluate_geometry",
     "summarise",

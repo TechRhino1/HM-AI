@@ -842,3 +842,200 @@ def test_calibration_grid_never_enables_a_runner_trail():
     # out-of-sample expectancy was measured on.
     for g in default_geometry_grid(coarse=True):
         assert g.trail_atr is None, f"grid geometry enables a trail: {g.key()}"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Stop slippage must survive the WHOLE call chain
+# ─────────────────────────────────────────────────────────────────────────────
+# ``simulate_trade`` modelled stop slippage correctly from the start, and the
+# three tests above pin that. What was NOT pinned is that the argument survives
+# the aggregators above it.
+#
+# ``simulate_all_candidates`` accepted ``slippage_price_equiv`` and never passed
+# it to ``simulate_trade``, and ``WRTargetCalibrator.calibrate_symbol`` computed
+# ``slip = slippage_pips * pip_size`` and dropped it -- that line was the only
+# reference to ``slip`` in the entire module. Net effect: the calibration
+# instrument charged NO stop slippage while ``BacktestEngine`` charged
+# ``actual_slippage_delta`` on every protective-stop fill. A 1000-pip argument
+# left every outcome bit-identical, i.e. the parameter was inert.
+#
+# Same failure class as the ``trail_atr=None`` bug: the instrument and the engine
+# silently resolved different costs, so the calibration reported an expectancy the
+# engine could not realise. Measured on EURUSD at the deployed geometry, 793 of
+# 1113 exits are stop exits and the real 0.5-pip charge is 0.0220 R per stop --
+# -0.0157 R per trade, against a per-symbol expectancy of a few hundredths of R.
+def _stop_exit_only(symbol="TEST"):
+    """Candidates whose forward path reaches the stop and never the target."""
+    n = 4
+    df = make_df(
+        highs=[100.0] * (n + 2),
+        lows=[100.0] + [98.0] * (n + 1),
+        closes=[100.0] + [98.5] * (n + 1),
+    )
+    cands = pd.DataFrame({
+        "symbol": [symbol] * n,
+        "bar_idx": [0, 1, 2, 3],
+        "side": ["BUY"] * n,
+        "fill": [100.0] * n,
+        "sl": [99.0] * n,
+        "score": [0.5] * n,
+        "regime": ["TREND"] * n,
+        "strategy": ["S"] * n,
+        "zone": ["DISCOUNT"] * n,
+    })
+    return df, cands
+
+
+def test_simulate_all_candidates_forwards_slippage():
+    """The aggregator must not swallow ``slippage_price_equiv``.
+
+    Regression: it accepted the argument and discarded it, so a 1000-pip
+    argument left every outcome bit-identical.
+    """
+    df, cands = _stop_exit_only()
+    geom = Geometry(tp_r=5.0, be_trigger_r=None, fast_cash_r=None, max_bars=10)
+    free = simulate_all_candidates(
+        df=df, candidates=cands, geom=geom, money_per_unit=100_000.0, symbol="TEST",
+    )
+    slipped = simulate_all_candidates(
+        df=df, candidates=cands, geom=geom, money_per_unit=100_000.0, symbol="TEST",
+        slippage_price_equiv=1000.0,
+    )
+    assert free and slipped
+    assert all(o.result == "SL" for o in free)
+    # risk_dist = 1.0, so every stop is deepened by exactly the slippage.
+    assert [o.pnl_r for o in free] != [o.pnl_r for o in slipped]
+    assert slipped[0].pnl_r == pytest.approx(free[0].pnl_r - 1000.0, abs=1e-6)
+
+
+def test_evaluate_geometry_forwards_slippage():
+    """The convenience wrapper must forward slippage too (it delegates)."""
+    df, cands = _stop_exit_only()
+    geom = Geometry(tp_r=5.0, be_trigger_r=None, fast_cash_r=None,
+                    max_bars=10, min_score=0.0)
+    free = evaluate_geometry(
+        df=df, candidates=cands, geom=geom, money_per_unit=100_000.0, symbol="TEST",
+    )
+    slipped = evaluate_geometry(
+        df=df, candidates=cands, geom=geom, money_per_unit=100_000.0, symbol="TEST",
+        slippage_price_equiv=0.1,
+    )
+    assert free and slipped
+    assert slipped[0].pnl_r == pytest.approx(free[0].pnl_r - 0.1, abs=1e-6)
+
+
+def test_aggregator_slippage_never_touches_target_fills():
+    """Slippage is charged on protective stops only -- never on the target.
+
+    BacktestEngine fills a TP at exactly ``tp``; if the simulator charged
+    slippage there as well the two paths would disagree in the opposite
+    direction, and this fix would overshoot into over-charging.
+    """
+    n = 4
+    df = make_df(
+        highs=[100.0] + [101.5] * (n + 1),
+        lows=[100.0] * (n + 2),
+        closes=[100.0] + [101.4] * (n + 1),
+    )
+    cands = pd.DataFrame({
+        "symbol": ["TEST"] * n, "bar_idx": [0, 1, 2, 3], "side": ["BUY"] * n,
+        "fill": [100.0] * n, "sl": [99.0] * n, "score": [0.5] * n,
+        "regime": ["TREND"] * n, "strategy": ["S"] * n, "zone": ["DISCOUNT"] * n,
+    })
+    geom = Geometry(tp_r=1.0, be_trigger_r=None, fast_cash_r=None, max_bars=10)
+    free = simulate_all_candidates(
+        df=df, candidates=cands, geom=geom, money_per_unit=100_000.0, symbol="TEST",
+    )
+    slipped = simulate_all_candidates(
+        df=df, candidates=cands, geom=geom, money_per_unit=100_000.0, symbol="TEST",
+        slippage_price_equiv=0.1,
+    )
+    assert free and all(o.result == "TP" for o in free)
+    assert [o.pnl_r for o in free] == [o.pnl_r for o in slipped]
+
+
+def _calibration_fixture(n_bars: int = 400, seed: int = 7):
+    """A self-contained FX-scale sample the calibrator can actually fit.
+
+    Two properties matter, both arrived at the hard way:
+
+    * the risk distance must be in PIP SCALE. An earlier version used price
+      100.0 with 1R = 1.0 -- 10,000 pips -- against which a 0.5-pip slippage is
+      0.00005 R, i.e. invisible. Slippage is a pip quantity and only means
+      something against a pip-scale stop.
+    * the sample must not be degenerate. A strict sawtooth made every candidate
+      resolve the same way (0% win rate), and a single-regime sample had that
+      regime switched off by the learned policy, leaving zero trades. A sample
+      that cannot respond to anything cannot test anything.
+
+    Stops sit on the losing side: below entry for a BUY, above for a SELL.
+    Putting a SELL stop below its entry makes it a +1R profit target instead.
+    """
+    rng = np.random.RandomState(seed)
+    close = 1.1000 + np.cumsum(rng.normal(0.0, 0.0009, n_bars))
+    high = close + np.abs(rng.normal(0.0, 0.0006, n_bars))
+    low = close - np.abs(rng.normal(0.0, 0.0006, n_bars))
+    df = pd.DataFrame({
+        "time": pd.date_range("2026-01-01", periods=n_bars, freq="1h", tz="UTC"),
+        "open": np.concatenate([[1.1000], close[:-1]]),
+        "high": high, "low": low, "close": close,
+        "atr": [0.0009] * n_bars, "spread": [0.0001] * n_bars,
+    })
+    risk = 0.0020  # 20 pips
+    # Spacing matters for stability, not just sample size: at one candidate per
+    # 6 bars the slippage flips the fold-selected geometry (tp_r 0.75 -> 0.4) and
+    # the win rate moves with it, which would confound "slippage lowers
+    # expectancy" with "a different geometry was chosen". One per 4 bars holds
+    # the geometry fixed, so the only thing that moves is the cost.
+    idx = list(range(5, n_bars - 60, 4))
+    side = ["BUY" if (i // 4) % 2 == 0 else "SELL" for i in idx]
+    fill = [float(close[i]) for i in idx]
+    sl = [f - risk if s == "BUY" else f + risk for f, s in zip(fill, side)]
+    cands = pd.DataFrame({
+        "symbol": ["EURUSD"] * len(idx), "bar_idx": idx, "side": side,
+        "fill": fill, "sl": sl, "score": [0.5] * len(idx),
+        "regime": ["TREND"] * len(idx), "strategy": ["S"] * len(idx),
+        "zone": ["DISCOUNT"] * len(idx),
+    })
+    return df, cands
+
+
+def test_calibrator_charges_stop_slippage():
+    """Integration: the calibrator must not drop the slippage it computes.
+
+    ``calibrate_symbol`` derived ``slip = slippage_pips * pip_size`` explicitly
+    to mirror the engine's ``actual_slippage_delta`` and then never used it, so
+    ``slippage_pips`` had NO effect on any calibrated number whatsoever. Three
+    assertions, weakest to strongest:
+
+      1. a higher slippage strictly lowers expectancy (accounting);
+      2. the win rate is untouched -- slippage deepens stop exits, it never
+         reclassifies a win as a loss;
+      3. an absurd slippage leaves nothing tradeable. This is the real
+         regression test: with the parameter dropped, the 1000-pip run would
+         return the same healthy profile as zero slippage.
+    """
+    df, cands = _calibration_fixture()
+
+    def calibrate(slippage_pips):
+        return WRTargetCalibrator(
+            target_wr=0.75, min_trades=12, folds=4, coarse_grid=True,
+            slippage_pips=slippage_pips, regime_geometry=False,
+        ).calibrate_symbol(df=df, candidates=cands, symbol="EURUSD")
+
+    free = calibrate(0.0)
+    slipped = calibrate(0.5)
+    absurd = calibrate(1000.0)
+
+    assert free.n_trades > 0 and slipped.n_trades > 0
+    assert slipped.win_rate == pytest.approx(free.win_rate, abs=1e-9)
+    assert slipped.expectancy_r < free.expectancy_r
+    # Measured on this fixture: +0.13600R -> +0.12640R, i.e. 0.0096R per trade.
+    # 1 pip is 0.05R here, so half a pip on each stop exit is material against a
+    # per-symbol expectancy of a few hundredths of an R.
+    assert free.expectancy_r - slipped.expectancy_r > 0.004
+    # 1000 pips is 50R per stop exit: nothing can reach positive expectancy.
+    assert absurd.n_trades == 0, (
+        "a 1000-pip slippage left tradeable configurations, so the calibrator "
+        "is not charging stop slippage at all"
+    )
