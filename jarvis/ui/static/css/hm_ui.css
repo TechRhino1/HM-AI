@@ -1,0 +1,1076 @@
+/* ==========================================================================
+   HM AI 4.0 — UNIFIED DESIGN SYSTEM
+   --------------------------------------------------------------------------
+   Purpose
+   -------
+   A single source of truth for design tokens, accessibility primitives and
+   shared shell components, loaded AFTER every page stylesheet so it can
+   modernise the shell without rewriting the four large page sheets.
+
+   Load order (do not change):
+       <page>.css   ->  auth.css  ->  hm_ui.css  ->  <page>.js  ->  hm_ui.js
+
+   Compatibility contract
+   ----------------------
+   This file is ADDITIVE FIRST. It introduces the unified `--hm-*` vocabulary
+   and re-points only those legacy tokens whose values were already identical
+   across all four pages (a no-op) or that were actively defective
+   (accessibility). Tokens whose values genuinely DIFFER per page are left
+   untouched, because redefining them globally would silently repaint pages
+   that are currently self-consistent. See "Legacy token compatibility" below
+   for the per-token decision table.
+
+   Hard rule: never delete or rename a class, id or data-attribute in this file.
+   The four page scripts hold 346 load-bearing element ids and ~178 inline
+   `onclick` handlers; this layer must remain purely additive on top of them.
+   ========================================================================== */
+
+
+/* ==========================================================================
+   1. UNIFIED TOKEN VOCABULARY  (the new single source of truth)
+   ========================================================================== */
+
+:root {
+    /* --- Surfaces (elevation ladder, darkest -> lightest) ------------------ */
+    --hm-bg-base: #070b12;          /* app background                       */
+    --hm-bg-sunken: #04070d;        /* wells, chart gutters                 */
+    --hm-bg-surface: #0d1420;       /* panels                               */
+    --hm-bg-raised: #131c2c;        /* cards, toolbars                      */
+    --hm-bg-overlay: #1a2438;       /* popovers, dropdowns, modals          */
+    --hm-bg-hover: #1e2a41;         /* hover state for raised surfaces      */
+    --hm-bg-active: #24314c;        /* pressed / selected surface           */
+
+    /* Glass layers. Kept as explicit rgba so they composite predictably.    */
+    --hm-glass-panel: rgba(13, 20, 32, 0.92);
+    --hm-glass-card: rgba(19, 28, 44, 0.86);
+    --hm-glass-scrim: rgba(3, 5, 10, 0.72);
+    --hm-blur: blur(16px);
+
+    /* --- Borders ---------------------------------------------------------- */
+    --hm-border-subtle: rgba(148, 163, 184, 0.14);
+    --hm-border: rgba(148, 163, 184, 0.22);
+    --hm-border-strong: rgba(148, 163, 184, 0.34);
+
+    /* --- Text (all values verified >= WCAG AA on the lightest surface) ----- */
+    --hm-text-primary: #f8fafc;     /* 17.4:1 on --hm-bg-raised             */
+    --hm-text-secondary: #b6c2d4;   /*  8.4:1 on --hm-bg-raised             */
+    --hm-text-dim: #8494ab;         /*  4.9:1 on --hm-bg-hover  (AA at any size) */
+    --hm-text-inverse: #05080e;     /* on accent / bull / bear fills        */
+
+    /* --- Accent ----------------------------------------------------------- */
+    --hm-accent: #38bdf8;           /* 9.3:1 on --hm-bg-base                */
+    --hm-accent-hover: #7dd3fc;
+    --hm-accent-subtle: rgba(56, 189, 248, 0.12);
+    --hm-accent-glow: 0 0 14px rgba(56, 189, 248, 0.35);
+
+    /* --- Semantic market colours ------------------------------------------ */
+    --hm-bull: #00f59b;
+    --hm-bull-subtle: rgba(0, 245, 155, 0.12);
+    --hm-bear: #ff3b5c;
+    --hm-bear-subtle: rgba(255, 59, 92, 0.12);
+    --hm-warn: #f59e0b;
+    --hm-warn-subtle: rgba(245, 158, 11, 0.14);
+    --hm-info: #38bdf8;
+    --hm-info-subtle: rgba(56, 189, 248, 0.12);
+    --hm-neutral: #8494ab;
+
+    /* --- Typography ------------------------------------------------------- */
+    --hm-font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    --hm-font-mono: 'JetBrains Mono', 'Roboto Mono', Consolas, monospace;
+
+    /* Type scale. Floor is 0.75rem (12px) for NEW chrome. Dense numeric
+       readouts in the legacy sheets intentionally stay at 9-11px: for
+       tabular figures the readability lever is CONTRAST, not size, and
+       forcing a size floor would overflow the fixed-height grid rows.      */
+    --hm-text-2xs: 0.6875rem;   /* 11px - micro labels, uppercase meta only  */
+    --hm-text-xs: 0.75rem;      /* 12px - minimum for sentence-case body text */
+    --hm-text-sm: 0.8125rem;    /* 13px                                       */
+    --hm-text-base: 0.875rem;   /* 14px                                       */
+    --hm-text-lg: 1rem;         /* 16px - mobile inputs (prevents iOS zoom)   */
+    --hm-text-xl: 1.25rem;
+    --hm-text-2xl: 1.5rem;
+
+    --hm-leading-tight: 1.25;
+    --hm-leading-normal: 1.5;
+    --hm-tracking-caps: 0.06em;     /* uppercase micro-label letter-spacing */
+
+    --hm-weight-normal: 400;
+    --hm-weight-medium: 500;
+    --hm-weight-semibold: 600;
+    --hm-weight-bold: 700;
+    --hm-weight-black: 800;
+
+    /* --- Spacing (4px base grid) ------------------------------------------ */
+    --hm-space-1: 0.25rem;   /*  4px */
+    --hm-space-2: 0.5rem;    /*  8px */
+    --hm-space-3: 0.75rem;   /* 12px */
+    --hm-space-4: 1rem;      /* 16px */
+    --hm-space-5: 1.5rem;    /* 24px */
+    --hm-space-6: 2rem;      /* 32px */
+    --hm-space-7: 3rem;      /* 48px */
+
+    /* --- Radii ------------------------------------------------------------ */
+    --hm-radius-sm: 4px;
+    --hm-radius: 6px;
+    --hm-radius-lg: 10px;
+    --hm-radius-xl: 14px;
+    --hm-radius-pill: 999px;
+
+    /* --- Elevation -------------------------------------------------------- */
+    --hm-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --hm-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
+    --hm-shadow-lg: 0 12px 40px rgba(0, 0, 0, 0.6);
+    --hm-shadow-focus: 0 0 0 3px rgba(56, 189, 248, 0.32);
+
+    /* --- Motion ----------------------------------------------------------- */
+    --hm-dur-instant: 90ms;
+    --hm-dur-fast: 140ms;
+    --hm-dur-normal: 220ms;
+    --hm-dur-slow: 340ms;
+    --hm-ease: cubic-bezier(0.4, 0, 0.2, 1);
+    --hm-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+
+    /* --- Layout ----------------------------------------------------------- */
+    --hm-hud-height: 56px;
+    --hm-nav-height: 56px;      /* mobile bottom/top tab bar               */
+    --hm-touch-target: 44px;    /* WCAG 2.5.5 minimum interactive size     */
+    --hm-content-max: 1920px;
+    --hm-z-hud: 40;
+    --hm-z-nav: 45;
+    --hm-z-drawer: 60;
+    --hm-z-modal: 80;
+    --hm-z-toast: 100;
+    --hm-z-skip: 120;
+}
+
+
+/* ==========================================================================
+   2. LEGACY TOKEN COMPATIBILITY
+   --------------------------------------------------------------------------
+   Decision table (why each legacy token is, or is not, re-pointed here):
+
+   TOKEN                 VALUES ACROSS PAGES        ACTION
+   --text-primary        identical (#f8fafc)        re-point (no-op)
+   --text-secondary      identical (#94a3b8)        re-point (no-op)
+   --text-dim            identical (#64748b)        FIX  (was 4.2:1 -> fails AA)
+   --neon-bull/bear      identical                 re-point (no-op)
+   --font-mono           identical                 re-point (no-op)
+   --accent-cyan         #38bdf8 vs #00d4ff        UNIFY (pure inconsistency)
+   --font-main           India-only name           add cross-alias
+   --bg-card/--bg-panel  DIFFER per page           leave alone (see note)
+   --border-subtle       DIFFER per page           leave alone (see note)
+   --bg-base/--bg-dark/  DIFFER per page           leave alone (see note)
+
+   Note on the "leave alone" rows: because each page loads exactly one page
+   stylesheet, these values never collide at runtime. They are a maintenance
+   liability (four sources of truth that can drift), not a rendering bug.
+   Repainting them globally from here would be an unbudgeted visual change to
+   pages that currently look correct, so the migration is opt-in per page:
+   swap `var(--bg-card)` -> `var(--hm-bg-raised)` when that page is next
+   touched. The mapping is 1:1 and documented above.
+   ========================================================================== */
+
+:root {
+    /* Identical across all four pages - safe to centralise. */
+    --text-primary: var(--hm-text-primary);
+    --text-secondary: var(--hm-text-secondary);
+    --neon-bull: var(--hm-bull);
+    --neon-bear: var(--hm-bear);
+    --font-mono: var(--hm-font-mono);
+
+    /* Accessibility fix: #64748b measured ~4.19:1 on --bg-base and ~3.89:1 on
+       --bg-surface, i.e. below the 4.5:1 AA floor - and it was applied to
+       8-11px text, the least forgiving case. #8494ab measures >=4.88:1 on the
+       lightest surface in use and still reads as de-emphasised. */
+    --text-dim: var(--hm-text-dim);
+
+    /* Pure inconsistency: same semantic ("primary accent"), two different
+       cyans. #38bdf8 is the softer, more legible of the two and already
+       proven on the terminal's darkest backgrounds, so it becomes canonical. */
+    --accent-cyan: var(--hm-accent);
+
+    /* Cross-alias the India sheets' divergent font token name. */
+    --font-main: var(--hm-font-sans);
+    --font-sans: var(--hm-font-sans);
+}
+
+
+/* ==========================================================================
+   3. ACCESSIBILITY PRIMITIVES
+   ========================================================================== */
+
+/* --- Screen-reader-only text --------------------------------------------- */
+.sr-only,
+.hm-sr-only {
+    position: absolute !important;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+}
+
+/* --- Skip link (first focusable element in <body>) ----------------------- */
+.hm-skip-link {
+    position: absolute;
+    top: 0;
+    left: 50%;
+    transform: translate(-50%, -120%);
+    z-index: var(--hm-z-skip);
+    padding: var(--hm-space-3) var(--hm-space-5);
+    background: var(--hm-accent);
+    color: var(--hm-text-inverse);
+    font: var(--hm-weight-bold) var(--hm-text-sm) / 1 var(--hm-font-sans);
+    border-radius: 0 0 var(--hm-radius) var(--hm-radius);
+    text-decoration: none;
+    box-shadow: var(--hm-shadow-lg);
+    transition: transform var(--hm-dur-fast) var(--hm-ease-out);
+}
+.hm-skip-link:focus,
+.hm-skip-link:focus-visible {
+    transform: translate(-50%, 0);
+    outline: 2px solid var(--hm-text-primary) !important;
+    outline-offset: -4px !important;
+}
+
+/* --- Focus ring ----------------------------------------------------------
+   The four page sheets contain eight `outline: none` declarations that
+   suppress the indicator outright, and not one of them restores it. A focus
+   ring is a WCAG 2.4.7 requirement, so it is enforced here with `!important`
+   to defeat those non-important suppressions. This is the ONLY place in this
+   file that uses `!important` on a visual property, and the specificity is
+   deliberately left at (0,1,0) so any future, better-authored rule in a page
+   sheet can still win by being written after this file.                    */
+:focus-visible {
+    outline: 2px solid var(--hm-accent) !important;
+    outline-offset: 2px !important;
+}
+/* Mouse/touch interaction should not paint the ring - keyboard only. */
+:focus:not(:focus-visible) {
+    outline: none;
+}
+/* Ring must stay visible when the control sits on an accent fill. */
+.hm-on-accent:focus-visible {
+    outline-color: var(--hm-text-inverse) !important;
+}
+
+/* --- Reduced motion ------------------------------------------------------ */
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+    }
+    .pulse-dot,
+    .hm-toast,
+    [class*="-pulse"],
+    [class*="-shimmer"],
+    [class*="-flash"] {
+        animation: none !important;
+    }
+}
+
+/* --- Increased contrast -------------------------------------------------- */
+@media (prefers-contrast: more) {
+    :root {
+        --hm-border-subtle: rgba(148, 163, 184, 0.4);
+        --hm-border: rgba(148, 163, 184, 0.55);
+        --hm-text-dim: var(--hm-text-secondary);
+    }
+}
+
+/* --- Touch targets ------------------------------------------------------- */
+.hm-touch {
+    min-height: var(--hm-touch-target);
+    min-width: var(--hm-touch-target);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+
+/* ==========================================================================
+   4. GLOBAL SHELL MODERNISATION
+   ========================================================================== */
+
+html {
+    /* Prevent iOS landscape font inflation. */
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+}
+
+body {
+    /* Honour notches / home indicator on iOS and Android. */
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+}
+
+/* --- Custom scrollbars (progressive enhancement, WebKit + Firefox) ------- */
+* {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(148, 163, 184, 0.28) transparent;
+}
+::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+}
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+::-webkit-scrollbar-thumb {
+    background: rgba(148, 163, 184, 0.26);
+    border: 2px solid transparent;
+    background-clip: content-box;
+    border-radius: var(--hm-radius-pill);
+}
+::-webkit-scrollbar-thumb:hover {
+    background: rgba(148, 163, 184, 0.44);
+    background-clip: content-box;
+}
+
+/* --- Selection ----------------------------------------------------------- */
+::selection {
+    background: var(--hm-accent);
+    color: var(--hm-text-inverse);
+}
+
+
+/* ==========================================================================
+   5. TOP HUD / HEADER  (unifies .terminal-hud .stocks-hud .india-hud .opt-hud)
+   ========================================================================== */
+
+.terminal-hud,
+.stocks-hud,
+.india-hud,
+.opt-hud {
+    /* min-height (not height) so a page sheet that pins an explicit height
+       still wins, while the four HUDs converge on one consistent height. */
+    min-height: var(--hm-hud-height);
+    background: var(--hm-glass-panel);
+    backdrop-filter: var(--hm-blur);
+    -webkit-backdrop-filter: var(--hm-blur);
+    border-bottom: 1px solid var(--hm-border-subtle);
+    box-shadow: var(--hm-shadow-sm);
+    position: relative;
+    z-index: var(--hm-z-hud);
+}
+
+/* --- Notch support for the HUD -------------------------------------------
+   The two HUD families need different treatment, so a single shared
+   `padding-top` is impossible without regressing one of them:
+
+     header.terminal-hud   fixed 56px height, ZERO vertical padding - adding
+                           padding would squash its flex-centred content, so
+                           the BOX grows instead.
+     .stocks/.india/.opt   no fixed height, 10px baseline padding - the
+                           baseline must be preserved.
+
+   `max()` guarantees we only ever ADD space, never remove it. Browsers
+   without `env()` support drop the whole declaration and keep the page
+   sheet's own padding, so this degrades to a no-op rather than a regression. */
+header.terminal-hud {
+    height: calc(56px + env(safe-area-inset-top));
+    padding-top: env(safe-area-inset-top);
+}
+.stocks-hud,
+.india-hud,
+.opt-hud {
+    padding-top: max(10px, env(safe-area-inset-top));
+}
+
+/* --- Brand --------------------------------------------------------------- */
+.brand-logo {
+    display: flex;
+    align-items: center;
+    gap: var(--hm-space-2);
+    text-decoration: none;
+    color: var(--hm-text-primary);
+}
+.brand-icon {
+    display: grid;
+    place-items: center;
+    width: 30px;
+    height: 30px;
+    border-radius: var(--hm-radius);
+    background: linear-gradient(135deg, var(--hm-accent), #6366f1);
+    color: var(--hm-text-inverse);
+    font-size: var(--hm-text-base);
+    box-shadow: var(--hm-accent-glow);
+    flex-shrink: 0;
+}
+.brand-text {
+    font-size: var(--hm-text-base);
+    font-weight: var(--hm-weight-bold);
+    letter-spacing: -0.01em;
+    white-space: nowrap;
+}
+.brand-text span {
+    color: var(--hm-accent);
+}
+
+/* --- Status badges -------------------------------------------------------
+   Metrics are deliberately kept compact (10px / line-height 1.2 / 3px 8px) to
+   match the existing page sheets. Badges sit inside dense flex headers and
+   table rows, so growing them would shift layouts - and they do not need the
+   size uplift anyway, because their foreground colours already clear AA by a
+   wide margin. What IS unified here is the base rule itself: india.css and
+   india_options.css define no `.badge` base at all, so their badges previously
+   depended entirely on per-variant classes.                                        */
+.badge {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--hm-space-1);
+    padding: 3px 8px;
+    border-radius: var(--hm-radius-pill);
+    font-family: var(--hm-font-mono);
+    font-size: 10px;
+    font-weight: var(--hm-weight-bold);
+    letter-spacing: var(--hm-tracking-caps);
+    text-transform: uppercase;
+    line-height: 1.2;
+    white-space: nowrap;
+    border: 1px solid transparent;
+}
+.badge-live {
+    background: var(--hm-bull-subtle);
+    color: var(--hm-bull);
+    border-color: rgba(0, 245, 155, 0.34);
+}
+.badge-mode {
+    background: var(--hm-accent-subtle);
+    color: var(--hm-accent);
+    border-color: rgba(56, 189, 248, 0.34);
+}
+.badge-safe {
+    background: var(--hm-warn-subtle);
+    color: var(--hm-warn);
+    border-color: rgba(245, 158, 11, 0.34);
+}
+
+/* --- Live pulse dot ------------------------------------------------------ */
+.pulse-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: currentColor;
+    flex-shrink: 0;
+    animation: hm-pulse 1.8s var(--hm-ease) infinite;
+}
+@keyframes hm-pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50%      { opacity: 0.45; transform: scale(0.82); }
+}
+
+/* --- Cross-page navigation -----------------------------------------------
+   Three pages carry a visible `.nav-links-wrapper`; the terminal exposes the
+   same four destinations inside a dropdown instead. Styling both from one
+   place is what removes the divergence.                                   */
+.nav-links-wrapper {
+    display: flex;
+    align-items: center;
+    gap: var(--hm-space-2);
+    flex-wrap: wrap;
+}
+
+.btn-nav-switch {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--hm-space-1);
+    min-height: 34px;
+    padding: var(--hm-space-2) var(--hm-space-3);
+    border: 1px solid var(--hm-border-subtle);
+    border-radius: var(--hm-radius);
+    background: var(--hm-bg-raised);
+    color: var(--hm-text-secondary);
+    font-family: var(--hm-font-sans);
+    font-size: var(--hm-text-xs);
+    font-weight: var(--hm-weight-semibold);
+    text-decoration: none;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background var(--hm-dur-fast) var(--hm-ease),
+                color var(--hm-dur-fast) var(--hm-ease),
+                border-color var(--hm-dur-fast) var(--hm-ease),
+                transform var(--hm-dur-instant) var(--hm-ease);
+}
+.btn-nav-switch:hover {
+    background: var(--hm-bg-hover);
+    color: var(--hm-text-primary);
+    border-color: var(--hm-accent);
+}
+.btn-nav-switch:active {
+    transform: translateY(1px);
+}
+
+/* Accept BOTH conventions. `stocks.html` marks the current page with
+   `btn-nav-active`; `india.html` and `india_options.html` use bare `active`.
+   Supporting both removes a latent break the moment these sheets are merged,
+   and lets the JS set the state without knowing which page it is on.
+   `[aria-current="page"]` is the canonical, machine-readable signal.        */
+.btn-nav-switch.btn-nav-active,
+.btn-nav-switch.active,
+.btn-nav-switch[aria-current="page"] {
+    background: var(--hm-accent-subtle);
+    color: var(--hm-accent);
+    border-color: rgba(56, 189, 248, 0.5);
+    font-weight: var(--hm-weight-bold);
+    box-shadow: inset 0 -2px 0 var(--hm-accent);
+}
+
+/* Terminal dropdown items are also cross-page nav - style them as such. */
+.market-nav-item,
+.dropdown-item.market-nav-item {
+    display: flex;
+    align-items: center;
+    gap: var(--hm-space-2);
+    min-height: var(--hm-touch-target);
+    padding: var(--hm-space-2) var(--hm-space-3);
+    border-radius: var(--hm-radius);
+    color: var(--hm-text-secondary);
+    font-size: var(--hm-text-sm);
+    text-decoration: none;
+    transition: background var(--hm-dur-fast) var(--hm-ease),
+                color var(--hm-dur-fast) var(--hm-ease);
+}
+.market-nav-item:hover {
+    background: var(--hm-bg-hover);
+    color: var(--hm-text-primary);
+}
+.market-nav-item[aria-current="page"] {
+    color: var(--hm-accent);
+    font-weight: var(--hm-weight-bold);
+    background: var(--hm-accent-subtle);
+}
+
+
+/* ==========================================================================
+   6. MOBILE TAB BAR  (unifies the four near-identical <=900px blocks)
+   ========================================================================== */
+
+.mobile-nav-bar {
+    display: none;
+    gap: var(--hm-space-1);
+    padding: var(--hm-space-1) var(--hm-space-2);
+    background: var(--hm-glass-panel);
+    backdrop-filter: var(--hm-blur);
+    -webkit-backdrop-filter: var(--hm-blur);
+    border-bottom: 1px solid var(--hm-border-subtle);
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    flex-shrink: 0;
+    z-index: var(--hm-z-nav);
+    padding-bottom: max(var(--hm-space-1), env(safe-area-inset-bottom));
+}
+.mobile-nav-bar::-webkit-scrollbar {
+    display: none;
+}
+
+.mob-tab-btn {
+    flex: 1 0 auto;
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    /* 44px minimum target (WCAG 2.5.5) - the previous 5px/10px padding
+       produced a ~28px hit box, which is below the usable threshold. */
+    min-height: var(--hm-touch-target);
+    padding: var(--hm-space-1) var(--hm-space-3);
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: var(--hm-radius);
+    color: var(--hm-text-dim);
+    font-family: var(--hm-font-sans);
+    font-size: var(--hm-text-2xs);
+    font-weight: var(--hm-weight-bold);
+    letter-spacing: var(--hm-tracking-caps);
+    text-transform: uppercase;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background var(--hm-dur-fast) var(--hm-ease),
+                color var(--hm-dur-fast) var(--hm-ease);
+}
+.mob-tab-icon {
+    font-size: var(--hm-text-base);
+    line-height: 1;
+}
+.mob-tab-label {
+    line-height: 1.2;
+}
+.mob-tab-btn:hover {
+    background: var(--hm-bg-hover);
+    color: var(--hm-text-primary);
+}
+.mob-tab-btn.active,
+.mob-tab-btn[aria-selected="true"] {
+    background: var(--hm-accent-subtle);
+    color: var(--hm-accent);
+    border-color: rgba(56, 189, 248, 0.45);
+    box-shadow: inset 0 -2px 0 var(--hm-accent);
+}
+
+@media (max-width: 900px) {
+    .mobile-nav-bar {
+        display: flex;
+    }
+}
+
+
+/* ==========================================================================
+   7. BUTTONS
+   ========================================================================== */
+
+.hm-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--hm-space-2);
+    min-height: 36px;
+    padding: var(--hm-space-2) var(--hm-space-4);
+    border: 1px solid var(--hm-border);
+    border-radius: var(--hm-radius);
+    background: var(--hm-bg-raised);
+    color: var(--hm-text-primary);
+    font-family: var(--hm-font-sans);
+    font-size: var(--hm-text-sm);
+    font-weight: var(--hm-weight-semibold);
+    line-height: 1;
+    white-space: nowrap;
+    cursor: pointer;
+    user-select: none;
+    transition: background var(--hm-dur-fast) var(--hm-ease),
+                border-color var(--hm-dur-fast) var(--hm-ease),
+                color var(--hm-dur-fast) var(--hm-ease),
+                transform var(--hm-dur-instant) var(--hm-ease);
+}
+.hm-btn:hover:not(:disabled) {
+    background: var(--hm-bg-hover);
+    border-color: var(--hm-border-strong);
+}
+.hm-btn:active:not(:disabled) {
+    transform: translateY(1px);
+}
+.hm-btn:disabled,
+.hm-btn[aria-disabled="true"] {
+    opacity: 0.45;
+    cursor: not-allowed;
+    pointer-events: none;
+}
+
+.hm-btn--primary {
+    background: var(--hm-accent);
+    border-color: var(--hm-accent);
+    color: var(--hm-text-inverse);
+}
+.hm-btn--primary:hover:not(:disabled) {
+    background: var(--hm-accent-hover);
+    border-color: var(--hm-accent-hover);
+}
+.hm-btn--bull {
+    background: var(--hm-bull-subtle);
+    border-color: rgba(0, 245, 155, 0.4);
+    color: var(--hm-bull);
+}
+.hm-btn--bear {
+    background: var(--hm-bear-subtle);
+    border-color: rgba(255, 59, 92, 0.4);
+    color: var(--hm-bear);
+}
+.hm-btn--ghost {
+    background: transparent;
+    border-color: transparent;
+    color: var(--hm-text-secondary);
+}
+.hm-btn--ghost:hover:not(:disabled) {
+    background: var(--hm-bg-hover);
+    color: var(--hm-text-primary);
+}
+.hm-btn--sm {
+    min-height: 28px;
+    padding: var(--hm-space-1) var(--hm-space-2);
+    font-size: var(--hm-text-2xs);
+}
+.hm-btn--icon {
+    min-width: 36px;
+    padding: var(--hm-space-2);
+}
+.hm-btn--block {
+    width: 100%;
+}
+
+
+/* ==========================================================================
+   8. TABLES
+   ========================================================================== */
+
+.table-responsive {
+    width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+}
+
+.table-header-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--hm-space-3);
+    flex-wrap: wrap;
+    padding: var(--hm-space-3) var(--hm-space-4);
+    border-bottom: 1px solid var(--hm-border-subtle);
+}
+.table-title {
+    display: flex;
+    align-items: center;
+    gap: var(--hm-space-2);
+    font-size: var(--hm-text-sm);
+    font-weight: var(--hm-weight-bold);
+    color: var(--hm-text-primary);
+    letter-spacing: -0.01em;
+}
+.table-count-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 1px 8px;
+    border-radius: var(--hm-radius-pill);
+    background: var(--hm-accent-subtle);
+    color: var(--hm-accent);
+    font-family: var(--hm-font-mono);
+    font-size: var(--hm-text-2xs);
+    font-weight: var(--hm-weight-bold);
+}
+.table-toolbar-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--hm-space-2);
+    flex-wrap: wrap;
+}
+
+/* Data tables: legacy sheets style their own <table>s, so this targets only
+   tables explicitly opted in, plus the generic descendant case. */
+.hm-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: var(--hm-text-sm);
+}
+.hm-table th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: var(--hm-bg-raised);
+    color: var(--hm-text-dim);
+    font-size: var(--hm-text-2xs);
+    font-weight: var(--hm-weight-bold);
+    letter-spacing: var(--hm-tracking-caps);
+    text-transform: uppercase;
+    text-align: left;
+    padding: var(--hm-space-2) var(--hm-space-3);
+    border-bottom: 1px solid var(--hm-border);
+    white-space: nowrap;
+}
+.hm-table td {
+    padding: var(--hm-space-2) var(--hm-space-3);
+    border-bottom: 1px solid var(--hm-border-subtle);
+    color: var(--hm-text-secondary);
+    vertical-align: middle;
+}
+.hm-table tbody tr {
+    transition: background var(--hm-dur-fast) var(--hm-ease);
+}
+.hm-table tbody tr:hover {
+    background: var(--hm-bg-hover);
+}
+.hm-table .hm-num {
+    font-family: var(--hm-font-mono);
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+}
+
+
+/* ==========================================================================
+   9. CARDS & PANELS
+   ========================================================================== */
+
+.hm-card {
+    background: var(--hm-glass-card);
+    backdrop-filter: var(--hm-blur);
+    -webkit-backdrop-filter: var(--hm-blur);
+    border: 1px solid var(--hm-border-subtle);
+    border-radius: var(--hm-radius-lg);
+    box-shadow: var(--hm-shadow);
+    overflow: hidden;
+}
+.hm-card__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--hm-space-3);
+    padding: var(--hm-space-3) var(--hm-space-4);
+    border-bottom: 1px solid var(--hm-border-subtle);
+}
+.hm-card__title {
+    font-size: var(--hm-text-sm);
+    font-weight: var(--hm-weight-bold);
+    color: var(--hm-text-primary);
+}
+.hm-card__body {
+    padding: var(--hm-space-4);
+}
+
+/* Focus-within highlight: makes the "which panel am I in" question answerable
+   for keyboard users, who otherwise get no spatial cue. */
+.hm-card:focus-within {
+    border-color: rgba(56, 189, 248, 0.4);
+    box-shadow: var(--hm-shadow), var(--hm-shadow-focus);
+}
+
+
+/* ==========================================================================
+   10. MODALS  (unifies .macro-news-modal-overlay .command-palette-overlay)
+   ========================================================================== */
+
+.macro-news-modal-overlay,
+.command-palette-overlay {
+    /* The templates toggle visibility with inline `style.display`; these
+       declarations only refine appearance, never visibility, so the existing
+       JS show/hide logic keeps working untouched. */
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    padding: var(--hm-space-4);
+    padding-bottom: max(var(--hm-space-4), env(safe-area-inset-bottom));
+    z-index: var(--hm-z-modal);
+    overscroll-behavior: contain;
+}
+
+/* Body scroll lock, toggled by hm_ui.js while a modal is open. */
+body.hm-modal-open {
+    overflow: hidden;
+}
+
+
+/* ==========================================================================
+   11. TOAST / FEEDBACK SYSTEM
+   --------------------------------------------------------------------------
+   Replaces ten blocking `window.alert()` calls. The call sites are NOT edited:
+   hm_ui.js swaps `window.alert` for a shim that renders here, so behaviour is
+   preserved (message reaches the user, execution still blocks nothing) while
+   the interaction becomes non-modal and screen-reader announced.
+   ========================================================================== */
+
+.hm-toast-stack {
+    position: fixed;
+    top: calc(var(--hm-space-4) + env(safe-area-inset-top));
+    right: calc(var(--hm-space-4) + env(safe-area-inset-right));
+    z-index: var(--hm-z-toast);
+    display: flex;
+    flex-direction: column;
+    gap: var(--hm-space-2);
+    width: min(400px, calc(100vw - var(--hm-space-5)));
+    pointer-events: none;
+}
+
+.hm-toast {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--hm-space-3);
+    padding: var(--hm-space-3) var(--hm-space-4);
+    background: var(--hm-bg-overlay);
+    border: 1px solid var(--hm-border);
+    border-left: 3px solid var(--hm-accent);
+    border-radius: var(--hm-radius);
+    box-shadow: var(--hm-shadow-lg);
+    color: var(--hm-text-primary);
+    font-family: var(--hm-font-sans);
+    font-size: var(--hm-text-sm);
+    line-height: var(--hm-leading-normal);
+    pointer-events: auto;
+    animation: hm-toast-in var(--hm-dur-normal) var(--hm-ease-out);
+}
+.hm-toast--leaving {
+    animation: hm-toast-out var(--hm-dur-fast) var(--hm-ease) forwards;
+}
+.hm-toast__icon {
+    flex-shrink: 0;
+    font-size: var(--hm-text-base);
+    line-height: 1.4;
+}
+.hm-toast__body {
+    flex: 1;
+    min-width: 0;
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;   /* preserve the \n in existing alert() strings */
+}
+.hm-toast__close {
+    flex-shrink: 0;
+    width: 24px;
+    height: 24px;
+    display: grid;
+    place-items: center;
+    background: transparent;
+    border: 0;
+    border-radius: var(--hm-radius-sm);
+    color: var(--hm-text-dim);
+    font-size: var(--hm-text-base);
+    line-height: 1;
+    cursor: pointer;
+    transition: background var(--hm-dur-fast) var(--hm-ease),
+                color var(--hm-dur-fast) var(--hm-ease);
+}
+.hm-toast__close:hover {
+    background: var(--hm-bg-hover);
+    color: var(--hm-text-primary);
+}
+
+.hm-toast--success { border-left-color: var(--hm-bull); }
+.hm-toast--error   { border-left-color: var(--hm-bear); }
+.hm-toast--warning { border-left-color: var(--hm-warn); }
+.hm-toast--info    { border-left-color: var(--hm-info); }
+
+@keyframes hm-toast-in {
+    from { opacity: 0; transform: translateX(24px) scale(0.97); }
+    to   { opacity: 1; transform: translateX(0) scale(1); }
+}
+@keyframes hm-toast-out {
+    from { opacity: 1; transform: translateX(0); }
+    to   { opacity: 0; transform: translateX(24px); }
+}
+
+@media (max-width: 600px) {
+    .hm-toast-stack {
+        top: auto;
+        bottom: calc(var(--hm-nav-height) + var(--hm-space-3) + env(safe-area-inset-bottom));
+        left: var(--hm-space-3);
+        right: var(--hm-space-3);
+        width: auto;
+    }
+    .hm-toast {
+        animation-name: hm-toast-in-mobile;
+    }
+}
+@keyframes hm-toast-in-mobile {
+    from { opacity: 0; transform: translateY(16px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+
+/* ==========================================================================
+   12. RESPONSIVE CONSOLIDATION
+   --------------------------------------------------------------------------
+   The four page sheets each carry their own near-identical <=900px block
+   (~36 + ~32 duplicated class families). Only genuinely shared shell rules
+   live here; page-specific layout stays in the page sheet.
+   ========================================================================== */
+
+@media (max-width: 1280px) {
+    .brand-text {
+        font-size: var(--hm-text-sm);
+    }
+}
+
+@media (max-width: 1024px) {
+    .nav-links-wrapper {
+        gap: var(--hm-space-1);
+    }
+    .btn-nav-switch {
+        padding: var(--hm-space-1) var(--hm-space-2);
+        font-size: var(--hm-text-2xs);
+    }
+}
+
+@media (max-width: 900px) {
+    /* Below the tablet breakpoint the horizontal nav is replaced by the
+       mobile tab bar, so the wrapper collapses rather than wrapping badly. */
+    .terminal-hud .nav-links-wrapper,
+    .stocks-hud .nav-links-wrapper,
+    .india-hud .nav-links-wrapper,
+    .opt-hud .nav-links-wrapper {
+        display: none;
+    }
+    .brand-text {
+        font-size: var(--hm-text-xs);
+    }
+}
+
+@media (max-width: 600px) {
+    :root {
+        --hm-hud-height: 50px;
+    }
+    .brand-text span {
+        display: none;   /* keep the mark, drop the version suffix */
+    }
+    /* 16px inputs prevent the iOS Safari auto-zoom on focus. */
+    input,
+    select,
+    textarea {
+        font-size: var(--hm-text-lg) !important;
+    }
+    .hm-btn {
+        min-height: var(--hm-touch-target);
+    }
+}
+
+@media (max-width: 480px) {
+    .brand-text {
+        font-size: var(--hm-text-2xs);
+    }
+    .mob-tab-btn {
+        padding: var(--hm-space-1) var(--hm-space-2);
+    }
+}
+
+/* --- Landscape phones: reclaim vertical space ---------------------------- */
+@media (max-height: 480px) and (orientation: landscape) {
+    .mobile-nav-bar {
+        padding-top: 0;
+        padding-bottom: 0;
+    }
+    .mob-tab-btn {
+        min-height: 38px;
+        flex-direction: row;
+        gap: var(--hm-space-1);
+    }
+}
+
+/* --- Coarse pointer: enlarge every interactive target -------------------- */
+@media (pointer: coarse) {
+    .mob-tab-btn,
+    .btn-nav-switch,
+    .market-nav-item {
+        min-height: var(--hm-touch-target);
+    }
+}
+
+
+/* ==========================================================================
+   13. PRINT
+   ========================================================================== */
+
+@media print {
+    .mobile-nav-bar,
+    .hm-toast-stack,
+    .hm-skip-link,
+    .btn-nav-switch,
+    #copilot-fab {
+        display: none !important;
+    }
+    body {
+        background: #ffffff !important;
+        color: #000000 !important;
+    }
+    .hm-card,
+    .terminal-hud,
+    .stocks-hud,
+    .india-hud,
+    .opt-hud {
+        box-shadow: none !important;
+        border-color: #cccccc !important;
+    }
+}

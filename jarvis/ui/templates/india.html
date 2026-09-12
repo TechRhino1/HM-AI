@@ -3,6 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="theme-color" content="#070b12">
+    <meta name="color-scheme" content="dark">
     <title>HM AI 4.0 — India Markets (NSE/BSE, Indices & F&O Intelligence)</title>
     <!-- Google Fonts: Inter & JetBrains Mono -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -12,10 +14,15 @@
     <script src="/static/js/vendor/lightweight-charts.standalone.production.js"></script>
     <script>if(typeof LightweightCharts==='undefined'){document.write('<script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"><\/script>');}</script>
     <!-- India Terminal Stylesheet -->
-    <link rel="stylesheet" href="/static/css/india.css?v=20260907_v1">
-    <link rel="stylesheet" href="/static/css/auth.css?v=20260907_v1">
+    <link rel="stylesheet" href="/static/css/india.css?v=20260912_v2">
+    <link rel="stylesheet" href="/static/css/auth.css?v=20260912_v2">
+    <!-- Unified Design System (loaded LAST - see hm_ui.css) -->
+    <link rel="stylesheet" href="/static/css/hm_ui.css?v=20260912_v2">
 </head>
 <body>
+
+    <!-- Keyboard users reach the layout without tabbing the whole HUD. -->
+    <a class="hm-skip-link" href="#hm-main">Skip to main content</a>
 
     <!-- ==========================================================================
          TOP INSTITUTIONAL HUD HEADER
@@ -32,7 +39,7 @@
         </div>
 
         <!-- Global Cross-Market Navigation Switches -->
-        <div class="nav-links-wrapper">
+        <div class="nav-links-wrapper" role="navigation" aria-label="Market sections">
             <a href="/" class="btn-nav-switch">
                 <span>⚡ Forex / Crypto</span>
             </a>
@@ -61,11 +68,11 @@
     <!-- ==========================================================================
          MOBILE BOTTOM NAVIGATION TAB BAR (VISIBLE ON TOUCH / MOBILE <= 900PX)
          ========================================================================== -->
-    <nav class="mobile-nav-bar" id="mobile-nav-bar">
-        <button id="mob-btn-buys" class="mob-tab-btn active" onclick="switchMobileIndiaView('buys')">⚡ Prime Buys</button>
-        <button id="mob-btn-screener" class="mob-tab-btn" onclick="switchMobileIndiaView('screener')">📋 Screener</button>
-        <button id="mob-btn-heatmap" class="mob-tab-btn" onclick="switchMobileIndiaView('heatmap')">🗺️ Heatmap</button>
-        <button id="mob-btn-all" class="mob-tab-btn" onclick="switchMobileIndiaView('all')">🌐 All View</button>
+    <nav class="mobile-nav-bar" id="mobile-nav-bar" role="tablist" aria-label="India market view selector">
+        <button id="mob-btn-buys" class="mob-tab-btn active" role="tab" aria-selected="true" onclick="switchMobileIndiaView('buys')">⚡ Prime Buys</button>
+        <button id="mob-btn-screener" class="mob-tab-btn" role="tab" aria-selected="false" onclick="switchMobileIndiaView('screener')">📋 Screener</button>
+        <button id="mob-btn-heatmap" class="mob-tab-btn" role="tab" aria-selected="false" onclick="switchMobileIndiaView('heatmap')">🗺️ Heatmap</button>
+        <button id="mob-btn-all" class="mob-tab-btn" role="tab" aria-selected="false" onclick="switchMobileIndiaView('all')">🌐 All View</button>
     </nav>
 
     <!-- ==========================================================================
@@ -108,7 +115,7 @@
     <!-- ==========================================================================
          MAIN VIEWPORT CONTAINER
          ========================================================================== -->
-    <div class="india-layout-container">
+    <div class="india-layout-container" role="main" id="hm-main" aria-label="India market screener">
 
         <!-- Filter & Control Toolbar -->
         <div class="filter-panel-card">
@@ -581,7 +588,9 @@
     </div>
 
     <!-- Universal Authentication & India Controller Script -->
-    <script src="/static/js/auth.js?v=20260907_v1"></script>
-    <script src="/static/js/india.js?v=20260907_v1"></script>
+    <script src="/static/js/auth.js?v=20260912_v2"></script>
+    <script src="/static/js/india.js?v=20260912_v2"></script>
+    <!-- Unified UX / accessibility layer (loaded LAST). -->
+    <script src="/static/js/hm_ui.js?v=20260912_v2" defer></script>
 </body>
 </html>

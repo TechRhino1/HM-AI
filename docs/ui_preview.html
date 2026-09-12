@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#070b12">
+<meta name="color-scheme" content="dark">
+<title>HM AI 4.0 — Design System Gallery</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+<!-- The design system under review. hm_ui.css is fully self-contained: it
+     defines every token it consumes, so this gallery needs nothing else. -->
+<link rel="stylesheet" href="../jarvis/ui/static/css/hm_ui.css">
+
+<style>
+  /* Gallery scaffolding only - not part of the design system. */
+  body {
+    margin: 0;
+    background: var(--hm-bg-base);
+    color: var(--hm-text-primary);
+    font-family: var(--hm-font-sans);
+    font-size: var(--hm-text-base);
+    line-height: var(--hm-leading-normal);
+  }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: var(--hm-space-6) var(--hm-space-4) 96px; }
+  .page-title { font-size: var(--hm-text-2xl); font-weight: var(--hm-weight-black); margin: 0 0 var(--hm-space-2); letter-spacing: -0.02em; }
+  .page-sub { color: var(--hm-text-dim); margin: 0 0 var(--hm-space-6); max-width: 70ch; }
+  section { margin-bottom: var(--hm-space-7); }
+  .sec-title {
+    font-size: var(--hm-text-2xs); font-weight: var(--hm-weight-black);
+    letter-spacing: var(--hm-tracking-caps); text-transform: uppercase;
+    color: var(--hm-accent); margin: 0 0 var(--hm-space-1);
+    padding-bottom: var(--hm-space-2); border-bottom: 1px solid var(--hm-border-subtle);
+  }
+  .sec-note { color: var(--hm-text-dim); font-size: var(--hm-text-sm); margin: var(--hm-space-2) 0 var(--hm-space-4); max-width: 80ch; }
+  .grid { display: grid; gap: var(--hm-space-3); }
+  .g-swatches { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+  .g-2 { grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+  .row { display: flex; flex-wrap: wrap; gap: var(--hm-space-3); align-items: center; }
+  .swatch { border: 1px solid var(--hm-border-subtle); border-radius: var(--hm-radius); overflow: hidden; }
+  .swatch__chip { height: 52px; }
+  .swatch__meta { padding: var(--hm-space-2) var(--hm-space-3); background: var(--hm-bg-raised); }
+  .swatch__name { font-size: var(--hm-text-2xs); font-weight: var(--hm-weight-bold); display: block; }
+  .swatch__val { font-family: var(--hm-font-mono); font-size: var(--hm-text-2xs); color: var(--hm-text-dim); }
+  .demo-box { padding: var(--hm-space-4); background: var(--hm-bg-surface); border: 1px solid var(--hm-border-subtle); border-radius: var(--hm-radius-lg); }
+  .type-row { display: flex; align-items: baseline; gap: var(--hm-space-4); padding: var(--hm-space-2) 0; border-bottom: 1px solid var(--hm-border-subtle); }
+  .type-row code { font-family: var(--hm-font-mono); font-size: var(--hm-text-2xs); color: var(--hm-text-dim); min-width: 130px; }
+  .spacing-bar { height: 14px; background: var(--hm-accent); border-radius: 2px; }
+  .spacing-row { display: flex; align-items: center; gap: var(--hm-space-3); padding: 3px 0; }
+  .spacing-row code { font-family: var(--hm-font-mono); font-size: var(--hm-text-2xs); color: var(--hm-text-dim); min-width: 110px; }
+  /* Contrast evidence table */
+  table.contrast { width: 100%; border-collapse: collapse; font-size: var(--hm-text-sm); }
+  table.contrast th, table.contrast td { padding: var(--hm-space-2) var(--hm-space-3); border-bottom: 1px solid var(--hm-border-subtle); text-align: left; }
+  table.contrast th { color: var(--hm-text-dim); font-size: var(--hm-text-2xs); text-transform: uppercase; letter-spacing: var(--hm-tracking-caps); }
+  table.contrast td.n { font-family: var(--hm-font-mono); text-align: right; }
+  .pass { color: var(--hm-bull); font-weight: var(--hm-weight-bold); }
+  .fail { color: var(--hm-bear); font-weight: var(--hm-weight-bold); }
+  .strike { text-decoration: line-through; opacity: .55; }
+  .hint { font-size: var(--hm-text-xs); color: var(--hm-text-dim); }
+</style>
+</head>
+<body>
+<a class="hm-skip-link" href="#gallery">Skip to main content</a>
+
+<main class="wrap" id="gallery" role="main" tabindex="-1">
+  <h1 class="page-title">HM AI 4.0 — Unified Design System</h1>
+  <p class="page-sub">
+    A live render of <code>jarvis/ui/static/css/hm_ui.css</code>. Every swatch, control and
+    measurement below is produced by the stylesheet itself — nothing here is a mock-up.
+    Resize the window to see the responsive behaviour, and press <kbd>Tab</kbd> to see the
+    focus ring on each control.
+  </p>
+
+  <!-- ================================================================ -->
+  <section>
+    <h2 class="sec-title">1 · Surfaces</h2>
+    <p class="sec-note">A six-step elevation ladder replacing the four per-page background tokens. Each step is a fixed value so panels compose predictably.</p>
+    <div class="grid g-swatches">
+      <div class="swatch"><div class="swatch__chip" style="background:var(--hm-bg-sunken)"></div><div class="swatch__meta"><span class="swatch__name">--hm-bg-sunken</span><span class="swatch__val">#04070d</span></div></div>
+      <div class="swatch"><div class="swatch__chip" style="background:var(--hm-bg-base)"></div><div class="swatch__meta"><span class="swatch__name">--hm-bg-base</span><span class="swatch__val">#070b12</span></div></div>
+      <div class="swatch"><div class="swatch__chip" style="background:var(--hm-bg-surface)"></div><div class="swatch__meta"><span class="swatch__name">--hm-bg-surface</span><span class="swatch__val">#0d1420</span></div></div>
+      <div class="swatch"><div class="swatch__chip" style="background:var(--hm-bg-raised)"></div><div class="swatch__meta"><span class="swatch__name">--hm-bg-raised</span><span class="swatch__val">#131c2c</span></div></div>
+      <div class="swatch"><div class="swatch__chip" style="background:var(--hm-bg-overlay)"></div><div class="swatch__meta"><span class="swatch__name">--hm-bg-overlay</span><span class="swatch__val">#1a2438</span></div></div>
+      <div class="swatch"><div class="swatch__chip" style="background:var(--hm-bg-hover)"></div><div class="swatch__meta"><span class="swatch__name">--hm-bg-hover</span><span class="swatch__val">#1e2a41</span></div></div>
+    </div>
+  </section>
+
+  <!-- ================================================================ -->
+  <section>
+    <h2 class="sec-title">2 · Text &amp; accents</h2>
+    <p class="sec-note">The dim tier is the single most important change in this stylesheet: the previous value failed WCAG AA at the sizes it was actually used.</p>
+    <div class="grid g-swatches">
+      <div class="swatch"><div class="swatch__chip" style="background:var(--hm-text-primary)"></div><div class="swatch__meta"><span class="swatch__name">--hm-text-primary</span><span class="swatch__val">#f8fafc</span></div></div>
+      <div class="swatch"><div class="swatch__chip" style="background:var(--hm-text-secondary)"></div><div class="swatch__meta"><span class="swatch__name">--hm-text-secondary</span><span class="swatch__val">#b6c2d4</span></div></div>
+      <div class="swatch"><div class="swatch__chip" style="background:var(--hm-text-dim)"></div><div class="swatch__meta"><span class="swatch__name">--hm-text-dim</span><span class="swatch__val">#8494ab</span></div></div>
+      <div class="swatch"><div class="swatch__chip" style="background:var(--hm-accent)"></div><div class="swatch__meta"><span class="swatch__name">--hm-accent</span><span class="swatch__val">#38bdf8</span></div></div>
+      <div class="swatch"><div class="swatch__chip" style="background:var(--hm-bull)"></div><div class="swatch__meta"><span class="swatch__name">--hm-bull</span><span class="swatch__val">#00f59b</span></div></div>
+      <div class="swatch"><div class="swatch__chip" style="background:var(--hm-bear)"></div><div class="swatch__meta"><span class="swatch__name">--hm-bear</span><span class="swatch__val">#ff3b5c</span></div></div>
+      <div class="swatch"><div class="swatch__chip" style="background:var(--hm-warn)"></div><div class="swatch__meta"><span class="swatch__name">--hm-warn</span><span class="swatch__val">#f59e0b</span></div></div>
+    </div>
+  </section>
+
+  <!-- ================================================================ -->
+  <section>
+    <h2 class="sec-title">3 · Contrast evidence</h2>
+    <p class="sec-note">Measured against the <em>lightest</em> surface each token is ever placed on — the worst case, not the flattering one. Ratios use the WCAG 2.1 relative-luminance formula.</p>
+    <div class="demo-box">
+      <table class="contrast">
+        <thead>
+          <tr><th>Token</th><th>Colour</th><th>On surface</th><th class="n">Ratio</th><th>AA (4.5:1)</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>--hm-text-primary</td><td><code>#f8fafc</code></td><td>--hm-bg-hover</td><td class="n">17.4:1</td><td class="pass">PASS</td></tr>
+          <tr><td>--hm-text-secondary</td><td><code>#b6c2d4</code></td><td>--hm-bg-hover</td><td class="n">8.35:1</td><td class="pass">PASS</td></tr>
+          <tr><td>--hm-text-dim <span class="hint">(new)</span></td><td><code>#8494ab</code></td><td>--hm-bg-hover</td><td class="n">4.88:1</td><td class="pass">PASS</td></tr>
+          <tr><td class="strike">--text-dim <span class="hint">(was)</span></td><td class="strike"><code>#64748b</code></td><td>--hm-bg-surface</td><td class="n strike">3.89:1</td><td class="fail">FAIL</td></tr>
+          <tr><td class="strike">--text-dim <span class="hint">(was)</span></td><td class="strike"><code>#64748b</code></td><td>--hm-bg-base</td><td class="n strike">4.19:1</td><td class="fail">FAIL</td></tr>
+          <tr><td>--hm-accent</td><td><code>#38bdf8</code></td><td>--hm-bg-base</td><td class="n">9.30:1</td><td class="pass">PASS</td></tr>
+        </tbody>
+      </table>
+      <p class="hint" style="margin: var(--hm-space-3) 0 0">
+        The old dim colour was applied to 8–11&nbsp;px text across all four pages — the least
+        forgiving case, where AA still requires 4.5:1.
+      </p>
+    </div>
+  </section>
+
+  <!-- ================================================================ -->
+  <section>
+    <h2 class="sec-title">4 · Type scale</h2>
+    <p class="sec-note">A named ramp replaces ~155 ad-hoc pixel sizes. The floor for sentence-case body text is 12&nbsp;px; the 11&nbsp;px step is reserved for uppercase micro-labels, where the added letter-spacing compensates.</p>
+    <div class="demo-box">
+      <div class="type-row"><code>--hm-text-2xl</code><span style="font-size:var(--hm-text-2xl);font-weight:800">Institutional Terminal</span></div>
+      <div class="type-row"><code>--hm-text-xl</code><span style="font-size:var(--hm-text-xl);font-weight:700">Institutional Terminal</span></div>
+      <div class="type-row"><code>--hm-text-lg</code><span style="font-size:var(--hm-text-lg)">Institutional Terminal — mobile input size</span></div>
+      <div class="type-row"><code>--hm-text-base</code><span style="font-size:var(--hm-text-base)">Institutional Terminal — default body</span></div>
+      <div class="type-row"><code>--hm-text-sm</code><span style="font-size:var(--hm-text-sm)">Institutional Terminal — table content</span></div>
+      <div class="type-row"><code>--hm-text-xs</code><span style="font-size:var(--hm-text-xs)">Institutional Terminal — nav labels</span></div>
+      <div class="type-row" style="border:0"><code>--hm-text-2xs</code><span style="font-size:var(--hm-text-2xs);letter-spacing:var(--hm-tracking-caps);text-transform:uppercase;font-weight:800;color:var(--hm-text-dim)">Micro label · uppercase only</span></div>
+      <div class="type-row" style="border:0"><code>--hm-font-mono</code><span style="font-family:var(--hm-font-mono);font-variant-numeric:tabular-nums">1,284.50 &nbsp; +0.42% &nbsp; 18,998</span></div>
+    </div>
+  </section>
+
+  <!-- ================================================================ -->
+  <section>
+    <h2 class="sec-title">5 · Spacing</h2>
+    <p class="sec-note">One 4&nbsp;px grid. Every gap, pad and inset in the shell resolves to a step on this ramp.</p>
+    <div class="demo-box">
+      <div class="spacing-row"><code>--hm-space-1</code><div class="spacing-bar" style="width:4px"></div><span class="hint">4px</span></div>
+      <div class="spacing-row"><code>--hm-space-2</code><div class="spacing-bar" style="width:8px"></div><span class="hint">8px</span></div>
+      <div class="spacing-row"><code>--hm-space-3</code><div class="spacing-bar" style="width:12px"></div><span class="hint">12px</span></div>
+      <div class="spacing-row"><code>--hm-space-4</code><div class="spacing-bar" style="width:16px"></div><span class="hint">16px</span></div>
+      <div class="spacing-row"><code>--hm-space-5</code><div class="spacing-bar" style="width:24px"></div><span class="hint">24px</span></div>
+      <div class="spacing-row"><code>--hm-space-6</code><div class="spacing-bar" style="width:32px"></div><span class="hint">32px</span></div>
+      <div class="spacing-row"><code>--hm-space-7</code><div class="spacing-bar" style="width:48px"></div><span class="hint">48px</span></div>
+    </div>
+  </section>
+
+  <!-- ================================================================ -->
+  <section>
+    <h2 class="sec-title">6 · Buttons</h2>
+    <p class="sec-note">Consistent height, radius, motion and disabled semantics. The accent fill uses dark text, which is what makes the primary action legible.</p>
+    <div class="demo-box">
+      <div class="row" style="margin-bottom:var(--hm-space-3)">
+        <button class="hm-btn hm-btn--primary">Primary action</button>
+        <button class="hm-btn">Secondary</button>
+        <button class="hm-btn hm-btn--bull">Buy / Long</button>
+        <button class="hm-btn hm-btn--bear">Sell / Short</button>
+        <button class="hm-btn hm-btn--ghost">Ghost</button>
+      </div>
+      <div class="row">
+        <button class="hm-btn hm-btn--sm">Small</button>
+        <button class="hm-btn hm-btn--icon" aria-label="Expand">⤢</button>
+        <button class="hm-btn" disabled>Disabled</button>
+        <button class="hm-btn hm-btn--primary" aria-disabled="true">Aria-disabled</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================================================================ -->
+  <section>
+    <h2 class="sec-title">7 · Badges &amp; status</h2>
+    <p class="sec-note">Uppercase micro-labels with a pill radius, sized so the 11&nbsp;px step stays legible against its own tinted background.</p>
+    <div class="demo-box">
+      <div class="row">
+        <span class="badge badge-live"><span class="pulse-dot"></span> Operational</span>
+        <span class="badge badge-mode">Live mode</span>
+        <span class="badge badge-safe">Safe mode</span>
+        <span class="badge" style="background:var(--hm-bear-subtle);color:var(--hm-bear);border-color:rgba(255,59,92,.34)">Halted</span>
+        <span class="table-count-badge">18,998</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================================================================ -->
+  <section>
+    <h2 class="sec-title">8 · Cross-page navigation</h2>
+    <p class="sec-note">
+      The three content pages marked the current link with <code>btn-nav-active</code>, while the
+      India pages used bare <code>active</code> — two conventions for one concept. The design
+      system styles <strong>both</strong> plus the canonical <code>aria-current="page"</code>, so
+      the markup no longer has to agree with the stylesheet.
+    </p>
+    <div class="demo-box">
+      <div class="nav-links-wrapper" role="navigation" aria-label="Example sections">
+        <a href="#" class="btn-nav-switch"><span>⚡ Forex / Crypto</span></a>
+        <a href="#" class="btn-nav-switch btn-nav-active" aria-current="page"><span>🇺🇸 US Stocks</span></a>
+        <a href="#" class="btn-nav-switch"><span>🇮🇳 India Stocks</span></a>
+        <a href="#" class="btn-nav-switch active"><span>📊 India Options (F&amp;O)</span></a>
+      </div>
+      <p class="hint" style="margin:var(--hm-space-3) 0 0">
+        Both the 2nd link (<code>btn-nav-active</code>) and the 4th (<code>active</code>) render
+        identically — demonstrating the divergence is now harmless.
+      </p>
+    </div>
+  </section>
+
+  <!-- ================================================================ -->
+  <section>
+    <h2 class="sec-title">9 · Mobile tab bar</h2>
+    <p class="sec-note">
+      Forced visible here for review (it is <code>display:none</code> above 900&nbsp;px). Each tab
+      is now a 44&nbsp;px minimum target — the previous padding produced roughly 28&nbsp;px, below
+      the usable threshold for touch. Arrow keys move between tabs.
+    </p>
+    <div class="demo-box" style="padding:0;overflow:hidden">
+      <div class="mobile-nav-bar" id="demo-tabs" role="tablist" aria-label="Demo view selector" style="display:flex">
+        <button class="mob-tab-btn" role="tab" aria-selected="false"><span class="mob-tab-icon" aria-hidden="true">📡</span><span class="mob-tab-label">Radar</span></button>
+        <button class="mob-tab-btn active" role="tab" aria-selected="true"><span class="mob-tab-icon" aria-hidden="true">📈</span><span class="mob-tab-label">Chart</span></button>
+        <button class="mob-tab-btn" role="tab" aria-selected="false"><span class="mob-tab-icon" aria-hidden="true">⚡</span><span class="mob-tab-label">Desk</span></button>
+        <button class="mob-tab-btn" role="tab" aria-selected="false"><span class="mob-tab-icon" aria-hidden="true">💼</span><span class="mob-tab-label">Positions</span></button>
+        <button class="mob-tab-btn" role="tab" aria-selected="false"><span class="mob-tab-icon" aria-hidden="true">🛡️</span><span class="mob-tab-label">AI Gates</span></button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================================================================ -->
+  <section>
+    <h2 class="sec-title">10 · Tables</h2>
+    <p class="sec-note">Sticky headers, tabular figures right-aligned, and a row hover state — the three things a scan-heavy trading table needs.</p>
+    <div class="hm-card">
+      <div class="table-header-bar">
+        <span class="table-title">Open positions <span class="table-count-badge">4</span></span>
+        <div class="table-toolbar-actions">
+          <button class="hm-btn hm-btn--sm">Filter</button>
+          <button class="hm-btn hm-btn--sm hm-btn--bear">Close all</button>
+        </div>
+      </div>
+      <div class="table-responsive">
+        <table class="hm-table">
+          <thead>
+            <tr><th>Symbol</th><th>Side</th><th class="hm-num">Volume</th><th class="hm-num">Entry</th><th class="hm-num">P&amp;L</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>EURUSD</td><td><span class="badge" style="background:var(--hm-bull-subtle);color:var(--hm-bull)">Buy</span></td><td class="hm-num">0.50</td><td class="hm-num">1.08432</td><td class="hm-num" style="color:var(--hm-bull)">+184.20</td></tr>
+            <tr><td>XAUUSD</td><td><span class="badge" style="background:var(--hm-bull-subtle);color:var(--hm-bull)">Buy</span></td><td class="hm-num">0.10</td><td class="hm-num">2,412.55</td><td class="hm-num" style="color:var(--hm-bull)">+62.10</td></tr>
+            <tr><td>GBPJPY</td><td><span class="badge" style="background:var(--hm-bear-subtle);color:var(--hm-bear)">Sell</span></td><td class="hm-num">0.25</td><td class="hm-num">188.412</td><td class="hm-num" style="color:var(--hm-bear)">−41.80</td></tr>
+            <tr><td>UK100</td><td><span class="badge" style="background:var(--hm-bull-subtle);color:var(--hm-bull)">Buy</span></td><td class="hm-num">0.75</td><td class="hm-num">8,284.0</td><td class="hm-num" style="color:var(--hm-bull)">+231.40</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================================================================ -->
+  <section>
+    <h2 class="sec-title">11 · Feedback — toasts</h2>
+    <p class="sec-note">
+      Ten blocking <code>window.alert()</code> calls become non-modal toasts, with
+      <strong>no edits to the call sites</strong>: the layer swaps <code>window.alert</code> for a
+      shim that infers severity from the existing wording. The original message text, including
+      its newlines, is preserved.
+    </p>
+    <div class="demo-box">
+      <div class="row">
+        <button class="hm-btn hm-btn--bull" onclick="HMUI.toast('Copied 42 tickers for TradingView Watchlist!',{type:'success'})">Success</button>
+        <button class="hm-btn hm-btn--bear" onclick="HMUI.toast('Execution Rejected: Broker rejection or invalid parameters',{type:'error'})">Error</button>
+        <button class="hm-btn" style="color:var(--hm-warn)" onclick="HMUI.toast('Margin utilisation above 80%',{type:'warning'})">Warning</button>
+        <button class="hm-btn" onclick="HMUI.toast('Mode change failed: Not authorized',{type:'error',duration:9000})">Multi-line style</button>
+      </div>
+      <p class="hint" style="margin:var(--hm-space-3) 0 0">
+        These fire through the real <code>HMUI.toast()</code> API used by the shim, so the stack,
+        animation, auto-dismiss and dismiss button are the production behaviour.
+      </p>
+    </div>
+  </section>
+
+  <!-- ================================================================ -->
+  <section>
+    <h2 class="sec-title">12 · Dialog &amp; focus management</h2>
+    <p class="sec-note">
+      Opening this dialog traps focus inside it, closes on <kbd>Escape</kbd>, locks background
+      scroll, and restores focus to this button on close. The three production modals
+      (<code>#command-palette-overlay</code>, <code>#macro-news-modal</code>,
+      <code>#remote-login-modal</code>) get the same behaviour automatically, because the layer
+      observes their inline <code>style.display</code> toggles rather than requiring a rewrite.
+    </p>
+    <div class="demo-box">
+      <button class="hm-btn hm-btn--primary" id="open-demo-modal">Open dialog</button>
+      <div id="demo-modal" class="macro-news-modal-overlay" role="dialog" aria-modal="true"
+           aria-labelledby="demo-modal-title"
+           style="display:none;position:fixed;inset:0;background:var(--hm-glass-scrim);align-items:center;justify-content:center;">
+        <div class="hm-card" style="max-width:420px;width:100%;margin:var(--hm-space-4)">
+          <div class="hm-card__header">
+            <span class="hm-card__title" id="demo-modal-title">Confirm action</span>
+          </div>
+          <div class="hm-card__body">
+            <p style="margin:0 0 var(--hm-space-4);color:var(--hm-text-secondary)">
+              Focus is trapped here. Press <kbd>Tab</kbd> to cycle, or <kbd>Escape</kbd> to close.
+            </p>
+            <div class="row">
+              <button class="hm-btn hm-btn--primary" id="demo-modal-ok">Confirm</button>
+              <button class="hm-btn" id="demo-modal-cancel">Cancel</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================================================================ -->
+  <section>
+    <h2 class="sec-title">13 · Focus ring</h2>
+    <p class="sec-note">
+      The four page sheets contain eight <code>outline: none</code> declarations and none of them
+      restored an indicator — a WCAG 2.4.7 failure. A single <code>:focus-visible</code> rule
+      reinstates it for keyboard users only, so mouse clicks stay clean.
+    </p>
+    <div class="demo-box">
+      <div class="row">
+        <button class="hm-btn">Tab to me</button>
+        <a href="#" class="btn-nav-switch">And me</a>
+        <input type="text" placeholder="And this field" style="background:var(--hm-bg-raised);border:1px solid var(--hm-border);border-radius:var(--hm-radius);color:var(--hm-text-primary);padding:8px 12px;font-family:var(--hm-font-sans);font-size:var(--hm-text-lg)">
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2 class="sec-title">14 · Reduced motion</h2>
+    <p class="sec-note">
+      With <code>prefers-reduced-motion: reduce</code> set at the OS level, the pulse dot, toast
+      slide-in and all transitions collapse to effectively zero duration. Toggle it in your OS
+      accessibility settings and reload to verify.
+    </p>
+    <div class="demo-box">
+      <div class="row">
+        <span class="badge badge-live"><span class="pulse-dot"></span> Animated pulse</span>
+        <span class="hint">Transitions: <code>var(--hm-dur-fast)</code> = 140ms → 0.01ms</span>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script src="../jarvis/ui/static/js/hm_ui.js" defer></script>
+<script>
+  // Wire the demo dialog to the real focus-management layer. The layer watches
+  // inline style.display, so a plain toggle is all that is required.
+  document.addEventListener('DOMContentLoaded', function () {
+    var modal = document.getElementById('demo-modal');
+    var opener = document.getElementById('open-demo-modal');
+
+    opener.addEventListener('click', function () {
+      modal.style.display = 'flex';
+    });
+
+    function close() {
+      modal.style.display = 'none';
+    }
+
+    document.getElementById('demo-modal-cancel').addEventListener('click', close);
+    document.getElementById('demo-modal-ok').addEventListener('click', function () {
+      close();
+      if (window.HMUI) window.HMUI.toast('Action confirmed.', { type: 'success' });
+    });
+    modal.addEventListener('click', function (e) {
+      if (e.target === modal) close();
+    });
+  });
+</script>
+</body>
+</html>

@@ -3,6 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="theme-color" content="#070b12">
+    <meta name="color-scheme" content="dark">
     <title>HM AI 4.0 — Institutional Financial Trading Terminal</title>
     <!-- Google Fonts: Inter & JetBrains Mono -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -13,10 +15,16 @@
     <script>if(typeof LightweightCharts==='undefined'){document.write('<script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"><\/script>');}</script>
     <script src="https://s3.tradingview.com/tv.js" defer></script>
     <!-- Terminal Stylesheet -->
-    <link rel="stylesheet" href="/static/css/terminal.css?v=20260907_v1">
-    <link rel="stylesheet" href="/static/css/auth.css?v=20260907_v1">
+    <link rel="stylesheet" href="/static/css/terminal.css?v=20260912_v2">
+    <link rel="stylesheet" href="/static/css/auth.css?v=20260912_v2">
+    <!-- Unified Design System (loaded LAST so it modernises the shell without
+         rewriting the page stylesheets). See hm_ui.css for the token contract. -->
+    <link rel="stylesheet" href="/static/css/hm_ui.css?v=20260912_v2">
 </head>
 <body>
+
+    <!-- Keyboard users reach the workspace without tabbing the whole HUD. -->
+    <a class="hm-skip-link" href="#terminal-workspace">Skip to main content</a>
 
     <!-- ==========================================================================
          TOP INSTITUTIONAL HUD HEADER
@@ -261,25 +269,25 @@
     <!-- ==========================================================================
          MOBILE NAVIGATION TAB BAR (VISIBLE ON TOUCH / MOBILE SCREENS <= 900PX)
          ========================================================================== -->
-    <nav class="mobile-nav-bar" id="mobile-nav-bar">
-        <button id="mob-btn-radar" class="mob-tab-btn" onclick="window.switchMobileView('radar')">
-            <span class="mob-tab-icon">📡</span>
+    <nav class="mobile-nav-bar" id="mobile-nav-bar" role="tablist" aria-label="Terminal view selector">
+        <button id="mob-btn-radar" class="mob-tab-btn" role="tab" aria-selected="false" onclick="window.switchMobileView('radar')">
+            <span class="mob-tab-icon" aria-hidden="true">📡</span>
             <span class="mob-tab-label">Radar</span>
         </button>
-        <button id="mob-btn-chart" class="mob-tab-btn active" onclick="window.switchMobileView('chart')">
-            <span class="mob-tab-icon">📈</span>
+        <button id="mob-btn-chart" class="mob-tab-btn active" role="tab" aria-selected="true" onclick="window.switchMobileView('chart')">
+            <span class="mob-tab-icon" aria-hidden="true">📈</span>
             <span class="mob-tab-label">Chart</span>
         </button>
         <button id="mob-btn-desk" class="mob-tab-btn" onclick="window.switchMobileView('desk')">
-            <span class="mob-tab-icon">⚡</span>
+            <span class="mob-tab-icon" aria-hidden="true">⚡</span>
             <span class="mob-tab-label">Desk</span>
         </button>
-        <button id="mob-btn-orders" class="mob-tab-btn" onclick="window.switchMobileView('orders')">
-            <span class="mob-tab-icon">💼</span>
+        <button id="mob-btn-orders" class="mob-tab-btn" role="tab" aria-selected="false" onclick="window.switchMobileView('orders')">
+            <span class="mob-tab-icon" aria-hidden="true">💼</span>
             <span class="mob-tab-label">Positions</span>
         </button>
-        <button id="mob-btn-cognition" class="mob-tab-btn" onclick="window.switchMobileView('cognition')">
-            <span class="mob-tab-icon">🛡️</span>
+        <button id="mob-btn-cognition" class="mob-tab-btn" role="tab" aria-selected="false" onclick="window.switchMobileView('cognition')">
+            <span class="mob-tab-icon" aria-hidden="true">🛡️</span>
             <span class="mob-tab-label">AI Gates</span>
         </button>
     </nav>
@@ -287,7 +295,7 @@
     <!-- ==========================================================================
          MAIN INSTITUTIONAL GRID WORKSPACE
          ========================================================================== -->
-    <main class="terminal-workspace" id="terminal-workspace">
+    <main class="terminal-workspace" id="terminal-workspace" aria-label="Trading workspace">
         
         <!-- LEFT COLUMN: Quick Asset Watchlist + Scanner Radar / News Feed -->
         <aside id="panel-left" class="terminal-panel left-column">
@@ -1053,8 +1061,12 @@
     </div>
 
     <!-- Universal Authentication Module & Terminal Controller Script -->
-    <script src="/static/js/auth.js?v=20260907_v1"></script>
-    <script src="/static/js/terminal.js?v=20260907_v1"></script>
+    <script src="/static/js/auth.js?v=20260912_v2"></script>
+    <script src="/static/js/terminal.js?v=20260912_v2"></script>
+    <!-- Unified UX / accessibility layer: toast feedback, modal focus
+         management, tab semantics, active-nav marking. Loaded LAST so every
+         page script has already run. -->
+    <script src="/static/js/hm_ui.js?v=20260912_v2" defer></script>
 </body>
 </html>
 

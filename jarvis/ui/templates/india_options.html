@@ -3,6 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="theme-color" content="#070b12">
+    <meta name="color-scheme" content="dark">
     <title>HM AI 4.0 — India F&O Options & Derivatives Intelligence Terminal</title>
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -11,10 +13,15 @@
     <!-- Chart.js for Payoff Diagram & OI Bar Charts -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <!-- India Options Stylesheet -->
-    <link rel="stylesheet" href="/static/css/india_options.css?v=20260907_v1">
-    <link rel="stylesheet" href="/static/css/auth.css?v=20260907_v1">
+    <link rel="stylesheet" href="/static/css/india_options.css?v=20260912_v2">
+    <link rel="stylesheet" href="/static/css/auth.css?v=20260912_v2">
+    <!-- Unified Design System (loaded LAST - see hm_ui.css) -->
+    <link rel="stylesheet" href="/static/css/hm_ui.css?v=20260912_v2">
 </head>
 <body>
+
+    <!-- Keyboard users reach the content without tabbing the whole HUD. -->
+    <a class="hm-skip-link" href="#hm-main">Skip to main content</a>
 
     <!-- ==========================================================================
          TOP INSTITUTIONAL HUD HEADER
@@ -31,7 +38,7 @@
         </div>
 
         <!-- 4-Way Cross-Market Navigation -->
-        <div class="nav-links-wrapper">
+        <div class="nav-links-wrapper" role="navigation" aria-label="Market sections">
             <a href="/" class="btn-nav-switch">
                 <span>⚡ Forex / Crypto</span>
             </a>
@@ -59,13 +66,20 @@
     <!-- ==========================================================================
          MOBILE BOTTOM NAVIGATION TAB BAR (VISIBLE ON TOUCH / MOBILE <= 900PX)
          ========================================================================== -->
-    <nav class="mobile-nav-bar" id="mobile-nav-bar">
-        <button id="mob-btn-singles" class="mob-tab-btn active" onclick="switchMobileOptionsView('singles')">⚡ Single Buys</button>
-        <button id="mob-btn-spreads" class="mob-tab-btn" onclick="switchMobileOptionsView('spreads')">🛡️ Spreads</button>
-        <button id="mob-btn-payoff" class="mob-tab-btn" onclick="switchMobileOptionsView('payoff')">📈 Payoff & OI</button>
-        <button id="mob-btn-chain" class="mob-tab-btn" onclick="switchMobileOptionsView('chain')">📋 Option Chain</button>
-        <button id="mob-btn-all" class="mob-tab-btn" onclick="switchMobileOptionsView('all')">🌐 All View</button>
+    <nav class="mobile-nav-bar" id="mobile-nav-bar" role="tablist" aria-label="Options view selector">
+        <button id="mob-btn-singles" class="mob-tab-btn active" role="tab" aria-selected="true" onclick="switchMobileOptionsView('singles')">⚡ Single Buys</button>
+        <button id="mob-btn-spreads" class="mob-tab-btn" role="tab" aria-selected="false" onclick="switchMobileOptionsView('spreads')">🛡️ Spreads</button>
+        <button id="mob-btn-payoff" class="mob-tab-btn" role="tab" aria-selected="false" onclick="switchMobileOptionsView('payoff')">📈 Payoff & OI</button>
+        <button id="mob-btn-chain" class="mob-tab-btn" role="tab" aria-selected="false" onclick="switchMobileOptionsView('chain')">📋 Option Chain</button>
+        <button id="mob-btn-all" class="mob-tab-btn" role="tab" aria-selected="false" onclick="switchMobileOptionsView('all')">🌐 All View</button>
     </nav>
+
+    <!-- The page previously had no main landmark: its content sections are
+         body-level siblings. Wrap them so the skip link has a target and
+         assistive tech can jump past the HUD. Verified safe: india_options.css
+         has no structural selectors (no `body >`, no `:nth-child`) and
+         india_options.js performs no DOM traversal. -->
+    <main role="main" id="hm-main" aria-label="Options intelligence workspace">
 
     <!-- ==========================================================================
          UNDERLYING SELECTOR & REAL-TIME SPOT TELEMETRY BAR
@@ -406,8 +420,12 @@
 
     </div>
 
+    </main>
+
     <!-- Universal Authentication & Options Terminal Controller Script -->
-    <script src="/static/js/auth.js?v=20260907_v1"></script>
-    <script src="/static/js/india_options.js?v=20260907_v1"></script>
+    <script src="/static/js/auth.js?v=20260912_v2"></script>
+    <script src="/static/js/india_options.js?v=20260912_v2"></script>
+    <!-- Unified UX / accessibility layer (loaded LAST). -->
+    <script src="/static/js/hm_ui.js?v=20260912_v2" defer></script>
 </body>
 </html>
