@@ -24,7 +24,10 @@ all **18,998** candidates. The verdict is negative and it is the important resul
 > largest apparent gradients (`risk_dist`, `atr`) are ~80 % explained by the
 > slippage cost term just fixed. Every value of every categorical feature
 > (`regime`, `strategy`) has **negative** pooled expectancy. The primary entry
-> filter (`score`) sorts how badly trades lose, not how well they win.
+> filter (`score`) sorts how badly trades lose, not how well they win — and the
+> follow-up test of using it for *position sizing* instead (§7a) **also fails**,
+> with the inverted rule performing best. It carries no actionable information in
+> either role.
 
 Geometry calibration can stop the system hurting itself — and after the
 reachability guard it does. It cannot manufacture a signal that is not there.
@@ -386,6 +389,49 @@ evidence of a portfolio-wide edge.
 
 ---
 
+## 7a. Tested: can the score be used for **sizing**? No.
+
+§3.4 identified the score's monotone-but-negative ladder as the most promising
+lead: if the score ranks *loss severity* rather than win probability, the same
+information might be usable as a position-size input even though it fails as a
+gate. That was worth testing rather than recommending. `tools/score_sizing_test.py`
+tests it on the **1,005 non-overlapping traded positions** (one at a time per
+symbol, mirroring `select_sequential`), with weights normalised **within each
+symbol** so the total risk budget is unchanged — only its distribution moves, so
+a variant that simply took more risk cannot win.
+
+| Sizing rule | Weighted exp (R) | Gain vs equal | p | null sd | Uniqueness-wtd | symbols improved |
+|---|---:|---:|---:|---:|---:|---:|
+| equal (baseline) | **+0.02597** | — | — | — | +0.02804 | — |
+| `linear_pct` | +0.01681 | **−0.00917** | 0.702 | 0.0155 | +0.00458 | 7/16 |
+| `linear_pct_min25` | +0.02046 | **−0.00551** | 0.725 | 0.0094 | +0.01405 | 7/16 |
+| `top_heavy_2x` | +0.01832 | **−0.00765** | 0.712 | 0.0139 | +0.00312 | 5/16 |
+| `top_half_only` | +0.01068 | **−0.01529** | 0.710 | 0.0277 | −0.02240 | 5/16 |
+| **`inverse_control`** | **+0.03523** | **+0.00926** | 0.316 | 0.0172 | +0.05079 | 9/16 |
+
+**Every rule that favours high scores makes the result worse.** The inverse
+control — favouring *low* scores — is the best of all, and none of the p-values is
+significant (all 0.32–0.73, with observed gains well inside the null sd).
+
+The inverse control is the tell. If the score carried directional sizing
+information, favouring it should help and inverting it should hurt. Instead the
+signs are *reversed*, which means the monotone ladder seen over all 18,998
+candidates **does not survive inside the traded region** — the region where a
+sizing rule would actually operate. The gradient was a property of the rejected
+candidates, not of the trades taken.
+
+**This closes the last lead.** The score is not usable as an entry filter (§3.4)
+and not usable as a sizing input (§7a). It carries no actionable information in
+either role.
+
+**One incidental number worth recording.** The equal-weighted baseline on the full
+95-day sample is **+0.026 R** over 1,005 positions, against the calibration's
+purged out-of-sample **−0.035 R** over 906. That gap *is* the selection
+overfitting, measured: the deployed configuration looks mildly positive on the
+sample it was chosen from and negative once purged.
+
+---
+
 ## 8. Verdict
 
 **Why the trades are failing.** Not entry/exit timing, not risk management, not
@@ -420,9 +466,9 @@ The work belongs in **signal research**:
   confirmation), not new transforms of the existing ones;
 * the `meta_labeler` should be trained, or removed from the reported feature set
   so it stops implying capability that is not there;
-* the score's monotone-but-negative ladder (§3.4) is the most promising lead:
-  if the score already ranks loss severity, the same information may be usable as
-  a *sizing* input even though it is not an entry filter.
+* ~~the score's monotone-but-negative ladder is the most promising lead~~ —
+  **tested and refuted** (§7a). It is not usable as a sizing input either; the
+  inverse rule is the best performer, which is the signature of no signal.
 
 **Discipline to keep:** any further change should be justified by a *mechanism*
 and tested the same way — one variable, identical entries, aggregate

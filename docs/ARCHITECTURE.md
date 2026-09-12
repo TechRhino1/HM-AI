@@ -333,6 +333,15 @@ varies) finds:
   a model is trained (`decision_engine.py`), so the adaptive layer contributes
   nothing on the backtest path. The sentinel is handled safely
   (`opportunity_arbiter.py` treats `<= 0` as absent).
+* **the score is not usable for sizing either.** The monotone-but-negative bucket
+  ladder looked like a lead — if the score ranks *loss severity* it might still
+  work as a position-size input. Tested on 1,005 non-overlapping traded positions
+  with weights normalised per symbol so the risk budget is unchanged
+  (`tools/score_sizing_test.py`): every rule favouring high scores makes the
+  result **worse**, and the **inverted** rule is the best performer (+0.0093 R,
+  p=0.32, all variants insignificant). Reversed signs mean no directional signal,
+  and the ladder seen over all candidates does not survive inside the traded
+  region — the only region a sizing rule operates in.
 
 Conclusion: further geometry or threshold search is not where the remaining
 variance lives. The next work is **signal research** — new information at entry
