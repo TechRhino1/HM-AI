@@ -280,6 +280,64 @@ candidate geometry (64 geometries × 16 symbols) would take days. Instead:
    pile-up reflects an in-sample selection criterion that is monotone in `tp_r`,
    not an optimum just outside the grid. Extending a grid relocates the artefact.
    Keep the coarse grid capped at 1.5.
+12. **Every cost the engine charges, the simulator must charge — and the argument
+   must actually arrive.** `BacktestEngine` slips every protective-stop fill by
+   `slippage_pips * pip_size` (`actual_slippage_delta`) and fills targets at
+   exactly `tp`; the simulator must match on both branches. It did not:
+   `simulate_all_candidates` accepted `slippage_price_equiv` and never forwarded
+   it to `simulate_trade`, and `calibrate_symbol` computed
+   `slip = slippage_pips * pip_size` and dropped it — that line was the only
+   reference to `slip` in the module. A **1000-pip** argument left every outcome
+   bit-identical, so the parameter was provably inert, and the calibration
+   charged no stop slippage at all. Two tools (`tools/sweep_tp_r.py`,
+   `tools/diag_engine_vs_sim.py`) had been passing the argument correctly and
+   silently getting nothing. Measured cost of the omission: **−114.31 R over
+   18,998 trades** (−0.00602 R/trade, 54.4 % stop exits), worth **−3.23 R** on the
+   aggregate out-of-sample sample (−28.64 R → −31.87 R) with **no** geometry
+   changing — a pure accounting error. This is the same class as Rule 10: the
+   leaf function was correct and only the plumbing to it was wrong. It also
+   poisons any feature attribution, because slippage is a fixed *pip* distance
+   and so costs `slip / risk_dist` in R — it falls as the stop widens, making
+   `risk_dist` and `atr` look like entry edges (rho +0.20 and +0.19) when ~80 %
+   of that is the cost term (`corr(delta, 1/risk_dist) = −0.40`; both collapse to
+   ~+0.04 at zero slippage). Pinned by
+   `tests/test_winrate_targeting.py::test_simulate_all_candidates_forwards_slippage`,
+   `::test_evaluate_geometry_forwards_slippage`,
+   `::test_aggregator_slippage_never_touches_target_fills` and
+   `::test_calibrator_charges_stop_slippage`.
+13. **A profile file must record the settings that produced it.** The reachability
+   guard makes the same target calibrate very differently at margin 0.0 and 0.17,
+   so a deployed file that does not record `enforce_reachable_target`,
+   `reachability_margin`, `min_tp_r_floor`, `wide_grid` and `slippage_pips` cannot
+   be traced back to its own provenance or reproduced. All five are written to the
+   profile meta.
+
+### Known limitation: the entries carry no measured edge
+
+The geometry stack is now calibrated, cost-accurate and guard-railed. It is also
+solving the wrong problem. An attribution scan over all **18,998** candidates
+(`tools/entry_edge_diagnostic.py`, deployed geometry held fixed so only the entry
+varies) finds:
+
+* **no numeric feature with a best-bucket expectancy meaningfully above zero.**
+  The strongest gradients (`risk_dist` +0.2039, `atr` +0.1942) are ~80 % the
+  slippage cost term of Rule 12 and collapse to ~+0.04 at zero slippage; their
+  best quintiles are +0.0009 R and +0.0025 R, i.e. break-even. `score`, the
+  primary entry filter, has rho +0.0323 and a best quintile of −0.0608 R — it
+  sorts *how badly* trades lose, not how well they win.
+* **no categorical feature to select into.** Every pooled value of `regime` and
+  `strategy` is negative (best: `BREAKOUT` −0.0424 R, `RANGE_MEAN_REVERSION`
+  −0.0547 R), and the "best" value differs on nearly every symbol. The large
+  spreads (+0.50 R, +0.43 R) are dispersion among small-n categories, not an edge.
+* **`meta_label_prob` is a constant `-1.0`** — the meta-label gate is inert until
+  a model is trained (`decision_engine.py`), so the adaptive layer contributes
+  nothing on the backtest path. The sentinel is handled safely
+  (`opportunity_arbiter.py` treats `<= 0` as absent).
+
+Conclusion: further geometry or threshold search is not where the remaining
+variance lives. The next work is **signal research** — new information at entry
+(order-flow, session, volatility regime at entry, cross-asset confirmation), not
+new transforms of the existing features. See `reports/entry_edge_verdict.md`.
 
 ### Reporting contract
 `tools/run_3month_backtest.py` renders seven sections; two of them exist purely
