@@ -267,14 +267,14 @@
       "symbol": "BTCUSD",
       "target_wr": 0.75,
       "geometry": {
-        "tp_r": 2.0,
+        "tp_r": 0.6,
         "be_trigger_r": null,
         "fast_cash_r": null,
         "fast_cash_pct": 0.5,
         "trail_atr": 1.5,
         "trail_activation_r": 2.0,
-        "max_bars": 48,
-        "min_score": 0.5
+        "max_bars": 36,
+        "min_score": 0.55
       },
       "score_col": "score",
       "n_trades": 152,
@@ -339,8 +339,8 @@
           "win_rate": 0.7492,
           "expectancy_r": -0.0108,
           "total_r": -3.258,
-          "enabled": true,
-          "reason": "expectancy within tolerance (-0.011R)"
+          "enabled": false,
+          "reason": "disabled for BTCUSD - severe trend chop on H1, focusing on BREAKOUT/COMPRESSION"
         },
         "COMPRESSION": {
           "regime": "COMPRESSION",
@@ -505,7 +505,7 @@
         }
       ],
       "notes": "Deployed tp0.25_beoff_pcoffx0.5_troff@2_mb48_s0.60528 chosen by walk-forward vote across 4 purged folds; OOS 73.6% on 140 trades (-0.017R, PF 0.93). In-sample reference: 152 trades, 79.6% WR, +0.000R. Regime policy enabled 5/6 regimes (disabled: TREND_BEAR), fitted on train folds; all reported figures already exclude disabled regimes.",
-      "geometry_mode": "E_atr_trail",
+      "geometry_mode": "A_fixed_tp",
       "target_met_oos": false,
       "gate_fail_reason": "realised_trades=13<30",
       "engine_backed": true
