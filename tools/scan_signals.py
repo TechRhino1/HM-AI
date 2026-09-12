@@ -37,23 +37,23 @@ REAL_DIR = Path(DATA_DIR) / "market" / "real"
 OUT_DIR = Path(DATA_DIR) / "signals"
 
 
-def discover_symbols() -> list[str]:
+def discover_symbols(days: int = 95) -> list[str]:
     if not REAL_DIR.exists():
         return []
     out = []
     for d in sorted(REAL_DIR.iterdir()):
-        if d.is_dir() and any(d.glob("*_H1_95d.parquet")):
+        if d.is_dir() and any(d.glob(f"*_H1_{days}d.parquet")):
             out.append(d.name)
     return out
 
 
-def parquet_for(symbol: str) -> Path:
-    return REAL_DIR / symbol / f"{symbol}_H1_95d.parquet"
+def parquet_for(symbol: str, days: int = 95) -> Path:
+    return REAL_DIR / symbol / f"{symbol}_H1_{days}d.parquet"
 
 
-def scan_one(symbol: str) -> dict:
+def scan_one(symbol: str, days: int = 95) -> dict:
     """Scan a single symbol and persist its candidate table."""
-    path = parquet_for(symbol)
+    path = parquet_for(symbol, days)
     if not path.exists():
         return {"symbol": symbol, "ok": False, "error": f"missing {path}"}
 
@@ -64,12 +64,14 @@ def scan_one(symbol: str) -> dict:
     elapsed = time.time() - t0
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
-    out_path = OUT_DIR / f"{symbol}_candidates.parquet"
+    suffix = "" if days == 95 else f"_{days}d"
+    out_path = OUT_DIR / f"{symbol}{suffix}_candidates.parquet"
     result.candidates.to_parquet(out_path, index=False)
 
     summary = result.summary()
     summary.update({
         "ok": True,
+        "days": days,
         "seconds": round(elapsed, 1),
         "candidates_path": str(out_path.relative_to(REPO_ROOT)),
         "first_bar": str(result.candidates["time"].iloc[0]) if len(result.candidates) else None,
@@ -82,30 +84,33 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--symbols", default=None, help="comma-separated subset")
     ap.add_argument("--workers", type=int, default=4)
+    ap.add_argument("--days", type=int, default=95,
+                    help="history window to read, matching the *_H1_<days>d.parquet cache")
     args = ap.parse_args()
 
     symbols = (
         [s.strip().upper() for s in args.symbols.split(",") if s.strip()]
-        if args.symbols else discover_symbols()
+        if args.symbols else discover_symbols(args.days)
     )
     if not symbols:
-        logger.error(f"No symbols found under {REAL_DIR}")
+        logger.error(f"No symbols found under {REAL_DIR} for {args.days}d")
         return 2
 
-    print(f"Scanning {len(symbols)} symbols with {args.workers} worker(s): {', '.join(symbols)}")
+    print(f"Scanning {len(symbols)} symbols ({args.days}d) with {args.workers} worker(s): "
+          f"{', '.join(symbols)}")
     t0 = time.time()
     summaries: list[dict] = []
 
     if args.workers <= 1:
         for s in symbols:
-            r = scan_one(s)
+            r = scan_one(s, args.days)
             summaries.append(r)
             print(f"  {s:8s} -> {r.get('candidates', 0):5d} candidates, "
                   f"{r.get('scanned', 0):5d} bars scanned, "
                   f"pipeline executed {r.get('executed_by_pipeline', 0)}  [{r.get('seconds', 0)}s]")
     else:
         with ProcessPoolExecutor(max_workers=args.workers) as pool:
-            futures = {pool.submit(scan_one, s): s for s in symbols}
+            futures = {pool.submit(scan_one, s, args.days): s for s in symbols}
             for fut in as_completed(futures):
                 s = futures[fut]
                 try:

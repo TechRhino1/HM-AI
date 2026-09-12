@@ -226,6 +226,30 @@ def resolve(symbol: str) -> SymbolSpec:
     )
 
 
+def is_registered(symbol: str) -> bool:
+    """True only for an exact registry or alias hit — never a fuzzy/fallback match.
+
+    ``resolve()`` always returns *something*; this tells you whether that
+    something is real. Use it before trusting a spec for anything consequential.
+    """
+    key = symbol.upper().strip()
+    if key in _REGISTRY:
+        return True
+    canonical = _ALIAS_MAP.get(key)
+    return bool(canonical and canonical in _REGISTRY)
+
+
+def asset_class_of(symbol: str) -> Optional[str]:
+    """Registry asset class ("FOREX"/"COMMODITY"/"INDEX"/"CRYPTO"), or None.
+
+    Returns None rather than guessing when the symbol is not registered, so
+    callers can distinguish "I know this is crypto" from "I have no idea".
+    """
+    if not is_registered(symbol):
+        return None
+    return resolve(symbol).asset_class
+
+
 def registry_mismatches(broker_meta: Dict[str, Any], symbol: str) -> Dict[str, Any]:
     """Compare the registry spec against real broker metadata from a data manifest.
 

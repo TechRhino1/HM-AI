@@ -43,13 +43,19 @@ REAL_DIR = Path(DATA_DIR) / "market" / "real"
 PROFILE_PATH = REPO_ROOT / "config" / "winrate_profiles.json"
 
 
-def discover() -> list[str]:
+def discover(days: int = 95) -> list[str]:
     if not SIGNAL_DIR.exists():
         return []
+    suffix = "" if days == 95 else f"_{days}d"
     return sorted(
-        p.name.replace("_candidates.parquet", "")
-        for p in SIGNAL_DIR.glob("*_candidates.parquet")
+        p.name.replace(f"{suffix}_candidates.parquet", "")
+        for p in SIGNAL_DIR.glob(f"*{suffix}_candidates.parquet")
     )
+
+
+def candidate_path(symbol: str, days: int = 95) -> Path:
+    suffix = "" if days == 95 else f"_{days}d"
+    return SIGNAL_DIR / f"{symbol}{suffix}_candidates.parquet"
 
 
 def main() -> int:
@@ -64,11 +70,17 @@ def main() -> int:
     )
     ap.add_argument("--fine", action="store_true", help="use the fine geometry grid")
     ap.add_argument("--no-regime-geometry", action="store_true")
+    ap.add_argument("--days", type=int, default=95,
+                    help="history window, matching the *_H1_<days>d.parquet cache")
+    ap.add_argument("--merge", action="store_true",
+                    help="upsert into the existing profile store instead of replacing it "
+                         "(required when calibrating a subset, otherwise the other symbols "
+                         "are silently dropped)")
     args = ap.parse_args()
 
     symbols = (
         [s.strip().upper() for s in args.symbols.split(",") if s.strip()]
-        if args.symbols else discover()
+        if args.symbols else discover(args.days)
     )
     if not symbols:
         logger.error(f"No candidate tables found in {SIGNAL_DIR}. Run tools/scan_signals.py first.")
@@ -96,10 +108,10 @@ def main() -> int:
     t0 = time.time()
 
     for sym in symbols:
-        cpath = SIGNAL_DIR / f"{sym}_candidates.parquet"
-        dpath = REAL_DIR / sym / f"{sym}_H1_95d.parquet"
+        cpath = candidate_path(sym, args.days)
+        dpath = REAL_DIR / sym / f"{sym}_H1_{args.days}d.parquet"
         if not cpath.exists() or not dpath.exists():
-            print(f"  {sym:8s} SKIP (missing data)")
+            print(f"  {sym:8s} SKIP (missing {cpath.name if not cpath.exists() else dpath.name})")
             continue
         df = pd.read_parquet(dpath).reset_index(drop=True)
         cands = pd.read_parquet(cpath)
@@ -125,16 +137,29 @@ def main() -> int:
         logger.error("No profiles produced.")
         return 1
 
+    # Summary statistics describe only the symbols calibrated in THIS run; the
+    # merged store may hold others from a different window or grid.
+    new_profiles = dict(profiles)
+
     store = WRProfileStore(PROFILE_PATH)
+    if args.merge:
+        # Upsert. ``save`` replaces the whole file, so calibrating a single
+        # symbol without this would silently delete every other profile.
+        existing = store.load()
+        existing.update(profiles)
+        profiles = existing
+        print(f"Merged into the existing store ({len(profiles)} profiles total).")
     store.save(profiles, meta={
         "target_wr": args.target,
         "min_trades": args.min_trades,
         "folds": args.folds,
         "grid": "fine" if args.fine else "coarse",
+        "days": args.days,
         "generated_utc": pd.Timestamp.now("UTC").isoformat(),
         "symbols": list(profiles.keys()),
     })
 
+    profiles = new_profiles
     met = sum(1 for p in profiles.values() if p.oos_target_met)
     in_sample_only = sum(1 for p in profiles.values() if p.target_met and not p.oos_target_met)
     total_oos = sum(p.oos_trades for p in profiles.values())

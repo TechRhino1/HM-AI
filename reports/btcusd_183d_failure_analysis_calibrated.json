@@ -1,0 +1,43 @@
+{
+  "meta": {
+    "symbol": "BTCUSD",
+    "broker_symbol": "BTCUSD#",
+    "days": 183,
+    "bars": 4392,
+    "legacy": false,
+    "start": "2026-03-13 14:00:00+00:00",
+    "end": "2026-09-12 13:00:00+00:00",
+    "provenance": "MT5_TERMINAL_REAL"
+  },
+  "summary": {
+    "trades": 0,
+    "verdict": "No trades taken."
+  },
+  "refusal": "calibrated profile has no validated edge (OOS expectancy -0.008R over 295 trades) - refusing symbol",
+  "calibrated_verdict": {
+    "in_sample_trades": 255,
+    "in_sample_win_rate": 0.7647,
+    "in_sample_expectancy_r": 0.0203,
+    "oos_trades": 295,
+    "oos_win_rate": 0.7695,
+    "oos_expectancy_r": -0.008,
+    "oos_profit_factor": 0.963,
+    "target_met_oos": false,
+    "binding_constraint": "out-of-sample - met in-sample (76.5%) but not on purged folds; OOS expectancy is non-positive (-0.008R)",
+    "tp_r": 0.3,
+    "min_score": 0.70939,
+    "max_bars": 24,
+    "enabled_regimes": [
+      "TREND_BULL",
+      "BREAKOUT",
+      "TREND_BEAR",
+      "COMPRESSION",
+      "LOW_VOLATILITY"
+    ],
+    "would_refuse": true
+  },
+  "rejection_stats": {
+    "capital protection: Directional Bias": 1141,
+    "calibrated profile has no validated edge (OOS expectancy -0.008R over 295 trades) - refusing symbol": 3200
+  }
+}

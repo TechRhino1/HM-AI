@@ -124,8 +124,15 @@ _CATEGORY = {
     "XAUUSD": "METAL", "XAGUSD": "METAL",
     "US30": "INDEX", "NAS100": "INDEX", "SPX500": "INDEX",
     "GER40": "INDEX", "UK100": "INDEX",
-    "USOIL": "ENERGY", "UKOIL": "ENERGY",
+    "USOIL": "ENERGY", "UKOIL": "ENERGY", "WTI": "ENERGY", "BRENT": "ENERGY",
     "BTCUSD": "CRYPTO", "ETHUSD": "CRYPTO", "SOLUSD": "CRYPTO",
+}
+
+_REGISTRY_CATEGORY = {
+    "CRYPTO": "CRYPTO",
+    "INDEX": "INDEX",
+    "COMMODITY": "METAL",
+    "FOREX": "FX_MAJOR",
 }
 
 DEFAULT_UNIVERSE: List[str] = [
@@ -140,11 +147,50 @@ DEFAULT_UNIVERSE: List[str] = [
 ]
 
 
+_BROKER_SUFFIXES = ("#", ".I#", ".#", ".I", ".PRO", ".RAW", ".ECN", ".M")
+
+
+def _strip_broker_suffix(symbol: str) -> str:
+    """Reduce a broker symbol to its canonical base ("BTCUSD#" -> "BTCUSD")."""
+    s = str(symbol).strip().upper()
+    for suf in _BROKER_SUFFIXES:
+        if s.endswith(suf) and len(s) > len(suf):
+            s = s[: -len(suf)]
+            break
+    return s
+
+
 def _category_of(symbol: str) -> str:
-    if symbol in _CATEGORY:
-        return _CATEGORY[symbol]
-    if len(symbol) == 6 and symbol.isalpha():
-        return "FX_MAJOR" if symbol.endswith("USD") or symbol.startswith("USD") else "FX_CROSS"
+    """Asset category, resolved from the single authoritative registry.
+
+    The broker suffix **must** be stripped first. ``_category_of("BTCUSD#")``
+    once returned ``"UNKNOWN"`` because this table only held ``"BTCUSD"`` — so the
+    weekend-closure check below treated a 24/7 crypto instrument as an FX pair and
+    rejected 1,248 of 4,378 perfectly valid Saturday/Sunday bars, blocking the
+    whole fetch. The same suffix bug silently mis-classified every ``#``/``.i#``
+    broker symbol.
+    """
+    raw = str(symbol).strip().upper()
+    base = _strip_broker_suffix(raw)
+    # Try the EXACT name first: broker aliases legitimately end in "#" / ".i#"
+    # ("GER40Cash#", "SILVER.i#"), so stripping before lookup destroys the key.
+    # Only fall back to the stripped form for a suffix the registry does not know
+    # ("BTCUSD.pro" on another broker).
+    try:
+        from jarvis.data.symbol_registry import asset_class_of
+    except Exception:  # pragma: no cover - registry import must never break a fetch
+        asset_class_of = None
+
+    for candidate in dict.fromkeys([raw, base]):
+        if candidate in _CATEGORY:
+            return _CATEGORY[candidate]
+        if asset_class_of is not None:
+            asset_class = asset_class_of(candidate)
+            if asset_class is not None:
+                return _REGISTRY_CATEGORY.get(asset_class, "UNKNOWN")
+
+    if len(base) == 6 and base.isalpha():
+        return "FX_MAJOR" if base.endswith("USD") or base.startswith("USD") else "FX_CROSS"
     return "UNKNOWN"
 
 
@@ -441,10 +487,29 @@ class MT5HistoryFetcher:
         return df, meta, quality
 
     # ── cache ───────────────────────────────────────────────────────────────
+    @staticmethod
+    def canonical_name(symbol: str) -> str:
+        """Filesystem-safe canonical name for a broker symbol.
+
+        ``BTCUSD#`` must cache under ``BTCUSD/``. Using the raw broker symbol put
+        the ``#`` in the directory name (``data/market/real/BTCUSD#/``), so every
+        downstream tool — which looks up ``<canonical>/`` — silently found no
+        data and reported "0 bars scanned" instead of an error.
+        """
+        try:
+            from jarvis.data.symbol_registry import is_registered, resolve
+
+            if is_registered(symbol):
+                return resolve(symbol).canonical
+        except Exception:  # pragma: no cover
+            pass
+        return _strip_broker_suffix(symbol)
+
     def cache_path(self, symbol: str, days: int) -> str:
-        d = os.path.join(self.cache_root, symbol)
+        name = self.canonical_name(symbol)
+        d = os.path.join(self.cache_root, name)
         os.makedirs(d, exist_ok=True)
-        return os.path.join(d, f"{symbol}_H1_{days}d.parquet")
+        return os.path.join(d, f"{name}_H1_{days}d.parquet")
 
     def fetch_and_cache(self, symbol: str, days: int = 95) -> Dict[str, Any]:
         """Fetch, validate, persist to parquet, and write a provenance manifest."""
@@ -453,7 +518,8 @@ class MT5HistoryFetcher:
         df.to_parquet(path, index=False)
 
         manifest = {
-            "symbol": symbol,
+            "symbol": self.canonical_name(symbol),
+            "requested_symbol": symbol,
             "broker_symbol": meta.broker_symbol,
             "timeframe": "H1",
             "days": days,

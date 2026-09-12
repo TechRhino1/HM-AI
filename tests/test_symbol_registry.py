@@ -15,6 +15,7 @@ import glob
 import json
 import os
 
+import pandas as pd
 import pytest
 
 from jarvis.data.symbol_registry import (
@@ -143,3 +144,61 @@ def test_helpers_agree_with_resolve():
     for sym in ("GER40", "XAUUSD", "EURUSD", "XAGUSD"):
         assert get_pip_size(sym) == resolve(sym).pip_size
         assert get_max_spread(sym) == resolve(sym).max_spread_pips
+
+
+# ── Asset-category resolution (the 24/7 crypto defect) ───────────────────────
+
+def test_crypto_broker_symbol_is_classified_as_crypto():
+    """BTCUSD# must be CRYPTO, not UNKNOWN.
+
+    The data validator exempts crypto from the weekend-closure check because
+    Bitcoin trades 24/7. When ``_category_of("BTCUSD#")`` returned "UNKNOWN" the
+    exemption did not apply, so 1,248 of 4,378 perfectly valid Saturday/Sunday
+    bars were flagged as synthetic and the entire 6-month fetch was rejected.
+    """
+    from jarvis.data.mt5_history import _category_of
+
+    assert _category_of("BTCUSD#") == "CRYPTO"
+    assert _category_of("BTCUSD") == "CRYPTO"
+    assert _category_of("ETHUSD#") == "CRYPTO"
+    assert _category_of("SOLUSD#") == "CRYPTO"
+
+
+def test_category_resolution_strips_unknown_broker_suffixes():
+    from jarvis.data.mt5_history import _category_of, _strip_broker_suffix
+
+    assert _strip_broker_suffix("BTCUSD#") == "BTCUSD"
+    assert _strip_broker_suffix("BTCUSD.pro") == "BTCUSD"
+    # A suffix the registry does not know must still classify correctly.
+    assert _category_of("BTCUSD.pro") == "CRYPTO"
+
+
+def test_category_resolution_handles_aliases_whose_key_ends_in_hash():
+    """Broker aliases legitimately end in "#" — stripping first would destroy the key."""
+    from jarvis.data.mt5_history import _category_of
+
+    assert _category_of("GER40Cash#") == "INDEX"
+    assert _category_of("US100Cash#") == "INDEX"
+    assert _category_of("UK100Cash#") == "INDEX"
+    assert _category_of("SILVER.i#") == "METAL"
+    assert _category_of("GOLD.i#") == "METAL"
+
+
+def test_non_crypto_weekend_bars_are_still_rejected():
+    """The crypto exemption must not weaken the check for everything else."""
+    from jarvis.data.mt5_history import validate_real_market_data
+
+    # A 24/7 grid on an FX symbol is still a generator artefact.
+    times = pd.date_range("2026-01-01", periods=240, freq="h", tz="UTC")
+    df = pd.DataFrame({
+        "time": times,
+        "open": 1.1, "high": 1.1002, "low": 1.0998, "close": 1.1001,
+        "spread": 20, "tick_volume": range(240),
+    })
+    quality = validate_real_market_data(df, "EURUSD", category="FX_MAJOR")
+    assert not quality.ok
+    assert any("weekend" in i for i in quality.issues)
+
+    # The same bars on crypto are fine — crypto genuinely trades at weekends.
+    quality_crypto = validate_real_market_data(df, "BTCUSD#", category="CRYPTO")
+    assert not any("weekend" in i for i in quality_crypto.issues)

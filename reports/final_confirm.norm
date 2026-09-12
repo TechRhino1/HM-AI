@@ -1,0 +1,26 @@
+MetaTrader5 python package not available. Falling back to PAPER mode.
+============================================================================================================
+JARVIS AI — 3-MONTH BACKTEST ON REAL MT5 DATA   (CALIBRATED PROFILES)
+============================================================================================================
+  AUDUSD   trades= 150 WR= 77.3% exp=-0.034R PF= 0.82 net=$  -218.31 DD= 2.81% [TIME]
+  BTCUSD   trades=   0 WR=  0.0% exp=+0.000R PF= 0.00 net=$    +0.00 DD= 0.00% [TIME]
+  ETHUSD   trades=   0 WR=  0.0% exp=+0.000R PF= 0.00 net=$    +0.00 DD= 0.00% [TIME]
+  EURUSD   trades=   0 WR=  0.0% exp=+0.000R PF= 0.00 net=$    +0.00 DD= 0.00% [TIME]
+  GBPUSD   trades=   0 WR=  0.0% exp=+0.000R PF= 0.00 net=$    +0.00 DD= 0.00% [TIME]
+  GER40    trades=   0 WR=  0.0% exp=+0.000R PF= 0.00 net=$    +0.00 DD= 0.00% [TIME]
+  NAS100   trades= 118 WR= 73.7% exp=-0.035R PF= 0.87 net=$  -187.86 DD= 2.58% [TIME]
+  NZDUSD   trades=  71 WR= 67.6% exp=-0.062R PF= 0.81 net=$  -211.08 DD= 4.13% [TIME]
+  SOLUSD   trades=   0 WR=  0.0% exp=+0.000R PF= 0.00 net=$    +0.00 DD= 0.00% [TIME]
+  UK100    trades=  40 WR= 70.0% exp=-0.147R PF= 0.85 net=$   -86.79 DD= 2.36% [TIME]
+  US30     trades=   0 WR=  0.0% exp=+0.000R PF= 0.00 net=$    +0.00 DD= 0.00% [TIME]
+  USDCAD   trades=   0 WR=  0.0% exp=+0.000R PF= 0.00 net=$    +0.00 DD= 0.00% [TIME]
+  USDCHF   trades=   0 WR=  0.0% exp=+0.000R PF= 0.00 net=$    +0.00 DD= 0.00% [TIME]
+  USDJPY   trades=  53 WR= 66.0% exp=-0.253R PF= 0.52 net=$  -419.42 DD= 4.19% [TIME]
+  XAGUSD   trades=   0 WR=  0.0% exp=+0.000R PF= 0.00 net=$    +0.00 DD= 0.00% [TIME]
+  XAUUSD   trades=  97 WR= 76.3% exp=-0.006R PF= 1.02 net=$   +28.42 DD= 2.23% [TIME]
+
+------------------------------------------------------------------------------------------------------------
+PORTFOLIO: 529 trades over 16 symbols | WR 73.3% | expectancy -0.063R | PF 0.83 | net $-1095.04 | maxDD 12.01%
+           uniqueness-weighted expectancy: -0.3705R
+Report: reports\backtest_3month_report.md
+Elapsed [TIME]
