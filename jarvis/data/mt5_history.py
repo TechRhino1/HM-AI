@@ -114,9 +114,11 @@ class SymbolMeta:
 _BROKER_FALLBACK = {
     "XAUUSD": "GOLD.i#", "XAGUSD": "SILVER.i#",
     "US30": "US30Cash#", "NAS100": "US100Cash#", "SPX500": "US500Cash#",
+    "US500": "US500Cash#",
     "GER40": "GER40Cash#", "UK100": "UK100Cash#",
-    "USOIL": "OILCash#", "UKOIL": "BRENTCash#",
+    "USOIL": "OILCash#", "UKOIL": "BRENTCash#", "WTI": "OILCash#",
     "BTCUSD": "BTCUSD#", "ETHUSD": "ETHUSD#", "SOLUSD": "SOLUSD#",
+    "EURJPY": "EURJPY#", "GBPJPY": "GBPJPY#",
 }
 
 # Categories drive risk and exit defaults.
@@ -148,6 +150,50 @@ DEFAULT_UNIVERSE: List[str] = [
 
 
 _BROKER_SUFFIXES = ("#", ".I#", ".#", ".I", ".PRO", ".RAW", ".ECN", ".M")
+
+# Timeframes this module can fetch, mapped to their bar length in minutes.
+#
+# The trade styles map onto these directly (see
+# ``jarvis.market.data_feed.fetch_multi_timeframe``):
+#   SWING       macro=D1  context=H4  primary=H1  setup=H4  timing=M15
+#   DAY_TRADING macro=H4  context=H1  primary=M15 setup=H1  timing=M5
+#   SCALP       macro=H1  context=M15 primary=M5  setup=M5  timing=M1
+#
+# ``M1`` is listed for completeness but brokers commonly serve far less M1
+# history than M5+; callers must handle a short series rather than assume 6
+# months is available.
+TIMEFRAME_MINUTES: Dict[str, int] = {
+    "M1": 1, "M5": 5, "M15": 15, "M30": 30,
+    "H1": 60, "H4": 240, "D1": 1440,
+}
+
+
+def _mt5_timeframe(name: str):
+    """Map a timeframe name to the MetaTrader5 constant, importing lazily."""
+    key = str(name).strip().upper()
+    if key not in TIMEFRAME_MINUTES:
+        raise ValueError(
+            f"Unsupported timeframe {name!r}; expected one of {sorted(TIMEFRAME_MINUTES)}"
+        )
+    import MetaTrader5 as mt5  # local import: module is optional at import time
+    const = getattr(mt5, f"TIMEFRAME_{key}", None)
+    if const is None:
+        raise ValueError(f"MetaTrader5 exposes no TIMEFRAME_{key}")
+    return const
+
+
+# Minimum bars that count as a usable series, scaled to the timeframe. 183
+# calendar days is ~130 D1 bars but ~124 000 M15 bars, so a single flat floor
+# either rejects valid daily data or waves through a nearly empty intraday one.
+_DEFAULT_MIN_BARS: Dict[str, int] = {
+    "M1": 2_000, "M5": 2_000, "M15": 1_500, "M30": 1_000,
+    "H1": 1_000, "H4": 400, "D1": 100,
+}
+
+
+def default_min_bars(timeframe: str) -> int:
+    """Timeframe-aware minimum-bar floor, defaulting to 400 for unknown names."""
+    return _DEFAULT_MIN_BARS.get(str(timeframe).strip().upper(), 400)
 
 
 def _strip_broker_suffix(symbol: str) -> str:
@@ -296,7 +342,8 @@ class DataQuality:
 
 
 def validate_real_market_data(df: pd.DataFrame, symbol: str,
-                              category: Optional[str] = None) -> DataQuality:
+                              category: Optional[str] = None,
+                              bar_minutes: int = 60) -> DataQuality:
     """Reject series that could not have come from a live market.
 
     Checks are deliberately structural — they test properties a *generator* does
@@ -305,6 +352,10 @@ def validate_real_market_data(df: pd.DataFrame, symbol: str,
     ``category`` matters: crypto trades 24/7 so weekend bars are legitimate there,
     whereas FX/metals/indices/energy are closed at weekends. Getting this wrong
     in either direction is a false positive that blocks real data.
+
+    ``bar_minutes`` is the timeframe's bar length. It generalises check 2 below,
+    which was hardcoded to H1 and therefore rejected *every* M5/M15 bar as
+    "not aligned to the hour" — the check has to know which grid it is testing.
     """
     issues: List[str] = []
     if df is None or df.empty:
@@ -324,13 +375,29 @@ def validate_real_market_data(df: pd.DataFrame, symbol: str,
     if ts.duplicated().any():
         issues.append(f"{int(ts.duplicated().sum())} duplicate timestamps")
 
-    # 2. H1 bars must align to the hour. A generator using `now()` as an anchor
-    #    produces fractional seconds; a real feed does not.
+    # 2. Bars must align to their own timeframe grid. A generator using `now()`
+    #    as an anchor produces fractional seconds; a real feed does not.
     #    Count BARS (not conditions) so the ratio stays meaningful.
-    misaligned = (ts.dt.minute != 0) | (ts.dt.second != 0) | (ts.dt.microsecond != 0)
+    #
+    #    Generalised from the original H1-only form: for M15 the expected minute
+    #    set is {0,15,30,45}, for M5 {0,5,...,55}. Sub-daily grids also pin
+    #    seconds/microseconds to zero; D1 bars carry no meaningful intraday
+    #    offset at all, so only the sub-daily case is checked.
+    misaligned = (ts.dt.second != 0) | (ts.dt.microsecond != 0)
+    if 0 < bar_minutes < 1440:
+        if bar_minutes < 60:
+            misaligned = misaligned | (ts.dt.minute % bar_minutes != 0)
+        else:
+            hours = bar_minutes // 60
+            misaligned = misaligned | (ts.dt.minute != 0)
+            if hours < 24:
+                misaligned = misaligned | (ts.dt.hour % hours != 0)
     frac = int(misaligned.sum())
     if frac > rows * 0.02:
-        issues.append(f"{frac}/{rows} bars not aligned to the hour (fractional timestamps)")
+        issues.append(
+            f"{frac}/{rows} bars not aligned to the {bar_minutes}-minute grid "
+            f"(fractional or off-grid timestamps)"
+        )
 
     # 3. Non-crypto markets close at weekends. A 24/7 grid on an FX symbol is a
     #    generator artefact. Crypto is exempt (it genuinely trades 24/7).
@@ -429,31 +496,69 @@ class MT5HistoryFetcher:
         self.shutdown()
 
     # ── fetch ───────────────────────────────────────────────────────────────
-    def fetch_h1(
+    def fetch_bars(
         self,
         symbol: str,
         days: int = 95,
+        timeframe: str = "H1",
         min_bars: int = 400,
         end: Optional[datetime] = None,
     ) -> Tuple[pd.DataFrame, SymbolMeta, DataQuality]:
-        """Return real H1 bars for ``symbol`` over the last ``days`` days."""
+        """Return real bars for ``symbol`` on ``timeframe`` over the last ``days``.
+
+        ``timeframe`` accepts any key of :data:`TIMEFRAME_MINUTES`. The broker's
+        history depth varies by timeframe — M5/M15/H1/H4/D1 typically reach back
+        the full requested window, while M1 is commonly capped far shorter — so a
+        caller asking for more than the broker holds gets the shorter series
+        rather than an error, provided it still clears ``min_bars``.
+        """
         self.connect()
+        tf = str(timeframe).strip().upper()
+        bar_minutes = TIMEFRAME_MINUTES[tf]
+        mt5_tf = _mt5_timeframe(tf)
         broker = resolve_broker_symbol(symbol)
         meta = build_symbol_meta(symbol)
 
         end_dt = end or datetime.now(timezone.utc)
         start_dt = end_dt - timedelta(days=days)
-
         mt5.symbol_select(broker, True)
-        rates = mt5.copy_rates_range(broker, mt5.TIMEFRAME_H1, start_dt, end_dt)
+
+        def _range(d: int):
+            return mt5.copy_rates_range(broker, mt5_tf, end_dt - timedelta(days=d), end_dt)
+
+        # Brokers hold less history on fine timeframes than on coarse ones, and
+        # MT5 answers a range that reaches past the stored history with an
+        # outright error ("Invalid params") rather than a partial series. Since
+        # that failure is monotone in the window length, binary-search the
+        # largest window the broker will actually serve instead of guessing.
+        rates = _range(days)
+        achieved_days = days
         if rates is None or len(rates) == 0:
-            # Fall back to a positional pull, then trim — some servers reject
-            # range queries for newly-selected symbols.
-            rates = mt5.copy_rates_from_pos(broker, mt5.TIMEFRAME_H1, 0, 20000)
+            lo, hi = 1, days - 1
+            rates, achieved_days = None, 0
+            while lo <= hi:
+                mid = (lo + hi) // 2
+                probe = _range(mid)
+                if probe is not None and len(probe) > 0:
+                    rates, achieved_days = probe, mid
+                    lo = mid + 1
+                else:
+                    hi = mid - 1
+            if rates is None:
+                # Some servers reject range queries for freshly-selected symbols;
+                # a positional pull is capped at 50 000 bars (beyond that MT5
+                # returns "Invalid params"), so never ask for more.
+                rates = mt5.copy_rates_from_pos(broker, mt5_tf, 0, 50000)
+                achieved_days = days
         if rates is None or len(rates) == 0:
             raise MT5UnavailableError(
-                f"No H1 data returned for {symbol} ({broker}) over {days} days. "
+                f"No {tf} data returned for {symbol} ({broker}) over {days} days. "
                 f"last_error={mt5.last_error()}"
+            )
+        if achieved_days < days:
+            logger.warning(
+                f"[{symbol}] {tf}: broker serves only ~{achieved_days}d of history "
+                f"(requested {days}d). Proceeding with the shorter real series."
             )
 
         df = pd.DataFrame(rates)
@@ -469,7 +574,8 @@ class MT5HistoryFetcher:
         df = df[["time", "open", "high", "low", "close",
                  "tick_volume", "spread", "real_volume"]].sort_values("time").reset_index(drop=True)
 
-        quality = validate_real_market_data(df, symbol, category=meta.category)
+        quality = validate_real_market_data(df, symbol, category=meta.category,
+                                            bar_minutes=bar_minutes)
         if not quality.ok and not self.allow_synthetic:
             raise SyntheticDataError(
                 f"Fetched data for {symbol} failed real-market validation: "
@@ -477,14 +583,25 @@ class MT5HistoryFetcher:
             )
         if len(df) < min_bars:
             raise MT5UnavailableError(
-                f"Only {len(df)} bars for {symbol}; need >= {min_bars}. "
+                f"Only {len(df)} {tf} bars for {symbol}; need >= {min_bars}. "
                 f"Broker history may be limited — widen the range or reduce min_bars."
             )
         logger.info(
-            f"[{symbol}] fetched {len(df)} real H1 bars "
+            f"[{symbol}] fetched {len(df)} real {tf} bars "
             f"({df['time'].iloc[0]} -> {df['time'].iloc[-1]}), quality ok={quality.ok}"
         )
         return df, meta, quality
+
+    def fetch_h1(
+        self,
+        symbol: str,
+        days: int = 95,
+        min_bars: int = 400,
+        end: Optional[datetime] = None,
+    ) -> Tuple[pd.DataFrame, SymbolMeta, DataQuality]:
+        """Return real H1 bars for ``symbol`` over the last ``days`` days."""
+        return self.fetch_bars(symbol, days=days, timeframe="H1",
+                               min_bars=min_bars, end=end)
 
     # ── cache ───────────────────────────────────────────────────────────────
     @staticmethod
@@ -505,27 +622,46 @@ class MT5HistoryFetcher:
             pass
         return _strip_broker_suffix(symbol)
 
-    def cache_path(self, symbol: str, days: int) -> str:
+    def cache_path(self, symbol: str, days: int, timeframe: str = "H1") -> str:
         name = self.canonical_name(symbol)
+        tf = str(timeframe).strip().upper()
         d = os.path.join(self.cache_root, name)
         os.makedirs(d, exist_ok=True)
-        return os.path.join(d, f"{name}_H1_{days}d.parquet")
+        return os.path.join(d, f"{name}_{tf}_{days}d.parquet")
 
-    def fetch_and_cache(self, symbol: str, days: int = 95) -> Dict[str, Any]:
-        """Fetch, validate, persist to parquet, and write a provenance manifest."""
-        df, meta, quality = self.fetch_h1(symbol, days=days)
-        path = self.cache_path(symbol, days)
+    def fetch_and_cache(self, symbol: str, days: int = 95,
+                        timeframe: str = "H1",
+                        min_bars: Optional[int] = None) -> Dict[str, Any]:
+        """Fetch, validate, persist to parquet, and write a provenance manifest.
+
+        ``min_bars`` defaults to the timeframe-aware floor from
+        :func:`default_min_bars` — a flat 400 would reject perfectly good D1
+        data, where 183 calendar days is only ~130 trading bars.
+        """
+        tf = str(timeframe).strip().upper()
+        if min_bars is None:
+            min_bars = default_min_bars(tf)
+        df, meta, quality = self.fetch_bars(symbol, days=days, timeframe=tf,
+                                            min_bars=min_bars)
+        path = self.cache_path(symbol, days, tf)
         df.to_parquet(path, index=False)
 
         manifest = {
             "symbol": self.canonical_name(symbol),
             "requested_symbol": symbol,
             "broker_symbol": meta.broker_symbol,
-            "timeframe": "H1",
+            "timeframe": tf,
             "days": days,
             "rows": int(len(df)),
             "start": str(df["time"].iloc[0]),
             "end": str(df["time"].iloc[-1]),
+            "span_days": round(
+                (df["time"].iloc[-1] - df["time"].iloc[0]).total_seconds() / 86400, 2
+            ),
+            "full_window": bool(
+                (df["time"].iloc[0] <= pd.Timestamp(df["time"].iloc[-1])
+                 - pd.Timedelta(days=days * 0.95))
+            ),
             "provenance": "MT5_TERMINAL_REAL",
             "synthetic": False,
             "quality": quality.as_dict(),
@@ -543,8 +679,10 @@ __all__ = [
     "DataQuality",
     "SyntheticDataError",
     "MT5UnavailableError",
-    "build_symbol_meta",
+    "TIMEFRAME_MINUTES",
+    "default_min_bars",
     "resolve_broker_symbol",
     "validate_real_market_data",
+    "build_symbol_meta",
     "DEFAULT_UNIVERSE",
 ]

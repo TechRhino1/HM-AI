@@ -312,6 +312,54 @@ candidate geometry (64 geometries × 16 symbols) would take days. Instead:
    be traced back to its own provenance or reproduced. All five are written to the
    profile meta.
 
+14. **A trade style is a timeframe map — and only a timeframe map.** `SWING`,
+   `DAY_TRADING` and `SCALP` differ in nothing else: they pick which timeframe
+   fills each of the five roles (`macro`, `context`, `primary`, `setup`,
+   `timing`). The map lives once, in `jarvis.market.data_feed.STYLE_TIMEFRAMES`,
+   and both the live feed (`fetch_multi_timeframe`) and the backtest engine read
+   it from there. It was previously inlined inside the live fetch, which meant a
+   backtest could silently test a different mode than the one that ships. Because
+   the style is *only* a timeframe map, `BacktestEngine` cannot express it by
+   swapping a flag: the caller must pass the mode's primary series as `df_h1`
+   **and** the real per-timeframe frames as `mtf_source`, or the engine will
+   resample H4/D1 off the primary and quietly test the wrong mode.
+
+15. **Higher-timeframe context must be sliced from completed bars only.** A bar
+   is visible to a decision at `bar_start + timeframe_duration`, never at
+   `bar_start`. The legacy resample path selected `time <= bar_time`, which lets
+   a partially-formed H4/D1 bar contribute its future close — lookahead that
+   inflates results. The style-aware path (`BacktestEngine._prepare_mtf` /
+   `_slice_mtf`) therefore indexes each frame by its *close* time and
+   binary-searches it, so only closed bars are ever visible. It is also the only
+   formulation that stays fast: a boolean-mask slice per bar is O(bars × rows),
+   which is quadratic and unusable at M5 scale (~35 k bars).
+
+### Broker history depth is not uniform — and it caps what can be backtested
+
+Measured against the live feed (XMGlobal-MT5, 2026-09):
+
+| Timeframe | Real history available | Rows over that span |
+|---|---|---|
+| M1 | **~67–69 days** (hard date floor at 2026-07-06) | ~67 000–99 000 |
+| M5 / M15 / H1 / H4 / D1 | full ~180–183 days | 34 000 / 12 000 / 3 100 / 780 / 130 |
+
+Two operational consequences, both encoded in the fetcher:
+
+  * **A range query that reaches past the stored history fails outright** with
+    `(-2, 'Terminal: Invalid params')` rather than returning a truncated series.
+    `MT5HistoryFetcher.fetch_bars` therefore binary-searches the largest window
+    the broker will serve instead of assuming the requested one exists. Asking
+    for 183 days of M1 silently yields 67 days *of real data*, never padding.
+  * **`copy_rates_from_pos` caps at 50 000 bars.** Anything larger also returns
+    `Invalid params`, so the positional fallback must not exceed it.
+
+The practical limit: **SCALP cannot be backtested over six months on this feed.**
+Its `timing` role is M1, so its usable window is ~67 days. `run_mode_backtest.py`
+truncates SCALP's primary series to that intersection rather than letting the M5
+loop run on past it — past that point the M1 frame is empty and the context
+builder degrades to a NEUTRAL timing bias instead of raising, which would be a
+quiet falsification of the mode under test.
+
 ### Known limitation: the entries carry no measured edge
 
 The geometry stack is now calibrated, cost-accurate and guard-railed. It is also

@@ -4,7 +4,7 @@ Eliminates all hardcoded "XAU", "GOLD", "JPY", "BTC" string checks scattered acr
 Provides contract_size, pip_size, pip_value, spread multiplier, asset class, and margin info per symbol.
 """
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict, Any, List, Optional
 from dataclasses import dataclass, field
 
 logger = logging.getLogger("JARVIS_SymbolRegistry")
@@ -101,8 +101,8 @@ _REGISTRY: Dict[str, SymbolSpec] = {
     ),
     "WTI": SymbolSpec(
         canonical="WTI", asset_class="COMMODITY",
-        contract_size=1000.0, pip_size=0.01, pip_value_per_lot=10.0,
-        typical_spread_pips=3.0, max_spread_pips=8.0,
+        contract_size=100.0, pip_size=0.01, pip_value_per_lot=10.0,
+        typical_spread_pips=13.0, max_spread_pips=25.0,
         typical_atr_pct=1.5, margin_pct=0.2, digits=2
     ),
     "ETHUSD": SymbolSpec(
@@ -226,6 +226,16 @@ def resolve(symbol: str) -> SymbolSpec:
     )
 
 
+def all_symbols() -> List[SymbolSpec]:
+    """Every registered spec, ordered by canonical name.
+
+    The authoritative "all available symbols" list for backtests and universe
+    sweeps — unlike ``DEFAULT_UNIVERSE`` in ``mt5_history``, which is a curated
+    subset and therefore under-reports coverage.
+    """
+    return [_REGISTRY[k] for k in sorted(_REGISTRY)]
+
+
 def is_registered(symbol: str) -> bool:
     """True only for an exact registry or alias hit — never a fuzzy/fallback match.
 
@@ -279,8 +289,15 @@ def registry_mismatches(broker_meta: Dict[str, Any], symbol: str) -> Dict[str, A
         elif field_name == "asset_class":
             # The manifest uses MT5 categories (INDEX/METAL/FX_MAJOR/CRYPTO);
             # the registry uses its own vocabulary. Compare loosely.
+            #
+            # ENERGY maps to COMMODITY because the registry's taxonomy is
+            # deliberately coarser: it has no ENERGY class, and ``_REGISTRY_CATEGORY``
+            # would not know what to do with one. WTI/UKOIL are energy instruments
+            # and are bucketed as commodities here — ``mt5_history._CATEGORY``
+            # keeps the finer ENERGY label for session/risk purposes.
             mapping = {
                 "INDEX": "INDEX", "METAL": "COMMODITY", "COMMODITY": "COMMODITY",
+                "ENERGY": "COMMODITY",
                 "FX_MAJOR": "FOREX", "FX_CROSS": "FOREX", "CRYPTO": "CRYPTO",
             }
             expected = mapping.get(str(broker_val).upper(), str(broker_val).upper())

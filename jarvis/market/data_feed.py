@@ -33,6 +33,39 @@ TF_MAP = {
     "D1": mt5.TIMEFRAME_D1 if (MT5_AVAILABLE and hasattr(mt5, "TIMEFRAME_D1")) else 16408,
 }
 
+# ─── Trade-style → timeframe map (single source of truth) ────────────────────
+# The three trade styles differ ONLY by the timeframes they request; nothing
+# else about them is distinct. This map was previously inlined inside
+# ``fetch_multi_timeframe``, which meant the live path and any offline
+# backtest could silently drift apart. Both now read it from here.
+STYLE_TIMEFRAMES: Dict[str, Dict[str, str]] = {
+    "SWING": {"macro": "D1", "context": "H4", "primary": "H1", "setup": "H4", "timing": "M15"},
+    "DAY_TRADING": {"macro": "H4", "context": "H1", "primary": "M15", "setup": "H1", "timing": "M5"},
+    "SCALP": {"macro": "H1", "context": "M15", "primary": "M5", "setup": "M5", "timing": "M1"},
+}
+
+# Accepted spellings for the day-trading style.
+_DAY_ALIASES = ("DAY_TRADING", "INTRADAY", "DAY")
+
+
+def normalise_style(trade_style: Optional[str]) -> str:
+    """Canonicalise a trade-style name; unknown/None falls back to SWING."""
+    style = (trade_style or "SWING").upper().strip()
+    if style in _DAY_ALIASES:
+        return "DAY_TRADING"
+    return style if style in STYLE_TIMEFRAMES else "SWING"
+
+
+def style_timeframes(trade_style: Optional[str]) -> Dict[str, str]:
+    """Role → timeframe map for a trade style (macro/context/primary/setup/timing)."""
+    return dict(STYLE_TIMEFRAMES[normalise_style(trade_style)])
+
+
+def style_timeframe_set(trade_style: Optional[str]) -> set:
+    """The distinct timeframes a style needs — i.e. what it must have data for."""
+    return set(style_timeframes(trade_style).values())
+
+
 class DataFeedEngine:
     _mt5_fetch_lock = threading.Lock()
 
@@ -112,15 +145,7 @@ class DataFeedEngine:
         - SCALP: macro=H1, context=M15, primary=M5, setup=M5, timing=M1
         """
         if timeframes is None:
-            style = (trade_style or "SWING").upper()
-            if style == "SWING":
-                timeframes = {"macro": "D1", "context": "H4", "primary": "H1", "setup": "H4", "timing": "M15"}
-            elif style in ("DAY_TRADING", "INTRADAY", "DAY"):
-                timeframes = {"macro": "H4", "context": "H1", "primary": "M15", "setup": "H1", "timing": "M5"}
-            elif style == "SCALP":
-                timeframes = {"macro": "H1", "context": "M15", "primary": "M5", "setup": "M5", "timing": "M1"}
-            else:
-                timeframes = {"macro": "D1", "context": "H4", "primary": "H1", "setup": "H4", "timing": "M15"}
+            timeframes = style_timeframes(trade_style)
 
         result = {}
         for role, tf in timeframes.items():

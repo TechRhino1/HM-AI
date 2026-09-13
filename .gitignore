@@ -77,3 +77,8 @@ data/*.db-wal
 
 # Derived signal-scan cache (regenerate with tools/scan_signals.py)
 data/signals/
+
+# Per-candidate replay frames from tools/verify_prioritization.py.
+# Regenerable (~29 MB) evidence; the distilled results are committed as
+# reports/prioritization_verification.json instead.
+reports/_prio_frame_*.parquet

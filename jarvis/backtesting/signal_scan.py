@@ -57,7 +57,7 @@ CANDIDATE_COLUMNS: List[str] = [
     "entry", "fill", "sl", "tp", "risk_dist", "rr",
     "atr", "spread_pips",
     "score", "dissection_score", "master_score", "ev", "adversarial_penalty",
-    "meta_label_prob",
+    "meta_label_prob", "mtf_confluence_score",
     "regime", "strategy", "zone", "trend_score", "confluence_count",
     "gate_passed", "hard_gate_failed", "n_failed_gates", "failing_gates",
     "decision", "order_type",
@@ -289,6 +289,14 @@ class SignalScanner:
                 "meta_label_prob": (
                     float(decision.meta_label_prob)
                     if getattr(decision, "meta_label_prob", None) is not None else -1.0
+                ),
+                # The arbiter's confluence input is ``master_confluence_score``,
+                # falling back to the context's ``mtf_confluence_score`` when the
+                # former is zero. Storing the fallback explicitly is what makes
+                # the arbiter's utility score exactly reconstructible offline
+                # instead of approximated.
+                "mtf_confluence_score": round(
+                    float(getattr(context, "mtf_confluence_score", 0.0) or 0.0), 4
                 ),
                 "regime": str(regime_val),
                 "strategy": str(getattr(decision, "strategy", "UNKNOWN")),

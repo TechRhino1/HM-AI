@@ -19,6 +19,7 @@ from jarvis.intelligence.symbol_profile_config import get_symbol_profile_config
 from jarvis.execution.exit_policy import ExitPolicy, evaluate_exit
 from jarvis.backtesting.exit_geometry import build_exit_geometry
 from jarvis.execution.entry_policy import evaluate_entry
+from jarvis.market.data_feed import style_timeframes, normalise_style
 
 class BacktestEngine:
     def __init__(
@@ -44,6 +45,75 @@ class BacktestEngine:
         comm_per_lot = getattr(cfg, "commission_per_lot", 0.0)
         return round(lots * comm_per_lot, 4)
 
+    # How many bars of each role the context builder gets. Matches the legacy
+    # resample path (primary 300, context 100, macro 50) so the two paths feed
+    # the engines comparable amounts of history.
+    _ROLE_LOOKBACK = {"primary": 300, "context": 100, "macro": 50, "setup": 100, "timing": 100}
+
+    @staticmethod
+    def _prepare_mtf(
+        mtf_source: Optional[Dict[str, pd.DataFrame]],
+        role_tf: Dict[str, str],
+    ) -> Dict[str, Any]:
+        """Pre-index real per-timeframe frames for O(log n) slicing inside the loop.
+
+        A boolean-mask slice per bar would be O(bars x rows) — quadratic, and
+        fatal at M5 scale (35k bars). Each frame is instead reduced to its
+        close-time array once, so the loop only ever does a binary search.
+
+        "Close time" is ``bar_start + timeframe_duration``; a bar is only visible
+        to a decision once that moment has passed. Using the bar's *start* would
+        let a partially-formed H4/D1 bar contribute its future close.
+        """
+        if not mtf_source:
+            return {}
+        try:
+            from jarvis.data.mt5_history import TIMEFRAME_MINUTES
+        except Exception:  # pragma: no cover - MetaTrader5 optional
+            TIMEFRAME_MINUTES = {"M1": 1, "M5": 5, "M15": 15, "M30": 30,
+                                 "H1": 60, "H4": 240, "D1": 1440}
+        prepared: Dict[str, Any] = {}
+        for tf in set(role_tf.values()):
+            df = mtf_source.get(tf)
+            if df is None or len(df) == 0 or "time" not in df.columns:
+                continue
+            d = df.copy()
+            starts = pd.to_datetime(d["time"])
+            done = (starts + pd.Timedelta(minutes=TIMEFRAME_MINUTES.get(tf, 60)))
+            d["_done_ns"] = done.values.astype("datetime64[ns]")
+            d = d.sort_values("_done_ns").reset_index(drop=True)
+            prepared[tf] = (d, d["_done_ns"].values)
+        return prepared
+
+    def _slice_mtf(
+        self,
+        prepared: Dict[str, Any],
+        role_tf: Dict[str, str],
+        bar_time: Any,
+    ) -> Dict[str, pd.DataFrame]:
+        """Role→frame dict of completed bars at ``bar_time``, from real data."""
+        try:
+            cutoff = pd.Timestamp(bar_time).tz_localize(None) if pd.Timestamp(bar_time).tzinfo else pd.Timestamp(bar_time)
+        except Exception:
+            return {}
+        cutoff = cutoff.to_datetime64().astype("datetime64[ns]")
+        out: Dict[str, pd.DataFrame] = {}
+        for role, tf in role_tf.items():
+            entry = prepared.get(tf)
+            if entry is None:
+                continue
+            d, done_ns = entry
+            # side="right" -> every bar whose close time is <= bar_time
+            cut = int(done_ns.searchsorted(cutoff, side="right"))
+            if cut <= 0:
+                continue
+            look = self._ROLE_LOOKBACK.get(role, 100)
+            lo = max(0, cut - look)
+            sl = d.iloc[lo:cut]
+            if len(sl):
+                out[role] = sl.drop(columns=["_done_ns"], errors="ignore")
+        return out
+
     def run_backtest(
         self,
         df_h1: Optional[pd.DataFrame] = None,
@@ -55,6 +125,8 @@ class BacktestEngine:
         end_date: Optional[str] = None,
         timeframe: str = "H1",
         wr_profile: Optional[Any] = None,
+        trade_style: Optional[str] = None,
+        mtf_source: Optional[Dict[str, pd.DataFrame]] = None,
     ) -> Dict[str, Any]:
         """Run a chronological backtest.
 
@@ -70,6 +142,15 @@ class BacktestEngine:
           * the exit policy and time stop come from the calibrated geometry.
 
         ``wr_profile=None`` preserves the previous behaviour exactly.
+
+        ``trade_style`` (``SWING`` / ``DAY_TRADING`` / ``SCALP``) reproduces the
+        live decision path, where the style selects the role→timeframe map and is
+        forwarded to the context builder and the decision engine. ``mtf_source``
+        supplies *real* per-timeframe frames keyed by timeframe name
+        (``{"M15": df, "M1": df, ...}``); each role is sliced from it at the
+        current bar, instead of the engine resampling the primary series. When
+        either is omitted the previous behaviour is unchanged: MTF context is
+        built by resampling the primary series to H4/D1.
         """
         balance = self.initial_balance
         equity = self.initial_balance
@@ -140,7 +221,17 @@ class BacktestEngine:
         else:
             full_df_h4 = None
             full_df_d1 = None
-        
+
+        # ── Style-aware real MTF context ────────────────────────────────────
+        # When a trade style is supplied the engine reproduces the live path:
+        # the style picks the role→timeframe map and each role is sliced from
+        # real per-timeframe bars. Slices use COMPLETED bars only (a bar is
+        # visible once its own close time has passed), so no partially-formed
+        # higher-timeframe bar leaks future prices into the decision.
+        active_style = normalise_style(trade_style) if trade_style else None
+        role_tf = style_timeframes(active_style) if active_style else None
+        mtf_prepared = self._prepare_mtf(mtf_source, role_tf) if role_tf else {}
+
         for i in range(effective_start, total_bars - 1):
             window_start = max(0, i - 300)
             history_slice = df_h1.iloc[window_start:i]
@@ -441,7 +532,11 @@ class BacktestEngine:
                     rejection_stats[skip_reason] = rejection_stats.get(skip_reason, 0) + 1
                     continue
 
-                if full_df_h4 is not None and bar_time is not None:
+                if mtf_prepared and bar_time is not None:
+                    mtf_dict = self._slice_mtf(mtf_prepared, role_tf, bar_time)
+                    if mtf_dict.get("primary") is None or mtf_dict["primary"].empty:
+                        mtf_dict["primary"] = history_slice
+                elif full_df_h4 is not None and bar_time is not None:
                     h4_slice = full_df_h4[full_df_h4["time"] <= bar_time].iloc[-100:]
                     d1_slice = full_df_d1[full_df_d1["time"] <= bar_time].iloc[-50:]
                     mtf_dict = {"primary": history_slice, "context": h4_slice, "macro": d1_slice}
@@ -451,7 +546,8 @@ class BacktestEngine:
                 context = self.context_engine.build_context(
                     symbol, mtf_dict,
                     current_spread_pips=spread_pips,
-                    max_allowed_spread_pips=spec.max_spread_pips
+                    max_allowed_spread_pips=spec.max_spread_pips,
+                    trade_style=active_style or "SWING",
                 )
                 regime = self.regime_classifier.classify_regime(context)
 
@@ -479,7 +575,7 @@ class BacktestEngine:
                 effective_risk_pct = max(0.20, planned_risk_pct * size_mult)
 
                 decision = self.decision_engine.evaluate(
-                    context, regime, analyst_reports, devil_report, account_balance=balance, risk_per_trade_pct=effective_risk_pct, mtf_data=mtf_dict
+                    context, regime, analyst_reports, devil_report, account_balance=balance, risk_per_trade_pct=effective_risk_pct, mtf_data=mtf_dict, trade_style=active_style or "SWING"
                 )
 
                 regime_name = (
