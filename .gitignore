@@ -82,3 +82,7 @@ data/signals/
 # Regenerable (~29 MB) evidence; the distilled results are committed as
 # reports/prioritization_verification.json instead.
 reports/_prio_frame_*.parquet
+
+# Runtime output of the geometry optimiser (/api/backtest/run). Each job writes
+# one JSON per symbol; regenerable by re-running the job, so not committed.
+reports/optimizer/

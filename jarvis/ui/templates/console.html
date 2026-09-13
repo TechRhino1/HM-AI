@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#070b12">
+<title>JARVIS — Trading Console</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+<link rel="stylesheet" href="/static/css/console.css">
+<link rel="stylesheet" href="/static/css/auth.css">
+<link rel="stylesheet" href="/static/css/hm_ui.css">
+</head>
+
+<body data-view="trade" data-panel="chart">
+<a class="hm-skip-link" href="#cx-main">Skip to trading workspace</a>
+
+<!-- ═══════════════════════════════════════════════════════════════════════
+     TOP BAR — brand, desks, view tabs, account strip
+     Two rows on desktop; the second row collapses into a summary strip on
+     mobile so the account is never more than a glance away.
+     ═══════════════════════════════════════════════════════════════════════ -->
+<header class="cx-topbar">
+  <div class="cx-topbar__row cx-topbar__row--primary">
+    <a class="cx-brand" href="/" aria-label="JARVIS console home">
+      <span class="cx-brand__mark" aria-hidden="true">◆</span>
+      <span class="cx-brand__name">JARVIS</span>
+    </a>
+
+    <!-- Desk switcher. The legacy terminal hid its equivalent below 900px,
+         which left a phone user with no route to the other three desks. -->
+    <nav class="cx-desks" aria-label="Trading desks">
+      <a href="/" class="cx-desk is-active" aria-current="page">Forex&nbsp;/&nbsp;Crypto</a>
+      <a href="/stocks" class="cx-desk">US&nbsp;Stocks</a>
+      <a href="/india" class="cx-desk">India</a>
+      <a href="/options" class="cx-desk">Options</a>
+    </nav>
+
+    <div class="cx-topbar__tools">
+      <button type="button" class="cx-iconbtn" id="cx-palette-btn"
+              aria-haspopup="dialog" aria-keyshortcuts="Control+K"
+              title="Command palette (Ctrl+K)">
+        <span aria-hidden="true">⌕</span><span class="cx-iconbtn__label">Commands</span>
+      </button>
+      <div id="auth-header-widget" class="auth-header-widget"></div>
+      <button type="button" class="cx-iconbtn cx-iconbtn--desks" id="cx-desks-toggle"
+              aria-expanded="false" aria-controls="cx-desks-sheet">Desks</button>
+    </div>
+  </div>
+
+  <div class="cx-topbar__row cx-topbar__row--secondary">
+    <div class="cx-views" role="tablist" aria-label="Console view">
+      <button type="button" role="tab" class="cx-viewtab" data-view-btn="trade"
+              aria-selected="true" aria-controls="cx-view-trade" id="cx-tab-trade">Trade</button>
+      <button type="button" role="tab" class="cx-viewtab" data-view-btn="backtest"
+              aria-selected="false" aria-controls="cx-view-backtest" id="cx-tab-backtest" tabindex="-1">Backtest</button>
+      <button type="button" role="tab" class="cx-viewtab" data-view-btn="analytics"
+              aria-selected="false" aria-controls="cx-view-analytics" id="cx-tab-analytics" tabindex="-1">Analytics</button>
+    </div>
+
+    <dl class="cx-account" aria-label="Account summary">
+      <div class="cx-account__item">
+        <dt>Equity</dt><dd class="cx-mono" id="cx-acc-equity">—</dd>
+      </div>
+      <div class="cx-account__item">
+        <dt>Open P&amp;L</dt><dd class="cx-mono" id="cx-acc-profit">—</dd>
+      </div>
+      <div class="cx-account__item">
+        <dt>Free margin</dt><dd class="cx-mono" id="cx-acc-margin">—</dd>
+      </div>
+      <div class="cx-account__item">
+        <dt>Risk at work</dt><dd class="cx-mono" id="cx-acc-risk">—</dd>
+      </div>
+      <div class="cx-account__item cx-account__item--wide">
+        <dt>Mode</dt>
+        <dd><span class="cx-chip" id="cx-exec-mode">—</span>
+            <span class="cx-chip cx-chip--muted" id="cx-trade-style">—</span>
+            <span class="cx-dot" id="cx-conn" role="status" aria-label="Connection status"></span></dd>
+      </div>
+    </dl>
+  </div>
+</header>
+
+<main id="cx-main" class="cx-main">
+
+<!-- ═══════════════════════════════════════════════════════════════════════
+     VIEW: TRADE
+     Desktop  >=1024px : three columns (watchlist | chart+positions | ticket+why)
+     Tablet  768-1023  : two columns   (watchlist | chart+positions+ticket)
+     Mobile  <768px    : one column, switched by body[data-panel]
+     ═══════════════════════════════════════════════════════════════════════ -->
+<section class="cx-view cx-view--trade" id="cx-view-trade"
+         role="tabpanel" aria-labelledby="cx-tab-trade" data-view-panel="trade">
+
+  <!-- ── Column 1: watchlist + auto-selection ─────────────────────────── -->
+  <div class="cx-col cx-col--left" data-panel-name="watchlist">
+    <section class="cx-card" aria-labelledby="cx-watchlist-h">
+      <div class="cx-card__head">
+        <h2 class="cx-card__title" id="cx-watchlist-h">Watchlist</h2>
+        <span class="cx-card__meta" id="cx-watchlist-count">—</span>
+      </div>
+      <div class="cx-card__body cx-scroll">
+        <table class="cx-table cx-table--watchlist">
+          <caption class="cx-visually-hidden">Symbols with live price and daily change</caption>
+          <thead>
+            <tr><th scope="col">Symbol</th><th scope="col" class="cx-num">Bid</th>
+                <th scope="col" class="cx-num">Chg%</th><th scope="col">Status</th></tr>
+          </thead>
+          <tbody id="cx-watchlist-body">
+            <tr><td colspan="4" class="cx-empty">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="cx-card cx-card--grow" aria-labelledby="cx-selection-h">
+      <div class="cx-card__head">
+        <h2 class="cx-card__title" id="cx-selection-h">Auto-selection</h2>
+        <div class="cx-card__actions">
+          <span class="cx-badge" id="cx-selection-count">0</span>
+          <button type="button" class="cx-btn cx-btn--ghost cx-btn--sm" id="cx-selection-refresh"
+                  title="Re-run the cross-mode consensus scan (S)">Refresh</button>
+        </div>
+      </div>
+      <p class="cx-card__hint">
+        Signals from Swing, Day and Scalp aggregated by consensus. A single mode
+        voting alone is never actionable.
+      </p>
+      <div class="cx-card__body cx-scroll" id="cx-selection-body" aria-live="polite">
+        <p class="cx-empty">Loading consensus…</p>
+      </div>
+    </section>
+  </div>
+
+  <!-- ── Column 2: chart + positions ──────────────────────────────────── -->
+  <div class="cx-col cx-col--center" data-panel-name="chart">
+    <section class="cx-card cx-card--chart" aria-labelledby="cx-chart-h">
+      <div class="cx-card__head">
+        <h2 class="cx-card__title" id="cx-chart-h">
+          <span id="cx-chart-symbol">XAUUSD</span>
+          <span class="cx-card__sub" id="cx-chart-meta">—</span>
+        </h2>
+        <div class="cx-card__actions">
+          <label class="cx-visually-hidden" for="cx-chart-tf">Chart timeframe</label>
+          <select id="cx-chart-tf" class="cx-select cx-select--sm">
+            <option value="M5">M5</option><option value="M15">M15</option>
+            <option value="H1" selected>H1</option><option value="H4">H4</option>
+            <option value="D1">D1</option>
+          </select>
+        </div>
+      </div>
+      <div class="cx-chart" id="cx-chart" role="img"
+           aria-label="Price chart. Use the timeframe selector to change resolution."></div>
+      <p class="cx-chart__fallback" id="cx-chart-fallback" hidden></p>
+    </section>
+
+    <section class="cx-card cx-card--grow" aria-labelledby="cx-pos-h">
+      <div class="cx-card__head">
+        <h2 class="cx-card__title" id="cx-pos-h">Open positions</h2>
+        <div class="cx-card__actions">
+          <span class="cx-badge" id="cx-pos-count">0</span>
+          <button type="button" class="cx-btn cx-btn--danger cx-btn--sm" id="cx-close-all"
+                  title="Close every open position (X)">Close all</button>
+        </div>
+      </div>
+      <div class="cx-card__body cx-scroll">
+        <table class="cx-table">
+          <caption class="cx-visually-hidden">Currently open positions</caption>
+          <thead>
+            <tr><th scope="col">Symbol</th><th scope="col">Side</th>
+                <th scope="col" class="cx-num">Vol</th><th scope="col" class="cx-num">Entry</th>
+                <th scope="col" class="cx-num">Now</th><th scope="col" class="cx-num">P&amp;L</th>
+                <th scope="col"><span class="cx-visually-hidden">Actions</span></th></tr>
+          </thead>
+          <tbody id="cx-pos-body">
+            <tr><td colspan="7" class="cx-empty">No open positions.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+
+  <!-- ── Column 3: order ticket + reasoning ──────────────────────────── -->
+  <div class="cx-col cx-col--right" data-panel-name="ticket">
+    <section class="cx-card" aria-labelledby="cx-ticket-h">
+      <div class="cx-card__head">
+        <h2 class="cx-card__title" id="cx-ticket-h">Order ticket</h2>
+        <span class="cx-card__meta" id="cx-ticket-symbol">—</span>
+      </div>
+      <form class="cx-form" id="cx-ticket-form" novalidate>
+        <div class="cx-field">
+          <label for="cx-ticket-sym">Symbol</label>
+          <input id="cx-ticket-sym" class="cx-input" type="text" autocomplete="off"
+                 spellcheck="false" value="XAUUSD">
+        </div>
+        <div class="cx-field-row">
+          <div class="cx-field">
+            <label for="cx-ticket-lots">Volume (lots)</label>
+            <input id="cx-ticket-lots" class="cx-input cx-mono" type="number"
+                   min="0.01" step="0.01" value="0.10" inputmode="decimal">
+          </div>
+          <div class="cx-field">
+            <label for="cx-ticket-type">Type</label>
+            <select id="cx-ticket-type" class="cx-select">
+              <option value="MARKET">Market</option>
+              <option value="LIMIT">Limit</option>
+            </select>
+          </div>
+        </div>
+        <div class="cx-field-row">
+          <div class="cx-field">
+            <label for="cx-ticket-sl">Stop loss</label>
+            <input id="cx-ticket-sl" class="cx-input cx-mono" type="number" step="any"
+                   inputmode="decimal" placeholder="optional">
+          </div>
+          <div class="cx-field">
+            <label for="cx-ticket-tp">Take profit</label>
+            <input id="cx-ticket-tp" class="cx-input cx-mono" type="number" step="any"
+                   inputmode="decimal" placeholder="optional">
+          </div>
+        </div>
+        <p class="cx-form__note" id="cx-ticket-note">
+          Lots are a request — the risk engine may size them down.
+        </p>
+        <div class="cx-ticket__actions">
+          <button type="submit" class="cx-btn cx-btn--buy" data-side="BUY" id="cx-buy">Buy</button>
+          <button type="submit" class="cx-btn cx-btn--sell" data-side="SELL" id="cx-sell">Sell</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="cx-card cx-card--grow" aria-labelledby="cx-why-h">
+      <div class="cx-card__head">
+        <h2 class="cx-card__title" id="cx-why-h">Why this trade</h2>
+        <button type="button" class="cx-btn cx-btn--ghost cx-btn--sm" id="cx-why-refresh"
+                title="Re-read the engine's reasoning (C)">Re-read</button>
+      </div>
+      <div class="cx-card__body cx-scroll" id="cx-why-body" aria-live="polite">
+        <p class="cx-empty">Select a symbol to see the engine's reasoning.</p>
+      </div>
+    </section>
+  </div>
+
+  <!-- Mobile-only panel switcher; body[data-panel] drives which column shows -->
+  <div class="cx-panelbar" role="tablist" aria-label="Panel">
+    <button type="button" role="tab" class="cx-panelbar__btn" data-panel-btn="watchlist"
+            aria-selected="false" aria-controls="cx-col-watchlist">Watchlist</button>
+    <button type="button" role="tab" class="cx-panelbar__btn" data-panel-btn="chart"
+            aria-selected="true" aria-controls="cx-col-chart">Chart</button>
+    <button type="button" role="tab" class="cx-panelbar__btn" data-panel-btn="ticket"
+            aria-selected="false" aria-controls="cx-col-ticket">Ticket</button>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════════════
+     VIEW: BACKTEST
+     ═══════════════════════════════════════════════════════════════════════ -->
+<section class="cx-view cx-view--backtest" id="cx-view-backtest"
+         role="tabpanel" aria-labelledby="cx-tab-backtest" data-view-panel="backtest" hidden>
+
+  <div class="cx-col cx-col--form">
+    <section class="cx-card" aria-labelledby="cx-bt-req-h">
+      <div class="cx-card__head">
+        <h2 class="cx-card__title" id="cx-bt-req-h">Backtest requirements</h2>
+      </div>
+      <p class="cx-card__hint">
+        Runs on the real 6-month MT5 history already cached for every symbol.
+        The optimum is found on the first <em>split</em> of the window and then
+        measured, untouched, on the remainder.
+      </p>
+      <form class="cx-form cx-form--grid" id="cx-bt-form" novalidate>
+        <div class="cx-field">
+          <label for="cx-bt-objective">Maximise</label>
+          <select id="cx-bt-objective" class="cx-select">
+            <option value="expectancy_r" selected>Edge per trade (expectancy R)</option>
+            <option value="total_r">Profit (total R)</option>
+            <option value="profit_factor">Consistency (profit factor)</option>
+            <option value="calmar">Risk-adjusted (return / drawdown)</option>
+          </select>
+        </div>
+        <div class="cx-field">
+          <label for="cx-bt-symbols">Symbols <span class="cx-field__hint">blank = all</span></label>
+          <input id="cx-bt-symbols" class="cx-input cx-mono" type="text"
+                 autocomplete="off" spellcheck="false" placeholder="WTI, EURUSD, BTCUSD">
+        </div>
+        <div class="cx-field">
+          <label for="cx-bt-modes">Modes</label>
+          <select id="cx-bt-modes" class="cx-select" multiple size="3">
+            <option value="SWING" selected>Swing</option>
+            <option value="DAY_TRADING" selected>Day</option>
+            <option value="SCALP" selected>Scalp</option>
+          </select>
+        </div>
+        <div class="cx-field">
+          <label for="cx-bt-mintrades">Min trades</label>
+          <input id="cx-bt-mintrades" class="cx-input cx-mono" type="number" min="1" step="1" value="30">
+        </div>
+        <div class="cx-field">
+          <label for="cx-bt-maxdd">Max drawdown (R)</label>
+          <input id="cx-bt-maxdd" class="cx-input cx-mono" type="number" min="1" step="1" value="40">
+        </div>
+        <div class="cx-field">
+          <label for="cx-bt-split">Train / validate split</label>
+          <input id="cx-bt-split" class="cx-input cx-mono" type="number" min="0.3" max="0.9" step="0.05" value="0.7">
+        </div>
+        <div class="cx-field">
+          <label for="cx-bt-passes">Descent passes</label>
+          <input id="cx-bt-passes" class="cx-input cx-mono" type="number" min="1" step="1" value="2">
+        </div>
+        <div class="cx-field">
+          <label for="cx-bt-evals">Evaluation budget</label>
+          <input id="cx-bt-evals" class="cx-input cx-mono" type="number" min="1" step="1" value="60">
+        </div>
+        <div class="cx-field cx-field--wide">
+          <label>Search grid <span class="cx-field__hint">narrow it to fit a time budget</span></label>
+          <div class="cx-checkgrid">
+            <label class="cx-check"><input type="checkbox" id="cx-bt-g-tp" checked> Target (R)</label>
+            <label class="cx-check"><input type="checkbox" id="cx-bt-g-be" checked> Breakeven</label>
+            <label class="cx-check"><input type="checkbox" id="cx-bt-g-pc" checked> Partial</label>
+            <label class="cx-check"><input type="checkbox" id="cx-bt-g-tr" checked> Trail</label>
+            <label class="cx-check"><input type="checkbox" id="cx-bt-g-q" checked> Selectivity</label>
+          </div>
+        </div>
+        <div class="cx-form__actions cx-field--wide">
+          <button type="submit" class="cx-btn cx-btn--primary" id="cx-bt-run">Run backtest</button>
+          <span class="cx-form__note" id="cx-bt-note">One job runs at a time.</span>
+        </div>
+      </form>
+    </section>
+
+    <section class="cx-card" aria-labelledby="cx-bt-hist-h">
+      <div class="cx-card__head">
+        <h2 class="cx-card__title" id="cx-bt-hist-h">Run history</h2>
+        <button type="button" class="cx-btn cx-btn--ghost cx-btn--sm" id="cx-bt-hist-refresh">Refresh</button>
+      </div>
+      <div class="cx-card__body cx-scroll" id="cx-bt-history">
+        <p class="cx-empty">No runs yet.</p>
+      </div>
+    </section>
+  </div>
+
+  <div class="cx-col cx-col--results">
+    <section class="cx-card" aria-labelledby="cx-bt-prog-h">
+      <div class="cx-card__head">
+        <h2 class="cx-card__title" id="cx-bt-prog-h">Progress</h2>
+        <span class="cx-badge" id="cx-bt-status">idle</span>
+      </div>
+      <div class="cx-progress" role="progressbar" aria-labelledby="cx-bt-prog-h"
+           aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="cx-bt-progress">
+        <div class="cx-progress__bar" id="cx-bt-progress-bar"></div>
+      </div>
+      <pre class="cx-log" id="cx-bt-log" aria-live="polite">Idle.</pre>
+    </section>
+
+    <section class="cx-card cx-card--grow" aria-labelledby="cx-bt-res-h">
+      <div class="cx-card__head">
+        <h2 class="cx-card__title" id="cx-bt-res-h">Results</h2>
+        <span class="cx-card__meta" id="cx-bt-res-meta">—</span>
+      </div>
+      <div class="cx-card__body cx-scroll" id="cx-bt-results">
+        <p class="cx-empty">Run a backtest to see results.</p>
+      </div>
+    </section>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════════════
+     VIEW: ANALYTICS
+     ═══════════════════════════════════════════════════════════════════════ -->
+<section class="cx-view cx-view--analytics" id="cx-view-analytics"
+         role="tabpanel" aria-labelledby="cx-tab-analytics" data-view-panel="analytics" hidden>
+
+  <section class="cx-card cx-card--wide" aria-labelledby="cx-an-metrics-h">
+    <div class="cx-card__head">
+      <h2 class="cx-card__title" id="cx-an-metrics-h">Account</h2>
+      <span class="cx-card__meta" id="cx-an-updated">—</span>
+    </div>
+    <div class="cx-metrics" id="cx-an-metrics"></div>
+  </section>
+
+  <section class="cx-card" aria-labelledby="cx-an-rel-h">
+    <div class="cx-card__head">
+      <h2 class="cx-card__title" id="cx-an-rel-h">Mode reliability</h2>
+      <button type="button" class="cx-btn cx-btn--ghost cx-btn--sm" id="cx-an-rel-refresh">Refresh</button>
+    </div>
+    <p class="cx-card__hint">
+      Measured on the 6-month per-mode backtest. These weights scale each mode's
+      vote in the consensus, so a mode that has lost money cannot manufacture
+      conviction.
+    </p>
+    <div class="cx-card__body cx-scroll" id="cx-an-reliability">
+      <p class="cx-empty">Loading…</p>
+    </div>
+  </section>
+
+  <section class="cx-card cx-card--wide" aria-labelledby="cx-an-hist-h">
+    <div class="cx-card__head">
+      <h2 class="cx-card__title" id="cx-an-hist-h">Trade history</h2>
+      <span class="cx-card__meta" id="cx-an-hist-count">—</span>
+    </div>
+    <div class="cx-card__body cx-scroll">
+      <table class="cx-table">
+        <caption class="cx-visually-hidden">Closed trade history</caption>
+        <thead>
+          <tr><th scope="col">Symbol</th><th scope="col">Side</th>
+              <th scope="col" class="cx-num">Vol</th><th scope="col" class="cx-num">P&amp;L</th>
+              <th scope="col">Regime</th><th scope="col">Strategy</th>
+              <th scope="col" class="cx-num">Conf</th><th scope="col">When</th></tr>
+        </thead>
+        <tbody id="cx-an-hist-body">
+          <tr><td colspan="8" class="cx-empty">No history yet.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+</section>
+
+</main>
+
+<!-- Mobile desk sheet — the only route to the other desks below 900px -->
+<div class="cx-sheet" id="cx-desks-sheet" hidden>
+  <div class="cx-sheet__panel" role="dialog" aria-modal="true" aria-label="Trading desks">
+    <div class="cx-sheet__head">
+      <h2>Desks</h2>
+      <button type="button" class="cx-iconbtn" id="cx-desks-close" aria-label="Close">✕</button>
+    </div>
+    <nav class="cx-sheet__nav" aria-label="Trading desks">
+      <a href="/" class="cx-sheet__link is-active">Forex / Crypto</a>
+      <a href="/stocks" class="cx-sheet__link">US Stocks</a>
+      <a href="/india" class="cx-sheet__link">India</a>
+      <a href="/options" class="cx-sheet__link">Options</a>
+      <a href="/classic" class="cx-sheet__link">Classic terminal</a>
+    </nav>
+  </div>
+</div>
+
+<!-- Command palette -->
+<div class="cx-palette" id="cx-palette" hidden>
+  <div class="cx-palette__panel" role="dialog" aria-modal="true" aria-labelledby="cx-palette-h">
+    <h2 class="cx-visually-hidden" id="cx-palette-h">Command palette</h2>
+    <label class="cx-visually-hidden" for="cx-palette-input">Search commands</label>
+    <input id="cx-palette-input" class="cx-palette__input" type="text" autocomplete="off"
+           spellcheck="false" placeholder="Type a command…">
+    <ul class="cx-palette__list" id="cx-palette-list" role="listbox" aria-label="Commands"></ul>
+  </div>
+</div>
+
+<script src="/static/js/vendor/lightweight-charts.standalone.production.js"></script>
+<script src="/static/js/auth.js"></script>
+<script src="/static/js/hm_ui.js"></script>
+<script src="/static/js/console.js"></script>
+</body>
+</html>
