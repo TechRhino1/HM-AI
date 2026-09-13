@@ -43,7 +43,7 @@ stylesheets or scripts.
 | Deleting the four page `:root` blocks | Each page sheet must remain usable standalone if `hm_ui.css` fails to load. The values are overridden, not conflicting, so there is no rendering bug to fix. | Migrate page-by-page to `--hm-*`, then delete. Mapping in §3. |
 | Merging the four page stylesheets into one | Would require visual regression testing across every panel; high risk, low immediate user benefit. | After the token migration above. |
 | Removing the 8 `outline: none` declarations at source | Functionally superseded by the `!important` focus rule; editing 6 files adds churn for no visual gain. | Clean up opportunistically when each sheet is next touched. |
-| `app.html` / `app_shell.css` / `app_shell.js` | Orphaned: no route serves them (see §6.1). Deleting dead code is outside a UI-modernisation scope. | Delete in a dedicated dead-code pass. |
+| `app.html` / `app_shell.css` / `app_shell.js` | Orphaned: no route served them (see §6.1). | **Done** — deleted in the console redesign (`5bfab68`). |
 
 ---
 
@@ -211,12 +211,16 @@ phone widths before this is considered fully signed off.
 
 ## 6. Findings recorded during the work
 
-### 6.1 Orphaned UI (dead code — not removed)
-`app.html` (372 lines), `app_shell.css` (8.7 KB) and `app_shell.js` (4.6 KB) are **not reachable**:
-`jarvis/api/server.py` has no `/app` route and no generic template route — it serves only
-`index.html`, `stocks.html`, `india.html`, `india_options.html`. `app.html` also carries a stale
-cache-buster (`?v=20260826_v7`) and references globals its page script never assigns. **Recommend
-deleting in a dedicated dead-code pass**, not inside a UI change.
+### 6.1 Orphaned UI (dead code — removed)
+`app.html` (372 lines), `app_shell.css` (8.7 KB) and `app_shell.js` (4.6 KB) were **not reachable**:
+`jarvis/api/server.py` had no `/app` route and no generic template route — it served only
+`index.html`, `stocks.html`, `india.html`, `india_options.html`. `app.html` also carried a stale
+cache-buster (`?v=20260826_v7`) and referenced globals its page script never assigned.
+
+**Resolved.** All three were deleted in the console redesign (commit `5bfab68`). The redesign
+replaced the single-purpose terminal with `console.html`, which is served at `/`, and retained the
+legacy terminal at `/classic` as the rollback path. `tools/verify_console_live.py` asserts that
+`/static/js/app_shell.js` now returns 404, so the removal cannot silently regress.
 
 ### 6.2 Latent nav-convention divergence
 `stocks.html` marks the current nav link with `btn-nav-active`; `india.html` and
@@ -239,7 +243,65 @@ belt-and-braces rather than load-bearing.
 
 ---
 
-## 7. How to review
+## 7. The redesigned console
+
+The single-purpose terminal was replaced by a three-view console. It is a **new surface**, not a
+restyle of the old one, so it does not consume the page sheets listed in §3 — it builds on
+`hm_ui.css` tokens directly and defines no new ones.
+
+### 7.1 Routing
+
+| Path | Serves | Notes |
+|---|---|---|
+| `/`, `/index.html`, `/console`, `/console.html` | `console.html` | The new console. |
+| `/classic`, `/classic.html` | `index.html` | The legacy terminal, kept as the rollback path. |
+| `/stocks`, `/india`, `/options`, … | unchanged | Untouched by this work. |
+
+The retired `app.html` / `app_shell.css` / `app_shell.js` are gone (§6.1).
+
+### 7.2 Three views
+
+* **Trade** — watchlist plus AI auto-selection, chart plus open positions, and an order ticket with
+  a "Why this trade" panel that shows the reasoning behind the selected setup.
+* **Backtest** — a requirements form (objective, symbols, modes, constraints, search grid), live
+  progress, results, and job history.
+* **Analytics** — account metrics, per-mode reliability, and trade history.
+
+### 7.3 Responsive contract
+
+The layout is driven by `body[data-view]` and `body[data-panel]`, so what is displayed and what the
+controls claim can never disagree.
+
+| Width | Layout |
+|---|---|
+| ≥ 1024 px | Three columns. |
+| 768–1023 px | Two columns. |
+| < 768 px | One column, switched by the panel bar. |
+
+Breakpoints are 1023 px / 767 px / 420 px, plus reduced-motion and print rules.
+
+### 7.4 New features
+
+* **Automatic trade selection across modes.** `jarvis/intelligence/mode_aggregator.py` adds the
+  cross-style consensus layer that the arbiter never had: candidates are grouped by symbol, each
+  style's vote is weighted by what it has actually earned on the 6-month history, and agreement is
+  measured by summed utility rather than headcount. One style voting alone is never tradeable by
+  construction — see the module docstring for the full argument.
+* **Requirement-driven backtesting on real MT5 data.** `jarvis/backtesting/optimizer.py` searches
+  entry-selectivity and exit geometry per symbol against the real cached history, with explicit
+  costs, hard constraints, and a held-out validation window.
+* **API surface.** `jarvis/api/intelligence_api.py` exposes both, behind authentication. The HTTP
+  surface has no path that can open a trade: auto-selection is hard-wired to a dry run.
+
+### 7.5 How to verify
+
+Run `python tools/verify_console_live.py`. It boots the real server on a scratch port and asserts
+every route above, including that the retired assets 404, that auto-selection stays a dry run when
+asked otherwise, and that it reports `UNAVAILABLE` rather than an empty success when no engine is
+attached. Unit coverage lives in `tests/test_mode_aggregator.py` and
+`tests/test_backtest_optimizer.py`.
+
+## 8. How to review
 
 1. **Open `docs/ui_preview.html`** — a live gallery of every token and component, including the
    measured contrast table and working toast/dialog demos. This is the fastest way to review.
@@ -250,7 +312,7 @@ belt-and-braces rather than load-bearing.
 4. **Reduced motion:** enable it at OS level, reload, confirm the pulse dot and toast
    animations stop.
 
-## 8. Rollback
+## 9. Rollback
 
 Fully reversible and low-risk: remove the two `<link>`/`<script>` references to `hm_ui.css` /
 `hm_ui.js` from the four templates. No page stylesheet or page script was modified, so the UIs
