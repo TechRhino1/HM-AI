@@ -59,7 +59,9 @@ def main():
             
         orchestrator.start()
         
-        server_thread = threading.Thread(target=run_web_server, args=(8501,), daemon=True)
+        server_thread = threading.Thread(
+            target=run_web_server, args=(8501,), kwargs={"orchestrator": orchestrator},
+            daemon=True)
         server_thread.start()
 
         print_status_hud()

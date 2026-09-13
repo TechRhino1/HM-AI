@@ -69,7 +69,8 @@ def main():
     # Start Web Dashboard Server in background thread or main
     server_thread = threading.Thread(
         target=run_web_server,
-        kwargs={"port": args.port, "host": args.host, "mt5_client": orchestrator.mt5_client},
+        kwargs={"port": args.port, "host": args.host, "mt5_client": orchestrator.mt5_client,
+                "orchestrator": orchestrator},
         daemon=True,
         name="web_server"
     )

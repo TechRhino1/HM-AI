@@ -268,7 +268,8 @@ def hm_start(mode: str = "live", port: int = 8501, host: str = "127.0.0.1", trad
     logger.info(f"Starting Remote Access Web Terminal at http://{host}:{port}...")
     while True:
         try:
-            run_web_server(port=port, host=host, mt5_client=orchestrator.mt5_client)
+            run_web_server(port=port, host=host, mt5_client=orchestrator.mt5_client,
+                           orchestrator=orchestrator)
         except KeyboardInterrupt:
             logger.info("Shutting down HM AI 4.0 trading platform...")
             orchestrator.stop()
