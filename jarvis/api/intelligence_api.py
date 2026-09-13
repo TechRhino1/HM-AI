@@ -1,0 +1,718 @@
+"""
+JARVIS AI 5.2 — Intelligence API (auto-selection + backtest jobs).
+
+WHY THIS MODULE EXISTS
+----------------------
+Two capabilities the console needs had no HTTP surface at all.
+
+**Auto-selection.** The cross-style consensus lives inside the orchestrator, and
+before this module the orchestrator was reachable from the web layer only as a
+broker client — ``run_web_server`` received the MT5 client and nothing else. The
+trade-style selector in the old UI therefore updated a global that the live
+orchestrator never read, so it silently changed nothing. This module gives the
+console a way to ask the *real* engine what it would do, and the server now
+hands it the real orchestrator.
+
+**Backtests.** The optimiser is CPU-bound and runs for minutes. It cannot run
+inside a request. So it runs as a *job*: submitted, polled, cancellable, with
+progress and a persisted report.
+
+THE SAFETY CONTRACT
+-------------------
+``/api/intelligence/auto-selection`` is **read-only by default**. It calls
+``orchestrator.scan_all_modes(dry_run=True)``, which runs the entire analytical
+path — data, context, regime, analysts, decision, sizing, every authorization
+gate — and stops before trailing positions or submitting orders. A preview must
+never move a stop loss or open a position, so ``dry_run`` is not a parameter a
+caller can turn off over HTTP. Live execution stays where it belongs: in the
+orchestration loop, driven by the engine's own schedule.
+
+JOB MODEL
+---------
+Jobs are serialised (one at a time). The optimiser is memory-hungry — it holds
+price frames and simulation caches — and this machine has under a gigabyte free;
+running two would trade throughput for swap thrash. Jobs are cancellable
+cooperatively through the optimiser's progress callback, and finished jobs are
+pruned so a long-lived server cannot accumulate reports in memory.
+"""
+from __future__ import annotations
+
+import json
+import logging
+import os
+import queue
+import threading
+import time
+import uuid
+from dataclasses import dataclass, field
+from typing import Any, Callable, Dict, List, Optional, Tuple
+
+from jarvis.backtesting.optimizer import (
+    OBJECTIVES,
+    STYLES,
+    GeometrySpace,
+    OptimizerSpec,
+    optimise,
+)
+from jarvis.config.paths import DATA_DIR, REPO_ROOT
+from jarvis.intelligence.mode_aggregator import (
+    STYLE_ORDER,
+    ModeReliabilityModel,
+    select_from_candidates,
+)
+
+logger = logging.getLogger("JARVIS_IntelligenceAPI")
+
+__all__ = [
+    "INTELLIGENCE",
+    "IntelligenceService",
+    "AutoSelectionService",
+    "BacktestJobManager",
+    "BacktestJob",
+]
+
+REPORTS_DIR = os.path.join(REPO_ROOT, "reports", "optimizer")
+
+# Auto-selection cache. The full scan is a real pipeline run, so a short TTL
+# keeps the console responsive without re-running it on every poll. Reliability
+# is re-read on a slower cadence because it only changes when a backtest is
+# re-run, not between requests.
+_SELECTION_TTL_SEC = 45.0
+_RELIABILITY_TTL_SEC = 60.0
+
+_MAX_CONCURRENT_JOBS = 1
+_MAX_JOBS = 20
+
+
+class JobCancelled(Exception):
+    """Raised from the optimiser's progress hook to abort a cancelled job."""
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Auto-selection
+# ─────────────────────────────────────────────────────────────────────────────
+class AutoSelectionService:
+    """Read-only cross-style consensus, cached briefly and never executing.
+
+    The orchestrator is fetched through a callable rather than held directly so
+    that the service picks up the live instance whenever the server (re)wires
+    it, instead of pinning a stale reference captured at import time.
+    """
+
+    def __init__(self, orchestrator_getter: Callable[[], Any]):
+        self._get_orchestrator = orchestrator_getter
+        self._lock = threading.Lock()
+        self._cached: Optional[Dict[str, Any]] = None
+        self._cached_at: float = 0.0
+        self._model: Optional[ModeReliabilityModel] = None
+        self._model_at: float = 0.0
+
+    # ── reliability ─────────────────────────────────────────────────────────
+    def reliability_model(self, force: bool = False) -> ModeReliabilityModel:
+        now = time.time()
+        with self._lock:
+            if (
+                not force
+                and self._model is not None
+                and (now - self._model_at) < _RELIABILITY_TTL_SEC
+            ):
+                return self._model
+        model = ModeReliabilityModel.from_report()
+        with self._lock:
+            self._model = model
+            self._model_at = now
+        return model
+
+    # ── selection ───────────────────────────────────────────────────────────
+    def get(
+        self,
+        *,
+        force: bool = False,
+        symbols: Optional[List[str]] = None,
+        styles: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        """Return the current consensus view, from cache when fresh."""
+        now = time.time()
+        with self._lock:
+            cacheable = not symbols and not styles
+            if (
+                not force
+                and cacheable
+                and self._cached is not None
+                and (now - self._cached_at) < _SELECTION_TTL_SEC
+            ):
+                payload = dict(self._cached)
+                payload["cached"] = True
+                payload["age_seconds"] = round(now - self._cached_at, 2)
+                return payload
+
+        payload = self._compute(symbols=symbols, styles=styles)
+
+        with self._lock:
+            if not symbols and not styles:
+                self._cached = dict(payload)
+                self._cached_at = time.time()
+        return payload
+
+    def _compute(
+        self,
+        *,
+        symbols: Optional[List[str]],
+        styles: Optional[List[str]],
+    ) -> Dict[str, Any]:
+        generated = _utc_now()
+
+        orchestrator = None
+        try:
+            orchestrator = self._get_orchestrator()
+        except Exception as exc:
+            logger.warning("orchestrator lookup failed: %s", exc)
+
+        if orchestrator is None:
+            return {
+                "status": "UNAVAILABLE",
+                "generated_utc": generated,
+                "dry_run": True,
+                "cached": False,
+                "age_seconds": 0.0,
+                "error": "Live orchestrator is not attached to the web server.",
+                "decisions": [],
+                "best": None,
+                "candidates": [],
+                "universe": {"symbols": 0, "styles": 0},
+            }
+
+        model = self.reliability_model()
+
+        # dry_run is hard-wired True. There is no HTTP path that opens a trade.
+        best, ranked, raw = orchestrator.scan_all_modes(
+            dry_run=True,
+            symbols=symbols,
+            styles=styles,
+        )
+
+        decisions = select_from_candidates(ranked, model=model)
+        tradeable = [d for d in decisions if d.is_tradeable]
+
+        candidates = []
+        for cand in ranked:
+            try:
+                item = cand.to_dict()
+                item["direction"] = str(getattr(cand, "bias", "") or "").upper()
+                candidates.append(item)
+            except Exception as exc:
+                logger.debug("could not serialise candidate: %s", exc)
+
+        # Symbols that produced no directional candidate at all are still worth
+        # reporting, so the console can distinguish "no setup" from "not scanned".
+        scanned_symbols = sorted({str(s) for s, _st, _r in raw}) if raw else []
+
+        return {
+            "status": "OK",
+            "generated_utc": generated,
+            "dry_run": True,
+            "cached": False,
+            "age_seconds": 0.0,
+            "universe": {
+                "symbols": len(scanned_symbols),
+                "styles": len(styles) if styles else len(STYLE_ORDER),
+                "scanned_pairs": len(raw) if raw else 0,
+                "candidates": len(candidates),
+            },
+            "decisions": [d.to_dict() for d in decisions],
+            "tradeable": [d.to_dict() for d in tradeable],
+            "best": tradeable[0].to_dict() if tradeable else (
+                decisions[0].to_dict() if decisions else None
+            ),
+            "arbiter_best": _safe_dict(best),
+            "candidates": candidates,
+            "scanned_symbols": scanned_symbols,
+        }
+
+
+def _safe_dict(obj: Any) -> Optional[Dict[str, Any]]:
+    if obj is None:
+        return None
+    try:
+        return obj.to_dict()
+    except Exception:
+        return None
+
+
+def _utc_now() -> str:
+    import pandas as pd
+
+    return pd.Timestamp.now("UTC").isoformat()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Backtest jobs
+# ─────────────────────────────────────────────────────────────────────────────
+@dataclass
+class BacktestJob:
+    """One optimiser run, with the progress trail that makes it observable."""
+
+    id: str
+    spec: Dict[str, Any]
+    label: str = ""
+    status: str = "QUEUED"          # QUEUED | RUNNING | DONE | FAILED | CANCELLED
+    created_utc: str = ""
+    started_utc: Optional[str] = None
+    finished_utc: Optional[str] = None
+    progress: List[str] = field(default_factory=list)
+    result: Optional[Dict[str, Any]] = None
+    error: Optional[str] = None
+    cancel_requested: bool = False
+    report_path: Optional[str] = None
+
+    def to_dict(self, include_result: bool = False) -> Dict[str, Any]:
+        out = {
+            "id": self.id,
+            "label": self.label,
+            "status": self.status,
+            "created_utc": self.created_utc,
+            "started_utc": self.started_utc,
+            "finished_utc": self.finished_utc,
+            "progress": list(self.progress[-40:]),
+            "progress_lines": len(self.progress),
+            "error": self.error,
+            "spec": self.spec,
+            "cancel_requested": self.cancel_requested,
+            "report_path": self.report_path,
+            "has_result": self.result is not None,
+        }
+        if include_result:
+            out["result"] = self.result
+        return out
+
+    def summary_line(self) -> str:
+        return f"[{self.status}] {self.label or self.id}"
+
+
+class BacktestJobManager:
+    """Serialised, cancellable job queue for optimiser runs.
+
+    One worker thread and a depth-1 concurrency ceiling: the optimiser is
+    memory-bound on this machine, so two concurrent runs would slow each other
+    down more than they overlap. The queue is what turns a multi-minute CPU task
+    into something a web request can start and a page can poll.
+    """
+
+    def __init__(self, max_jobs: int = _MAX_JOBS):
+        self._jobs: Dict[str, BacktestJob] = {}
+        self._order: List[str] = []
+        self._lock = threading.Lock()
+        self._queue: "queue.Queue[str]" = queue.Queue()
+        self._worker: Optional[threading.Thread] = None
+        self._max_jobs = max_jobs
+        self._active = threading.Semaphore(_MAX_CONCURRENT_JOBS)
+
+    # ── lifecycle ───────────────────────────────────────────────────────────
+    def _ensure_worker(self) -> None:
+        if self._worker is not None and self._worker.is_alive():
+            return
+        self._worker = threading.Thread(
+            target=self._loop, name="backtest_job_worker", daemon=True
+        )
+        self._worker.start()
+
+    def submit(self, spec: Dict[str, Any], label: str = "") -> BacktestJob:
+        job = BacktestJob(
+            id=uuid.uuid4().hex[:12],
+            spec=dict(spec or {}),
+            label=label or str((spec or {}).get("label") or "backtest"),
+            created_utc=_utc_now(),
+        )
+        with self._lock:
+            self._jobs[job.id] = job
+            self._order.append(job.id)
+            self._prune_locked()
+        self._ensure_worker()
+        self._queue.put(job.id)
+        logger.info("backtest job %s queued (%s)", job.id, job.label)
+        return job
+
+    def _prune_locked(self) -> None:
+        """Drop the oldest finished jobs so memory cannot grow without bound."""
+        if len(self._order) <= self._max_jobs:
+            return
+        for jid in list(self._order):
+            if len(self._order) <= self._max_jobs:
+                break
+            job = self._jobs.get(jid)
+            if job is not None and job.status in ("DONE", "FAILED", "CANCELLED"):
+                self._jobs.pop(jid, None)
+                self._order.remove(jid)
+
+    def get(self, job_id: str) -> Optional[BacktestJob]:
+        with self._lock:
+            return self._jobs.get(job_id)
+
+    def list(self) -> List[BacktestJob]:
+        with self._lock:
+            return [self._jobs[j] for j in reversed(self._order) if j in self._jobs]
+
+    def cancel(self, job_id: str) -> bool:
+        job = self.get(job_id)
+        if job is None:
+            return False
+        if job.status in ("DONE", "FAILED", "CANCELLED"):
+            return False
+        job.cancel_requested = True
+        if job.status == "QUEUED":
+            job.status = "CANCELLED"
+            job.finished_utc = _utc_now()
+        return True
+
+    # ── worker ──────────────────────────────────────────────────────────────
+    def _loop(self) -> None:
+        while True:
+            job_id = self._queue.get()
+            try:
+                job = self.get(job_id)
+                if job is None or job.status == "CANCELLED":
+                    continue
+                with self._active:
+                    self._run(job)
+            except Exception as exc:  # never let the worker die
+                logger.error("backtest worker error: %s", exc, exc_info=True)
+            finally:
+                self._queue.task_done()
+
+    def _progress_hook(self, job: BacktestJob) -> Callable[[str], None]:
+        def hook(message: str) -> None:
+            job.progress.append(str(message))
+            logger.info("job %s: %s", job.id, message)
+            if job.cancel_requested:
+                raise JobCancelled()
+        return hook
+
+    def _run(self, job: BacktestJob) -> None:
+        job.status = "RUNNING"
+        job.started_utc = _utc_now()
+        hook = self._progress_hook(job)
+        try:
+            spec = OptimizerSpec(**_spec_kwargs(job.spec))
+            result = optimise(
+                symbols=spec.symbols,
+                modes=spec.modes,
+                objective=spec.objective,
+                min_trades=spec.min_trades,
+                max_dd_r=spec.max_dd_r,
+                slippage_pips=spec.slippage_pips,
+                commission_per_lot=spec.commission_per_lot,
+                passes=spec.passes,
+                max_evaluations=spec.max_evaluations,
+                walk_forward_split=spec.walk_forward_split,
+                walk_forward_folds=spec.walk_forward_folds,
+                days=spec.days,
+                label=spec.label,
+                space=_space_from_spec(job.spec),
+                progress=hook,
+            )
+            job.result = result
+            job.report_path = _persist(job)
+            job.status = "DONE"
+            hook(f"done in {result.get('elapsed_seconds')}s -> {job.report_path}")
+        except JobCancelled:
+            job.status = "CANCELLED"
+            job.progress.append("cancelled by request")
+            logger.info("job %s cancelled", job.id)
+        except Exception as exc:
+            job.status = "FAILED"
+            job.error = f"{type(exc).__name__}: {exc}"
+            logger.error("job %s failed: %s", job.id, exc, exc_info=True)
+        finally:
+            job.finished_utc = _utc_now()
+
+
+def _spec_kwargs(raw: Dict[str, Any]) -> Dict[str, Any]:
+    """Whitelist incoming spec keys so a malformed body cannot reach the dataclass."""
+    allowed = {
+        "symbols", "modes", "objective", "min_trades", "max_dd_r",
+        "slippage_pips", "commission_per_lot", "passes", "max_evaluations",
+        "walk_forward_split", "walk_forward_folds", "per_mode_search", "days", "label",
+    }
+    out: Dict[str, Any] = {}
+    for key, value in (raw or {}).items():
+        if key not in allowed:
+            continue
+        if key in ("symbols", "modes"):
+            if isinstance(value, str):
+                value = [v.strip() for v in value.split(",") if v.strip()]
+            elif isinstance(value, (list, tuple)):
+                value = [str(v).strip() for v in value if str(v).strip()]
+            else:
+                continue
+            out[key] = tuple(value)
+        else:
+            out[key] = value
+    return out
+
+
+def _space_from_spec(raw: Dict[str, Any]) -> GeometrySpace:
+    """Build the search grid, honouring optional narrowing from the request.
+
+    A narrowed grid is how a caller keeps a run inside a time budget: the full
+    product is 1920 geometries per mode, which is far more than a few-minute
+    budget allows, so exposing the dimensions is what makes the endpoint usable
+    interactively rather than only as a batch tool.
+    """
+    space = GeometrySpace()
+    grid = (raw or {}).get("space") or {}
+    if not isinstance(grid, dict):
+        return space
+
+    def numbers(key: str, default: Tuple[float, ...]) -> Tuple[float, ...]:
+        values = grid.get(key)
+        if not isinstance(values, (list, tuple)) or not values:
+            return default
+        out: List[float] = []
+        for v in values:
+            try:
+                out.append(float(v))
+            except (TypeError, ValueError):
+                continue
+        return tuple(out) or default
+
+    def optional(key: str, default: Tuple[Optional[float], ...]) -> Tuple[Optional[float], ...]:
+        values = grid.get(key)
+        if not isinstance(values, (list, tuple)) or not values:
+            return default
+        out: List[Optional[float]] = []
+        for v in values:
+            if v is None or v == "off" or v == "None":
+                out.append(None)
+                continue
+            try:
+                out.append(float(v))
+            except (TypeError, ValueError):
+                continue
+        return tuple(out) or default
+
+    return GeometrySpace(
+        tp_r=numbers("tp_r", space.tp_r),
+        be_trigger_r=optional("be_trigger_r", space.be_trigger_r),
+        fast_cash_r=optional("fast_cash_r", space.fast_cash_r),
+        trail_atr=optional("trail_atr", space.trail_atr),
+        min_score_quantiles=numbers("min_score_quantiles", space.min_score_quantiles),
+        max_bars=int(grid.get("max_bars", space.max_bars) or space.max_bars),
+    )
+
+
+def _persist(job: BacktestJob) -> str:
+    """Write the report to disk so a result outlives the process."""
+    os.makedirs(REPORTS_DIR, exist_ok=True)
+    safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in (job.label or job.id))
+    path = os.path.join(REPORTS_DIR, f"{safe}__{job.id}.json")
+    try:
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(job.result or {}, fh, indent=2, default=str)
+        return os.path.relpath(path, REPO_ROOT)
+    except OSError as exc:
+        logger.warning("could not persist report for job %s: %s", job.id, exc)
+        return ""
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# HTTP surface
+# ─────────────────────────────────────────────────────────────────────────────
+class IntelligenceService:
+    """Router for ``/api/intelligence/*``, ``/api/backtest/*`` and auto-select."""
+
+    def __init__(self):
+        self._orchestrator: Any = None
+        self.jobs = BacktestJobManager()
+        self.selection = AutoSelectionService(lambda: self._orchestrator)
+
+    def configure_orchestrator(self, orchestrator: Any) -> None:
+        """Attach the live orchestrator. Called by the server at startup."""
+        self._orchestrator = orchestrator
+
+    @property
+    def orchestrator(self) -> Any:
+        return self._orchestrator
+
+    # ── GET ─────────────────────────────────────────────────────────────────
+    def handle_get(self, path: str, query: Dict[str, List[str]], handler: Any) -> bool:
+        try:
+            if path.startswith("/api/intelligence/auto-selection"):
+                return self._get_auto_selection(query, handler)
+            if path.startswith("/api/intelligence/reliability"):
+                return self._get_reliability(handler)
+            if path.startswith("/api/intelligence/meta"):
+                return self._get_meta(handler)
+            if path.startswith("/api/backtest/jobs"):
+                return self._get_jobs(path, query, handler)
+            if path.startswith("/api/backtest/meta"):
+                return self._get_meta(handler)
+        except Exception as exc:
+            logger.error("intelligence GET %s failed: %s", path, exc, exc_info=True)
+            _json(handler, {"status": "ERROR", "error": f"{type(exc).__name__}: {exc}"}, 500)
+            return True
+        return False
+
+    def _get_auto_selection(self, query: Dict[str, List[str]], handler: Any) -> bool:
+        force = _flag(query, "refresh") or _flag(query, "force")
+        symbols = _csv(query, "symbols")
+        styles = _csv(query, "styles")
+        payload = self.selection.get(force=force, symbols=symbols, styles=styles)
+        _json(handler, payload, 200 if payload.get("status") == "OK" else 503)
+        return True
+
+    def _get_reliability(self, handler: Any) -> bool:
+        force = False
+        model = self.selection.reliability_model(force=force)
+        _json(handler, {
+            "status": "OK",
+            "styles": [model.for_style(s).to_dict() for s in STYLE_ORDER],
+            "model": model.as_dict(),
+        })
+        return True
+
+    def _get_meta(self, handler: Any) -> bool:
+        _json(handler, {
+            "status": "OK",
+            "styles": list(STYLE_ORDER),
+            "objectives": list(OBJECTIVES),
+            "default_space": {
+                "tp_r": list(GeometrySpace().tp_r),
+                "be_trigger_r": list(GeometrySpace().be_trigger_r),
+                "fast_cash_r": list(GeometrySpace().fast_cash_r),
+                "trail_atr": list(GeometrySpace().trail_atr),
+                "min_score_quantiles": list(GeometrySpace().min_score_quantiles),
+            },
+            "defaults": {
+                "objective": "expectancy_r",
+                "min_trades": 30,
+                "max_dd_r": 40.0,
+                "passes": 3,
+                "max_evaluations": 400,
+                "walk_forward_split": 0.7,
+                "walk_forward_folds": 3,
+                "slippage_pips": 0.5,
+                "commission_per_lot": 5.0,
+                "days": 183,
+            },
+            "orchestrator_attached": self._orchestrator is not None,
+            "reports_dir": os.path.relpath(REPORTS_DIR, REPO_ROOT),
+        })
+        return True
+
+    def _get_jobs(self, path: str, query: Dict[str, List[str]], handler: Any) -> bool:
+        # /api/backtest/jobs            -> list
+        # /api/backtest/jobs/<id>       -> one
+        # /api/backtest/jobs/<id>/result-> one, with result
+        tail = path[len("/api/backtest/jobs"):].strip("/")
+        if not tail:
+            _json(handler, {
+                "status": "OK",
+                "jobs": [j.to_dict() for j in self.jobs.list()],
+            })
+            return True
+
+        parts = tail.split("/")
+        job = self.jobs.get(parts[0])
+        if job is None:
+            _json(handler, {"status": "NOT_FOUND", "error": f"no job {parts[0]}"}, 404)
+            return True
+
+        want_result = len(parts) > 1 and parts[1] == "result"
+        _json(handler, {
+            "status": "OK",
+            "job": job.to_dict(include_result=want_result),
+        })
+        return True
+
+    # ── POST ────────────────────────────────────────────────────────────────
+    def handle_post(self, path: str, body: Dict[str, Any], handler: Any) -> bool:
+        try:
+            if path.startswith("/api/action/auto-select"):
+                return self._post_auto_select(body, handler)
+            if path.startswith("/api/backtest/run"):
+                return self._post_run(body, handler)
+            if path.startswith("/api/backtest/cancel"):
+                return self._post_cancel(body, handler)
+        except Exception as exc:
+            logger.error("intelligence POST %s failed: %s", path, exc, exc_info=True)
+            _json(handler, {"status": "ERROR", "error": f"{type(exc).__name__}: {exc}"}, 500)
+            return True
+        return False
+
+    def _post_auto_select(self, body: Dict[str, Any], handler: Any) -> bool:
+        """Refresh the consensus view.
+
+        Deliberately ignores any ``dry_run`` field a caller might send. The
+        endpoint is a preview; the only way to execute remains the engine's own
+        loop. Accepting the flag would turn a read-only surface into a way to
+        fire orders over HTTP.
+        """
+        if "dry_run" in body and not _truthy(body.get("dry_run")):
+            logger.warning("auto-select: ignoring dry_run=False; this endpoint is read-only")
+        symbols = body.get("symbols")
+        styles = body.get("styles")
+        payload = self.selection.get(
+            force=True,
+            symbols=[str(s) for s in symbols] if isinstance(symbols, list) else None,
+            styles=[str(s) for s in styles] if isinstance(styles, list) else None,
+        )
+        payload["requested_dry_run_ignored"] = "dry_run" in body and not _truthy(body.get("dry_run"))
+        _json(handler, payload, 200 if payload.get("status") == "OK" else 503)
+        return True
+
+    def _post_run(self, body: Dict[str, Any], handler: Any) -> bool:
+        spec = body.get("spec") if isinstance(body.get("spec"), dict) else body
+        label = str((spec or {}).get("label") or body.get("label") or "")
+        job = self.jobs.submit(spec or {}, label=label)
+        _json(handler, {
+            "status": "OK",
+            "job_id": job.id,
+            "job": job.to_dict(),
+        }, 202)
+        return True
+
+    def _post_cancel(self, body: Dict[str, Any], handler: Any) -> bool:
+        job_id = str(body.get("id") or body.get("job_id") or "").strip()
+        if not job_id:
+            _json(handler, {"status": "BAD_REQUEST", "error": "id is required"}, 400)
+            return True
+        ok = self.jobs.cancel(job_id)
+        job = self.jobs.get(job_id)
+        _json(handler, {
+            "status": "OK" if ok else "NOOP",
+            "cancelled": ok,
+            "job": job.to_dict() if job else None,
+        }, 200 if job else 404)
+        return True
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# helpers
+# ─────────────────────────────────────────────────────────────────────────────
+def _json(handler: Any, payload: Dict[str, Any], status_code: int = 200) -> None:
+    handler._send_json(payload, status_code=status_code)
+
+
+def _flag(query: Dict[str, List[str]], name: str) -> bool:
+    values = query.get(name)
+    if not values:
+        return False
+    return _truthy(values[0])
+
+
+def _truthy(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in ("1", "true", "yes", "on")
+
+
+def _csv(query: Dict[str, List[str]], name: str) -> Optional[List[str]]:
+    values = query.get(name)
+    if not values:
+        return None
+    out = [v.strip().upper() for v in values[0].split(",") if v.strip()]
+    return out or None
+
+
+# Module singleton — the server imports this one object.
+INTELLIGENCE = IntelligenceService()
