@@ -32,6 +32,13 @@ class JarvisRequestHandler(BaseHTTPRequestHandler):
     mt5_client: MT5Client = MT5Client(mode="live")
     data_feed: DataFeedEngine = DataFeedEngine(mt5_client=mt5_client)
     copilot: JarvisCopilot = JarvisCopilot(GLOBAL_STATE)
+    # The live orchestrator, attached by whichever entry point owns it.
+    #
+    # This was the root of a real bug: the handler only ever received the broker
+    # client, so the trade-style selector updated a global that the running
+    # orchestrator never read — it silently changed nothing. ``None`` is a valid
+    # state (API-only mode) and every consumer checks for it.
+    orchestrator: Optional[Any] = None
     _bg_thread_started: bool = False
     _bg_lock = threading.Lock()
     _CANDLES_CACHE: Dict[str, Tuple[Dict[str, Any], float]] = {}
@@ -44,6 +51,21 @@ class JarvisRequestHandler(BaseHTTPRequestHandler):
         """Use the application's single broker client for API and orchestration work."""
         cls.mt5_client = mt5_client
         cls.data_feed = DataFeedEngine(mt5_client=mt5_client)
+
+    @classmethod
+    def configure_orchestrator(cls, orchestrator: Any):
+        """Attach the running orchestrator so the API can drive the real engine.
+
+        Propagates to the intelligence router as well, because auto-selection
+        must call the same ``scan_all_modes`` the live loop uses — otherwise the
+        preview would describe a different engine than the one trading.
+        """
+        cls.orchestrator = orchestrator
+        try:
+            from jarvis.api.intelligence_api import INTELLIGENCE
+            INTELLIGENCE.configure_orchestrator(orchestrator)
+        except Exception as exc:
+            logger.warning(f"Could not attach orchestrator to the intelligence API: {exc}")
 
     def _extract_token(self) -> str:
         auth_header = self.headers.get("Authorization", "")
@@ -263,7 +285,9 @@ class JarvisRequestHandler(BaseHTTPRequestHandler):
 
         try:
             public_get_endpoints = {
-                "/", "/index.html", "/stocks", "/stocks.html", "/screener",
+                "/", "/index.html", "/console", "/console.html",
+                "/classic", "/classic.html",
+                "/stocks", "/stocks.html", "/screener",
                 "/india", "/india.html", "/india/stocks", "/nse", "/bse",
                 "/options", "/options.html", "/india/options", "/india-options", "/fno",
                 "/api/telemetry_state", "/api/telemetry", "/api/candles", "/api/rates",
@@ -271,6 +295,10 @@ class JarvisRequestHandler(BaseHTTPRequestHandler):
                 "/api/tunnel_info", "/api/diagnostics", "/api/pending_orders",
                 "/api/stream/telemetry", "/api/auth/me", "/api/auth/verify"
             }
+            # NOTE: /api/intelligence/* and /api/backtest/* are deliberately NOT
+            # listed here. Page shells must load before auth, but the intelligence
+            # surface exposes trading intent and can start CPU-heavy jobs, so it
+            # stays behind authentication.
             is_public_get = (
                 path in public_get_endpoints
                 or path.startswith("/static/")
@@ -283,7 +311,9 @@ class JarvisRequestHandler(BaseHTTPRequestHandler):
                 self._send_json({"status": "UNAUTHORIZED", "error": "Authentication required"}, status_code=401)
                 return
 
-            if path == "/" or path == "/index.html":
+            if path in ("/", "/index.html", "/console", "/console.html"):
+                self._serve_console_ui()
+            elif path in ("/classic", "/classic.html"):
                 self._serve_terminal_ui()
             elif path in ["/stocks", "/stocks.html", "/screener"]:
                 self._serve_stocks_ui()
@@ -301,6 +331,10 @@ class JarvisRequestHandler(BaseHTTPRequestHandler):
                 from jarvis.india.india_service import INDIA_SERVICE
                 if not INDIA_SERVICE.handle_request(path, query, self):
                     self.send_error(404, f"India API {path} not found")
+            elif path.startswith("/api/intelligence/") or path.startswith("/api/backtest/"):
+                from jarvis.api.intelligence_api import INTELLIGENCE
+                if not INTELLIGENCE.handle_get(path, query, self):
+                    self.send_error(404, f"Intelligence API {path} not found")
             elif path in ("/api/telemetry_state", "/api/telemetry"):
                 snap = self.state_manager.get_state_snapshot()
                 acc_dict = snap.get("account")
@@ -652,7 +686,10 @@ class JarvisRequestHandler(BaseHTTPRequestHandler):
                 return
 
             # Protected Action Endpoints — Require Authentication + appropriate role
-            if path.startswith("/api/action/") or path.startswith("/api/historical/"):
+            if (path.startswith("/api/action/")
+                    or path.startswith("/api/historical/")
+                    or path.startswith("/api/backtest/")
+                    or path.startswith("/api/intelligence/")):
                 ok, _ = self._require_role("ADMIN", "TRADER")
                 if not ok:
                     return
@@ -669,15 +706,35 @@ class JarvisRequestHandler(BaseHTTPRequestHandler):
                 query = data.get("query", "")
                 response_text = self.copilot.ask(query)
                 self._send_json({"query": query, "response": response_text})
+            elif path == "/api/action/auto-select" or path.startswith("/api/backtest/") or path.startswith("/api/intelligence/"):
+                from jarvis.api.intelligence_api import INTELLIGENCE
+                if not INTELLIGENCE.handle_post(path, data, self):
+                    self.send_error(404, f"Intelligence API {path} not found")
             elif path == "/api/action/toggle_safe_mode":
                 is_safe = self.state_manager.toggle_safe_mode()
                 self._send_json({"safe_mode": is_safe})
             elif path == "/api/action/set_trade_style":
                 style = data.get("trade_style", "SWING").upper()
                 self.state_manager.set_trade_style(style)
-                if hasattr(self, "orchestrator") and self.orchestrator:
-                    self.orchestrator.trade_style = style
-                self._send_json({"status": "SUCCESS", "trade_style": style})
+                # Propagate to the LIVE orchestrator. This is the fix for a real
+                # bug: the old check was `hasattr(self, "orchestrator")` against
+                # an attribute that was never set, so it was always False and the
+                # selector silently changed nothing. The response now states
+                # whether the engine actually picked the change up.
+                applied = False
+                orch = self.orchestrator
+                if orch is not None:
+                    try:
+                        orch.trade_style = style
+                        applied = True
+                    except Exception as exc:
+                        logger.warning(f"Could not apply trade_style to orchestrator: {exc}")
+                self._send_json({
+                    "status": "SUCCESS",
+                    "trade_style": style,
+                    "applied_to_orchestrator": applied,
+                    "orchestrator_attached": orch is not None,
+                })
             elif path == "/api/historical/download":
                 from jarvis.historical.historical_engine import HISTORICAL_DATA_ENGINE
                 sym = data.get("symbol", "XAUUSD").upper()
@@ -917,7 +974,12 @@ class JarvisRequestHandler(BaseHTTPRequestHandler):
         else:
             self.send_error(404, f"Template {template_name} not found")
 
+    def _serve_console_ui(self):
+        """Primary desk console (the redesigned, responsive UI)."""
+        self._serve_template("console.html")
+
     def _serve_terminal_ui(self):
+        """Legacy terminal UI, retained at /classic as a rollback path."""
         self._serve_template("index.html")
 
     def _serve_stocks_ui(self):
@@ -929,22 +991,28 @@ class JarvisRequestHandler(BaseHTTPRequestHandler):
     def _serve_options_ui(self):
         self._serve_template("india_options.html")
 
-def start_server(host: str = "127.0.0.1", port: int = 8501, mt5_client: Optional[MT5Client] = None) -> ThreadingHTTPServer:
+def start_server(host: str = "127.0.0.1", port: int = 8501, mt5_client: Optional[MT5Client] = None,
+                 orchestrator: Optional[Any] = None) -> ThreadingHTTPServer:
     if host not in {"127.0.0.1", "::1", "localhost"} and os.environ.get("JARVIS_COOKIE_SECURE", "").lower() not in {"1", "true", "yes"}:
         raise ValueError("Remote binding requires HTTPS session cookies: set JARVIS_COOKIE_SECURE=1 behind TLS.")
     if mt5_client:
         JarvisRequestHandler.configure_broker(mt5_client)
+    if orchestrator is not None:
+        JarvisRequestHandler.configure_orchestrator(orchestrator)
     ThreadingHTTPServer.allow_reuse_address = True
     server = ThreadingHTTPServer((host, port), JarvisRequestHandler)
     JarvisRequestHandler.start_background_syncer()
     logger.info(f"JARVIS AI 3.0 Web Terminal Server running at http://{host}:{port}")
     return server
 
-def run_web_server(port: int = 8501, host: str = "127.0.0.1", mt5_client: Optional[MT5Client] = None):
+def run_web_server(port: int = 8501, host: str = "127.0.0.1", mt5_client: Optional[MT5Client] = None,
+                   orchestrator: Optional[Any] = None):
     if host not in {"127.0.0.1", "::1", "localhost"} and os.environ.get("JARVIS_COOKIE_SECURE", "").lower() not in {"1", "true", "yes"}:
         raise ValueError("Remote binding requires HTTPS session cookies: set JARVIS_COOKIE_SECURE=1 behind TLS.")
     if mt5_client:
         JarvisRequestHandler.configure_broker(mt5_client)
+    if orchestrator is not None:
+        JarvisRequestHandler.configure_orchestrator(orchestrator)
     ThreadingHTTPServer.allow_reuse_address = True
     server = ThreadingHTTPServer((host, port), JarvisRequestHandler)
     JarvisRequestHandler.start_background_syncer()

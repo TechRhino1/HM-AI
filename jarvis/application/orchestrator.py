@@ -6,7 +6,7 @@ import time
 import logging
 import threading
 from datetime import datetime, timezone
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Tuple
 
 from jarvis.application.state_manager import StateManager, GLOBAL_STATE
 from jarvis.application.event_bus import EventBus, GLOBAL_EVENT_BUS
@@ -266,8 +266,16 @@ class JarvisOrchestrator:
             })
         return out
 
-    def run_cycle_for_symbol(self, symbol: str, trade_style: Optional[str] = None) -> Dict[str, Any]:
-        """Executes a single end-to-end analytical and decision cycle for a target symbol and trade style."""
+    def run_cycle_for_symbol(self, symbol: str, trade_style: Optional[str] = None,
+                             dry_run: bool = False) -> Dict[str, Any]:
+        """Executes a single end-to-end analytical and decision cycle for a target symbol and trade style.
+
+        ``dry_run=True`` runs the whole analytical path — data, context, regime,
+        analysts, decision, sizing and every authorization gate — but performs no
+        side effects: no position trailing, no order submission, no risk
+        reservation, no learning record. It exists so the auto-selection endpoint
+        can ask "what would you do right now?" without doing it.
+        """
         active_trade_style = (trade_style or self.trade_style or "SWING").upper()
         # 1. Fetch Multi-Timeframe Data based on trade_style
         mtf_data = self.data_feed.fetch_multi_timeframe(symbol, trade_style=active_trade_style)
@@ -379,17 +387,20 @@ class JarvisOrchestrator:
         is_asian_blackout = (1 <= now_utc_hour < 5) and not is_crypto(symbol) and self.mode == "live"
 
         # Active Open Position Trailing & Profit Lock Management
-        for pos in active_sym_positions:
-            try:
-                manage_res = self.order_manager.manage_position(pos, context)
-                if manage_res.get("modified"):
-                    self.mt5_client.modify_position(
-                        ticket=pos.ticket,
-                        sl=manage_res["new_sl"],
-                        tp=manage_res["new_tp"]
-                    )
-            except Exception as e:
-                logger.error(f"Error trailing position #{pos.ticket}: {e}", exc_info=True)
+        # Suppressed on a dry run: trailing MODIFIES live stop levels, which is a
+        # side effect a read-only preview must never have.
+        if not dry_run:
+            for pos in active_sym_positions:
+                try:
+                    manage_res = self.order_manager.manage_position(pos, context)
+                    if manage_res.get("modified"):
+                        self.mt5_client.modify_position(
+                            ticket=pos.ticket,
+                            sl=manage_res["new_sl"],
+                            tp=manage_res["new_tp"]
+                        )
+                except Exception as e:
+                    logger.error(f"Error trailing position #{pos.ticket}: {e}", exc_info=True)
 
         if not is_exec_style_match:
             pass
@@ -437,8 +448,11 @@ class JarvisOrchestrator:
                 auth_res = {'authorized': False, 'reason': f'DRAWDOWN_GUARD: {reason}'}
 
         # 7. Execute if authorized (Atomic Reservation -> Execute -> Commit/Release)
+        # A dry run stops here. Everything above has already decided what WOULD
+        # happen and auth_res carries the reason either way, so a preview loses no
+        # information by skipping the order itself.
         exec_res = None
-        if auth_res.get("authorized") and decision.decision == "EXECUTE":
+        if not dry_run and auth_res.get("authorized") and decision.decision == "EXECUTE":
             decision.execution_authorized = True
             lots = auth_res.get("lots", 0.01)
             # Unified lot cap based on account tier (§4)
@@ -519,19 +533,45 @@ class JarvisOrchestrator:
             "decision": decision,
             "context": context,
             "authorized": auth_res.get("authorized", False),
+            "auth_reason": auth_res.get("reason", ""),
+            "dry_run": bool(dry_run),
             "execution": exec_res
         }
 
-    def _orchestration_loop_single_pass(self) -> List[Dict[str, Any]]:
-        """Executes a single multi-style radar sweep across SWING, DAY_TRADING, and SCALP with Universal Opportunity Arbitration."""
+    def scan_all_modes(
+        self,
+        *,
+        dry_run: bool = False,
+        symbols: Optional[List[str]] = None,
+        styles: Optional[List[str]] = None,
+    ) -> Tuple[Optional[Any], List[Any], List[Tuple[str, str, Dict[str, Any]]]]:
+        """Sweep every (symbol, style) pair, then arbitrate the results.
+
+        Returns ``(best_opportunity, ranked_candidates, raw_results)``.
+
+        This is the ONE place the cross-style fan-out and the arbitration happen.
+        The live loop and the read-only preview endpoint both go through it, so a
+        preview cannot drift from what the engine actually does — which was the
+        whole problem with the previous arrangement, where the arbiter was
+        reachable only from inside the loop.
+
+        ``dry_run`` is threaded into every per-symbol cycle, suppressing trailing
+        and order submission while leaving the decision and every authorization
+        gate intact.
+        """
         from concurrent.futures import ThreadPoolExecutor, as_completed
-        active_styles = ["SWING", "DAY_TRADING", "SCALP"]
-        tasks = [(sym, style) for style in active_styles for sym in self.symbols]
-        raw_results = []
+
+        active_styles = list(styles) if styles else ["SWING", "DAY_TRADING", "SCALP"]
+        active_symbols = list(symbols) if symbols else list(self.symbols)
+        tasks = [(sym, style) for style in active_styles for sym in active_symbols]
+        raw_results: List[Tuple[str, str, Dict[str, Any]]] = []
+
+        if not tasks:
+            return None, [], []
 
         with ThreadPoolExecutor(max_workers=max(4, min(32, len(tasks))), thread_name_prefix="radar_worker") as executor:
             future_to_task = {
-                executor.submit(self.run_cycle_for_symbol, sym, style): (sym, style)
+                executor.submit(self.run_cycle_for_symbol, sym, style, dry_run): (sym, style)
                 for sym, style in tasks
             }
             for fut in as_completed(future_to_task):
@@ -555,6 +595,11 @@ class JarvisOrchestrator:
 
         # 2. Rank candidates by Utility score & select best actionable opportunity across styles
         best_opportunity, ranked_candidates = self.opportunity_arbiter.rank_and_select_best(candidates)
+        return best_opportunity, ranked_candidates, raw_results
+
+    def _orchestration_loop_single_pass(self, dry_run: bool = False) -> List[Dict[str, Any]]:
+        """Executes a single multi-style radar sweep across SWING, DAY_TRADING, and SCALP with Universal Opportunity Arbitration."""
+        best_opportunity, ranked_candidates, raw_results = self.scan_all_modes(dry_run=dry_run)
 
         if best_opportunity:
             logger.info(
@@ -583,7 +628,10 @@ class JarvisOrchestrator:
                 )
             )
 
-            if is_exec_ready:
+            # Execution is the one thing a dry run must not do. The ranking and
+            # the readiness verdict above are computed either way, so the caller
+            # still learns what WOULD have been traded.
+            if is_exec_ready and not dry_run:
                 decision = best_opportunity.decision_obj
                 sym = best_opportunity.symbol
                 canonical_sym = sym.upper().replace("/", "").replace("_", "").replace("-", "")
