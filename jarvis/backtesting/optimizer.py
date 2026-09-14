@@ -197,23 +197,69 @@ class SeriesBundle:
     def n_bars(self) -> int:
         return int(len(self.df))
 
-    def min_score_for(self, quantile: float) -> float:
+    def scores(self, regimes: Optional[Iterable[str]] = None) -> pd.Series:
+        """The ``score`` column, optionally restricted to a set of regime labels.
+
+        ``regimes=None`` means "no filter" (the pooled distribution). An empty or
+        unmatched filter returns an empty series rather than falling back to the
+        pooled column: silently widening back to everything would turn a regime
+        filter that matched nothing into an unfiltered run, which is the one
+        failure mode that would look like success.
+        """
+        if self.candidates is None or len(self.candidates) == 0:
+            return pd.Series(dtype=float)
+        col = self.candidates["score"]
+        if regimes is None:
+            return col
+        wanted = {str(r) for r in regimes}
+        if "regime" not in self.candidates.columns:
+            return col.iloc[0:0]
+        mask = self.candidates["regime"].astype(str).isin(wanted)
+        return col[mask]
+
+    def min_score_for(
+        self, quantile: float, regimes: Optional[Iterable[str]] = None
+    ) -> float:
         """The candidate-score threshold at ``quantile`` of THIS symbol's scores.
 
         Per-symbol rather than pooled on purpose: a "97th percentile signal" is a
         statement about a symbol's own score distribution, and the distributions
         differ enough between FX, gold and crypto that a pooled threshold would
         mean very different things on each.
+
+        ``regimes`` narrows the distribution to those regimes first, and that is
+        not cosmetic. The scores a symbol produces in COMPRESSION are
+        systematically different from the ones it produces in TREND_BULL, so the
+        90th percentile of the pooled distribution can sit near the median of the
+        compression subset. Applying a pooled threshold inside a regime filter
+        would then accept most of that regime's setups (or reject nearly all of
+        them) while still reporting a "90th percentile" run.
         """
         if self.candidates is None or len(self.candidates) == 0:
             return 0.0
         q = float(max(0.0, min(1.0, quantile)))
         if q <= 0.0:
             return 0.0
+        scores = self.scores(regimes)
+        if len(scores) == 0:
+            return 0.0
         try:
-            return float(self.candidates["score"].quantile(q))
+            return float(scores.quantile(q))
         except Exception:
             return 0.0
+
+    def regime_counts(self) -> Dict[str, int]:
+        """Candidate count per regime label, descending. Empty when unlabelled.
+
+        Used to decide which regimes carry enough mass to be searched on their
+        own, and to say so explicitly when one does not.
+        """
+        if self.candidates is None or len(self.candidates) == 0:
+            return {}
+        if "regime" not in self.candidates.columns:
+            return {}
+        vc = self.candidates["regime"].astype(str).value_counts()
+        return {str(k): int(v) for k, v in vc.items()}
 
     def summary(self) -> Dict[str, Any]:
         return {
@@ -529,10 +575,26 @@ class BacktestOptimizer:
         self._sim_cache: Dict[str, List[TradeOutcome]] = {}
         self._eval_count = 0
         self._cache_hits = 0
+        # ``max_evaluations`` is a budget per SEARCH, not per optimiser. The
+        # regime-conditioned driver runs one descent per market condition, and
+        # with an absolute counter the first descent would consume the budget and
+        # every later regime would bail out on its first line search — silently
+        # reporting "no feasible geometry" for regimes that were never searched.
+        # Zero here keeps the single-search behaviour bit-identical.
+        self._budget_start = 0
 
     # ── reporting ───────────────────────────────────────────────────────────
     def _say(self, msg: str) -> None:
         self._progress(msg)
+
+    # ── search budget ───────────────────────────────────────────────────────
+    def _budget_spent(self) -> int:
+        """Evaluations consumed by the CURRENT search (see ``_budget_start``)."""
+        return self._eval_count - self._budget_start
+
+    def _reset_budget(self) -> None:
+        """Start a fresh ``max_evaluations`` window for the next search."""
+        self._budget_start = self._eval_count
 
     # ── simulation (cached) ─────────────────────────────────────────────────
     def _outcomes(self, bundle: SeriesBundle, geom: Geometry) -> List[TradeOutcome]:
@@ -564,20 +626,33 @@ class BacktestOptimizer:
         entry_lo: Optional[int],
         entry_hi: Optional[int],
         quantile: float,
+        regimes: Optional[Iterable[str]] = None,
     ) -> List[TradeOutcome]:
         """Simulate under ``geom`` then apply selectivity + one-position-at-a-time.
 
         The selectivity threshold is derived from ``quantile`` on this symbol's
         own score distribution, so the geometry's own ``min_score`` field is
         overwritten here — it is a carrier for the searched value, not an input.
+
+        ``regimes`` is passed to BOTH the quantile lookup and the selection, so a
+        regime-conditional run means "the top ``quantile`` of *this regime's*
+        setups". Computing the threshold on the pooled scores and then filtering
+        by regime would silently rescale the selectivity, which is the subtle way
+        a regime-conditional search can end up describing a different system than
+        the one it claims to.
+
+        Regime filtering is free: ``_outcomes`` is cached on the geometry alone,
+        so re-scoring one geometry under every regime costs one simulation plus
+        cheap filtering passes over the same outcome list.
         """
         outcomes = self._outcomes(bundle, geom)
-        min_score = bundle.min_score_for(quantile)
+        min_score = bundle.min_score_for(quantile, regimes)
         return select_sequential(
             outcomes,
             min_score=min_score,
             entry_lo=entry_lo,
             entry_hi=entry_hi,
+            regimes=set(regimes) if regimes is not None else None,
         )
 
     # ── scoring ─────────────────────────────────────────────────────────────
@@ -590,12 +665,17 @@ class BacktestOptimizer:
         entry_hi: Optional[int] = None,
         quantile: Optional[float] = None,
         count: bool = True,
+        regimes: Optional[Iterable[str]] = None,
     ) -> Dict[str, Any]:
         """Pooled metrics for ``geom`` across every bundle in the window.
 
         Each bundle contributes its own selected trades; the pool is then ordered
         by entry time so the drawdown figure describes a portfolio equity curve
         rather than an arbitrary concatenation order.
+
+        ``regimes`` restricts the pool to those market conditions, which is how
+        the same cached simulation answers "what does this geometry do *in a
+        trend*" as well as "what does it do overall".
         """
         if count:
             self._eval_count += 1
@@ -604,7 +684,10 @@ class BacktestOptimizer:
         pooled: List[TradeOutcome] = []
         for b in bundles:
             pooled.extend(
-                self._selected(b, geom, entry_lo=entry_lo, entry_hi=entry_hi, quantile=q)
+                self._selected(
+                    b, geom, entry_lo=entry_lo, entry_hi=entry_hi,
+                    quantile=q, regimes=regimes,
+                )
             )
 
         if not pooled:
@@ -620,8 +703,11 @@ class BacktestOptimizer:
         *,
         entry_lo: Optional[int],
         entry_hi: Optional[int],
+        regimes: Optional[Iterable[str]] = None,
     ) -> GeometryEvaluation:
-        metrics = self.evaluate(geom, bundles, entry_lo=entry_lo, entry_hi=entry_hi)
+        metrics = self.evaluate(
+            geom, bundles, entry_lo=entry_lo, entry_hi=entry_hi, regimes=regimes
+        )
         return GeometryEvaluation(
             geometry=geom,
             metrics=metrics,
@@ -637,10 +723,18 @@ class BacktestOptimizer:
         *,
         entry_lo: Optional[int],
         entry_hi: Optional[int],
+        regimes: Optional[Iterable[str]] = None,
     ) -> GeometryEvaluation:
-        """Greedy line search over each dimension in turn, repeated ``passes`` times."""
+        """Greedy line search over each dimension in turn, repeated ``passes`` times.
+
+        ``regimes`` restricts the objective to those market conditions, so the
+        same descent answers both "the best geometry overall" and "the best
+        geometry when the market is in COMPRESSION".
+        """
         current = self.space.seed()
-        best = self._score(current, bundles, entry_lo=entry_lo, entry_hi=entry_hi)
+        best = self._score(
+            current, bundles, entry_lo=entry_lo, entry_hi=entry_hi, regimes=regimes
+        )
         self._say(
             f"    seed: {_geom_str(best.geometry)} -> "
             f"exp={best.metrics.get('expectancy_r', 0):+.4f}R "
@@ -650,19 +744,25 @@ class BacktestOptimizer:
         for p in range(self.spec.passes):
             improved = False
             for dim in _DESCENT_ORDER:
-                if self._eval_count >= self.spec.max_evaluations:
-                    self._say(f"    evaluation budget reached ({self._eval_count})")
+                if self._budget_spent() >= self.spec.max_evaluations:
+                    self._say(
+                        f"    evaluation budget reached "
+                        f"({self._budget_spent()}/{self.spec.max_evaluations})"
+                    )
                     return best
 
                 for value in self.space.options(dim):
-                    if self._eval_count >= self.spec.max_evaluations:
+                    if self._budget_spent() >= self.spec.max_evaluations:
                         break
                     # Skip a value that reproduces the current point.
                     if _same_value(getattr(best.geometry, dim, None), value):
                         continue
 
                     candidate = self.space.with_value(best.geometry, dim, value)
-                    ev = self._score(candidate, bundles, entry_lo=entry_lo, entry_hi=entry_hi)
+                    ev = self._score(
+                        candidate, bundles,
+                        entry_lo=entry_lo, entry_hi=entry_hi, regimes=regimes,
+                    )
                     if ev.score > best.score:
                         best = ev
                         improved = True
@@ -740,6 +840,7 @@ class BacktestOptimizer:
         entry_lo: int,
         entry_hi: int,
         folds: int,
+        regimes: Optional[Iterable[str]] = None,
     ) -> List[Dict[str, Any]]:
         """Contiguous folds over the validation window, for a stability read."""
         folds = max(1, int(folds))
@@ -749,7 +850,9 @@ class BacktestOptimizer:
         for i in range(folds):
             lo = entry_lo + i * width
             hi = entry_hi if i == folds - 1 else min(entry_hi, lo + width)
-            m = self.evaluate(geom, bundles, entry_lo=lo, entry_hi=hi, count=False)
+            m = self.evaluate(
+                geom, bundles, entry_lo=lo, entry_hi=hi, count=False, regimes=regimes
+            )
             out.append({
                 "fold": i + 1,
                 "entry_lo": lo,
@@ -797,6 +900,13 @@ class BacktestOptimizer:
                 self._say(f"  {style}: no series available — skipped")
                 report["modes"].append({"style": style, "error": "no series"})
                 continue
+
+            # Each mode gets its own ``max_evaluations`` window. With a single
+            # absolute counter the first mode consumes the budget and every later
+            # mode returns the unsearched seed geometry while still reporting a
+            # full result — a silent failure, and one that a low budget (the live
+            # verifier passes 12) triggers on every run.
+            self._reset_budget()
 
             for b in bundles:
                 report["series"].append(b.summary())
