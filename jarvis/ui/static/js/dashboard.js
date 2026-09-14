@@ -33,6 +33,7 @@
   var POLL = {
     telemetry: 3000,
     jobs: 4000,
+    pending: 15000,
     chart: 20000,
     analytics: 20000
   };
@@ -68,7 +69,16 @@
     jobs: [],
     activeJob: null,
     selection: null,
-    chartSeries: null,
+    radar: [],            // orchestrator's ranked candidates (telemetry)
+    radarFilter: 'ALL',   // style filter for the scanner radar
+    pending: [],          // working orders from /api/pending_orders
+    chart: null,          // {host, chart, candles, volume, lines, tradeLines}
+    chartCandles: [],     // bars currently drawn — source for level maths
+    chartLevels: null,    // {r1,r2,s1,s2}; null when no swing pivot exists
+    chartSymbol: null,    // symbol the drawn series belongs to
+    chartTimeframe: null, // timeframe the drawn series belongs to
+    chartPainted: false,  // false until the first setData() has run
+    showLevels: true,     // support/resistance + trade overlays on the chart
     lastValues: {}        // for flash-on-change
   };
 
@@ -117,6 +127,39 @@
       minimumFractionDigits: digits === undefined ? 2 : digits,
       maximumFractionDigits: digits === undefined ? 2 : digits
     });
+  }
+
+  /* Price precision is a property of the instrument, not of the number's
+     magnitude. A JPY pair quotes to 3 decimals and gold to 2 whatever the
+     value; inferring from size alone renders USDJPY as 151.23400 and disagrees
+     with the backend, which resolves precision per symbol. */
+  var PRICE_DIGITS = [
+    [/^(XAU|GOLD)/, 2],
+    [/^(XAG|SILVER)/, 2],
+    [/^(BTC|ETH)/, 2],
+    [/(NAS100|US30|US500|US100|GER40|UK40|UK100|JP225|HK50|SPX|DAX)/, 1],
+    [/JPY$/, 3]
+  ];
+
+  function priceDigits(symbol, value) {
+    var s = String(symbol || '').toUpperCase();
+    for (var i = 0; i < PRICE_DIGITS.length; i++) {
+      if (PRICE_DIGITS[i][0].test(s)) return PRICE_DIGITS[i][1];
+    }
+    var v = Math.abs(Number(value));
+    if (!isFinite(v) || v === 0) return 5;
+    if (v >= 100) return 2;
+    if (v >= 10) return 3;
+    return 5;
+  }
+
+  /* A price of 0 means "not set" for a stop or target, so it renders as a dash
+     rather than as a real level at zero. */
+  function formatPrice(value, symbol) {
+    if (value === null || value === undefined || value === '') return '—';
+    var v = Number(value);
+    if (!isFinite(v) || v === 0) return '—';
+    return num(v, priceDigits(symbol, v));
   }
 
   function pct(value, digits) {
@@ -259,7 +302,13 @@
 
     if (view === 'analytics') { loadAnalytics(); }
     if (view === 'backtest') { loadBacktestMeta(); loadJobs(); }
-    if (view === 'trade') { loadChart(); }
+    if (view === 'trade') {
+      loadChart();
+      // The chart container was display:none while another view was active, so
+      // its canvas kept whatever width it had when it was hidden. Resize once
+      // the layout has flushed rather than measuring a zero-width element.
+      if (typeof requestAnimationFrame === 'function') requestAnimationFrame(resizeChart);
+    }
   }
 
   function setPane(pane) {
@@ -269,7 +318,10 @@
     Array.prototype.forEach.call(document.querySelectorAll('[data-pane-btn]'), function (btn) {
       btn.setAttribute('aria-selected', String(btn.getAttribute('data-pane-btn') === pane));
     });
-    if (pane === 'chart') loadChart();
+    if (pane === 'chart') {
+      loadChart();
+      if (typeof requestAnimationFrame === 'function') requestAnimationFrame(resizeChart);
+    }
   }
 
   /* ── Account strip ────────────────────────────────────────────────────── */
@@ -343,7 +395,7 @@
         '<td><span class="tt-symbol">' + esc(sym) + '</span></td>' +
         '<td><span class="tt-dir ' + dirCls + '">' + esc(bias) + '</span></td>' +
         '<td class="tt-num">' + (isFinite(conf) ? num(conf * 100, 0) + '%' : '—') + '</td>' +
-        '<td class="tt-num">' + (isFinite(Number(d.entry_price)) ? num(d.entry_price, 5) : '—') + '</td>' +
+        '<td class="tt-num">' + formatPrice(d.entry_price, sym) + '</td>' +
         '<td class="tt-num">' + (isFinite(rr) ? num(rr, 2) + 'R' : '—') + '</td>' +
         '<td><span class="tt-chip ' + sessionChip(ms.status) + '">' + esc(ms.status || '—') + '</span></td>';
 
@@ -453,6 +505,134 @@
     });
   }
 
+  /* ── Scanner radar ────────────────────────────────────────────────────── */
+  /* Rows come from telemetry's radar_opportunities — the orchestrator's ranked
+     candidate list. A candidate the engine considers actionable is marked, so
+     the list does not imply that everything in it is tradeable. */
+  function renderRadar() {
+    var host = $('radar-body');
+    if (!host) return;
+
+    var all = state.radar || [];
+    var filter = String(state.radarFilter || 'ALL').toUpperCase();
+    var rows = all.filter(function (o) {
+      if (filter === 'ALL') return true;
+      var style = String(o.trade_style || '').toUpperCase();
+      if (filter === 'DAY_TRADING') return style === 'DAY_TRADING' || style === 'DAY' || style === 'INTRADAY';
+      return style === filter;
+    });
+
+    setText($('radar-count'), String(rows.length));
+
+    if (!rows.length) {
+      setState(host, 'empty',
+        all.length ? 'No setups in this style' : 'No scan published',
+        all.length
+          ? all.length + ' candidate(s) scanned, none matching the filter.'
+          : 'The radar has not published a scan yet.');
+      return;
+    }
+
+    host.removeAttribute('data-state');
+    host.innerHTML = '';
+    var frag = document.createDocumentFragment();
+
+    rows.slice(0, 20).forEach(function (o) {
+      var sym = o.symbol || '';
+      var actionable = o.is_actionable === true;
+      var label = String(o.status_label || o.action || o.decision || '—').toUpperCase();
+      var win = Number(o.win_prob !== undefined && o.win_prob !== null ? o.win_prob : o.score);
+      var ev = Number(o.ev);
+
+      var card = document.createElement('div');
+      card.className = 'tt-radar' + (actionable ? ' tt-radar--live' : '');
+      card.setAttribute('data-clickable', 'true');
+      card.setAttribute('tabindex', '0');
+      card.innerHTML =
+        '<div class="tt-radar__top">' +
+          '<span class="tt-symbol">' + esc(sym) + '</span>' +
+          '<span class="tt-radar__action' + (actionable ? ' is-live' : '') + '">' + esc(label) + '</span>' +
+          '<span class="tt-rail__spacer"></span>' +
+          '<span class="tt-chip tt-chip--muted">' + esc(o.trade_style || '—') + '</span>' +
+        '</div>' +
+        '<div class="tt-radar__nums">' +
+          '<span>Entry <b>' + formatPrice(o.entry_price, sym) + '</b></span>' +
+          '<span>SL <b>' + formatPrice(o.stop_loss, sym) + '</b></span>' +
+          '<span>TP <b>' + formatPrice(o.take_profit, sym) + '</b></span>' +
+          '<span>R:R <b>' + num(o.risk_reward_ratio, 2) + '</b></span>' +
+          '<span>Win <b>' + (isFinite(win) ? num(win, 0) + '%' : '—') + '</b></span>' +
+          '<span>EV <b class="' + signClass(ev) + '">' + (isFinite(ev) && ev > 0 ? '+' : '') + num(ev, 2) + 'R</b></span>' +
+        '</div>' +
+        '<div class="tt-radar__meta">' +
+          esc(o.regime || '—') + ' · ' + esc(o.strategy || '—') +
+          (o.confluence_tier ? ' · ' + esc(o.confluence_tier) : '') +
+          (o.setup_grade ? ' · ' + esc(o.setup_grade) : '') +
+        '</div>';
+
+      card.addEventListener('click', function () { selectSymbol(sym); });
+      card.addEventListener('keydown', function (ev) {
+        if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); selectSymbol(sym); }
+      });
+      frag.appendChild(card);
+    });
+
+    host.appendChild(frag);
+  }
+
+  /* ── Pending orders ───────────────────────────────────────────────────── */
+  /* MT5 reports the order type as a numeric enum; rendering "2" in a column
+     headed Type tells the user nothing. */
+  var PENDING_TYPES = {
+    0: 'BUY LIMIT', 1: 'SELL LIMIT', 2: 'BUY STOP',
+    3: 'SELL STOP', 4: 'BUY STOP LIMIT', 5: 'SELL STOP LIMIT'
+  };
+
+  function pendingTypeName(t) {
+    var s = String(t === null || t === undefined ? '' : t);
+    if (/^\d+$/.test(s) && PENDING_TYPES[Number(s)]) return PENDING_TYPES[Number(s)];
+    return s || '—';
+  }
+
+  function loadPendingOrders() {
+    var body = $('pending-body');
+    apiGet('/api/pending_orders', TIMEOUT.normal).then(function (res) {
+      if (!res.ok) {
+        setText($('pending-count'), '0');
+        setState(body, 'stale', 'Pending orders unavailable',
+          String(res.error || ('HTTP ' + res.status)).slice(0, 120));
+        return;
+      }
+      // The route returns a bare array; tolerate a wrapped one as well.
+      var list = Array.isArray(res.data) ? res.data : ((res.data && res.data.orders) || []);
+      state.pending = list;
+      renderPendingOrders();
+    });
+  }
+
+  function renderPendingOrders() {
+    var body = $('pending-body');
+    var list = state.pending || [];
+    setText($('pending-count'), String(list.length));
+
+    if (!list.length) {
+      setState(body, 'empty', 'No working orders', null);
+      return;
+    }
+
+    body.removeAttribute('data-state');
+    body.innerHTML = list.map(function (o) {
+      var sym = o.symbol || '';
+      return '<tr>' +
+        '<td><span class="tt-symbol">' + esc(sym) + '</span></td>' +
+        '<td class="tt-muted">' + esc(pendingTypeName(o.type)) + '</td>' +
+        '<td class="tt-num">' + num(o.volume, 2) + '</td>' +
+        '<td class="tt-num">' + formatPrice(o.price, sym) + '</td>' +
+        '<td class="tt-num">' + (Number(o.sl) > 0 ? formatPrice(o.sl, sym) : '—') + '</td>' +
+        '<td class="tt-num">' + (Number(o.tp) > 0 ? formatPrice(o.tp, sym) : '—') + '</td>' +
+        '</tr>';
+    }).join('');
+  }
+
   /* ── Positions ────────────────────────────────────────────────────────── */
   function renderPositions() {
     var body = $('pos-body');
@@ -462,6 +642,9 @@
     if (!positions.length) {
       setState(body, 'empty', 'No open positions', null);
       setText($('pos-total'), '—');
+      // The chart's trade overlays belong to this list, so a flat book must
+      // clear them rather than leaving stale entry and stop lines on screen.
+      refreshChartDecorations();
       return;
     }
 
@@ -480,8 +663,8 @@
         '<td><span class="tt-symbol">' + esc(p.symbol) + '</span></td>' +
         '<td><span class="tt-dir ' + dirCls + '">' + esc(side || '—') + '</span></td>' +
         '<td class="tt-num">' + num(p.volume, 2) + '</td>' +
-        '<td class="tt-num">' + num(p.price_open, 5) + '</td>' +
-        '<td class="tt-num">' + num(p.price_current, 5) + '</td>' +
+        '<td class="tt-num">' + formatPrice(p.open_price, p.symbol) + '</td>' +
+        '<td class="tt-num">' + formatPrice(p.current_price, p.symbol) + '</td>' +
         '<td class="tt-num ' + signClass(profit) + '">' + (profit > 0 ? '+' : '') + num(profit, 2) + '</td>';
       frag.appendChild(tr);
     });
@@ -490,6 +673,10 @@
     var tot = $('pos-total');
     setText(tot, (total > 0 ? '+' : '') + num(total, 2));
     if (tot) tot.className = 'tt-num ' + signClass(total);
+
+    // Overlays follow the position list, not only the candle poll, so a fill or
+    // a close redraws immediately instead of at the next chart refresh.
+    refreshChartDecorations();
   }
 
   /* ── Reasoning ("why this trade") ─────────────────────────────────────── */
@@ -592,20 +779,474 @@
     }
   }
 
-  /* ── Chart ────────────────────────────────────────────────────────────── */
+  /* ── Chart ────────────────────────────────────────────────────────────────
+     One lightweight-charts instance per session, rebuilt only when the
+     container it was built into goes away.
+
+     Four rules keep it honest and usable:
+
+     1. LIVE TICKS UPDATE, THEY DO NOT RELOAD. setData() resets the viewport, so
+        a trader who scrolled back to a level is thrown forward on every poll.
+        The first paint uses setData(); later ticks call update() on the forming
+        bar, which leaves scroll and zoom exactly where the user put them.
+
+     2. LEVELS ARE DERIVED, NEVER INVENTED. Support and resistance come from
+        swing pivots in the candles actually on screen. When the series is too
+        short to contain a pivot on a side, that level is simply not drawn and
+        the legend says so — a synthetic level reads as a real price and someone
+        will trade against it.
+
+     3. OVERLAYS ARE THE TRADE. Entry, stop and target are drawn as price lines
+        whose axis labels carry the side, size and price, so the geometry of an
+        open position is legible on the chart itself rather than only in the
+        table beneath it.
+
+     4. THE CHART IS THE SAME DATA AS THE TABLE. Candle precision is resolved
+        per symbol by the same rule the backend uses, so a price read off the
+        axis and the same price read off a row agree digit for digit.
+     ────────────────────────────────────────────────────────────────────────── */
+
+  var CHART_COLORS = {
+    up: '#00f59b',
+    down: '#ff3b5c',
+    resistance1: '#ff2a5f',
+    resistance2: '#f43f5e',
+    support1: '#00f59b',
+    support2: '#10b981',
+    entryBuy: '#00d4ff',
+    entrySell: '#c084fc',
+    stopAtRisk: '#ff0055',
+    stopLocked: '#fbbf24',
+    target: '#00ff88'
+  };
+
+  /* Build the chart once. Returns null when the library or the container is
+     missing, so every caller can bail rather than throw into a poll loop. */
+  function ensureChart() {
+    var host = $('chart');
+    if (!host) return null;
+    if (typeof LightweightCharts === 'undefined') return null;
+    if (state.chart && state.chart.host === host && host.contains(state.chart.chart.chartElement())) {
+      return state.chart;
+    }
+
+    host.innerHTML = '';
+    var chart = LightweightCharts.createChart(host, {
+      width: host.clientWidth || 600,
+      height: host.clientHeight || 320,
+      layout: {
+        background: { color: 'transparent' },
+        textColor: '#8494ab',
+        fontSize: 11,
+        fontFamily: "'JetBrains Mono', 'Roboto Mono', Consolas, monospace"
+      },
+      grid: {
+        vertLines: { color: 'rgba(148,163,184,0.06)' },
+        horzLines: { color: 'rgba(148,163,184,0.06)' }
+      },
+      rightPriceScale: {
+        borderColor: 'rgba(148,163,184,0.15)',
+        scaleMargins: { top: 0.08, bottom: 0.24 }
+      },
+      timeScale: {
+        borderColor: 'rgba(148,163,184,0.15)',
+        timeVisible: true,
+        secondsVisible: false,
+        rightOffset: 4
+      },
+      crosshair: {
+        mode: 1,
+        vertLine: { color: 'rgba(56,189,248,0.5)', width: 1, style: 3, labelBackgroundColor: '#1a2438' },
+        horzLine: { color: 'rgba(56,189,248,0.5)', width: 1, style: 3, labelBackgroundColor: '#1a2438' }
+      },
+      localization: { priceFormatter: function (p) { return p.toFixed(priceDigits(state.chartSymbol || state.symbol, p)); } }
+    });
+
+    // v4 exposes addCandlestickSeries(); v5 replaced it with addSeries(type).
+    // Support both so a vendored-library bump does not silently blank the chart.
+    var candleOpts = {
+      upColor: CHART_COLORS.up, downColor: CHART_COLORS.down,
+      borderUpColor: CHART_COLORS.up, borderDownColor: CHART_COLORS.down,
+      wickUpColor: CHART_COLORS.up, wickDownColor: CHART_COLORS.down
+    };
+    var candleSeries = (typeof chart.addCandlestickSeries === 'function')
+      ? chart.addCandlestickSeries(candleOpts)
+      : chart.addSeries(LightweightCharts.CandlestickSeries, candleOpts);
+
+    // Volume shares the price pane on its own overlay scale pinned to the
+    // bottom fifth. lightweight-charts v4 has no pane API, and a second chart
+    // instance would need its own time axis kept in sync by hand.
+    var volumeSeries = null;
+    if (typeof chart.addHistogramSeries === 'function') {
+      volumeSeries = chart.addHistogramSeries({
+        priceFormat: { type: 'volume' },
+        priceScaleId: 'volume',
+        lastValueVisible: false,
+        priceLineVisible: false
+      });
+      chart.priceScale('volume').applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
+    }
+
+    state.chart = {
+      host: host,
+      chart: chart,
+      candles: candleSeries,
+      volume: volumeSeries,
+      lines: [],
+      tradeLines: []
+    };
+
+    // ResizeObserver is what the layout actually drives: the window listener
+    // alone misses pane switches and view changes, which resize without a
+    // window event and leave the canvas at its old width.
+    if (typeof ResizeObserver !== 'undefined') {
+      var ro = new ResizeObserver(function () {
+        resizeChart();
+      });
+      ro.observe(host);
+    }
+
+    subscribeCrosshair(chart, candleSeries);
+    return state.chart;
+  }
+
+  function resizeChart() {
+    if (!state.chart) return;
+    var host = state.chart.host;
+    var w = host.clientWidth || 600;
+    var h = host.clientHeight || 320;
+    state.chart.chart.applyOptions({ width: w, height: h });
+  }
+
+  /* Crosshair readout. Beyond OHLC this names the level the bar is testing,
+     which is the reason the levels are drawn at all. */
+  function subscribeCrosshair(chart, candleSeries) {
+    chart.subscribeCrosshairMove(function (param) {
+      var tip = $('chart-tooltip');
+      if (!tip) return;
+      if (!param || !param.time || !param.seriesData || !param.point) {
+        tip.hidden = true;
+        return;
+      }
+      var bar = param.seriesData.get(candleSeries);
+      if (!bar) { tip.hidden = true; return; }
+
+      var sym = state.chartSymbol || state.symbol || '';
+      var digits = priceDigits(sym, bar.close);
+      var lv = state.chartLevels;
+
+      var tag = 'Mid-range';
+      var tagCls = ' tt-tip__tag--flat';
+      if (lv) {
+        if (lv.r1 !== null && bar.high >= lv.r1) { tag = 'Testing R1 resistance'; tagCls = ' tt-tip__tag--down'; }
+        else if (lv.r2 !== null && bar.high >= lv.r2) { tag = 'Testing R2 resistance'; tagCls = ' tt-tip__tag--down'; }
+        else if (lv.s1 !== null && bar.low <= lv.s1) { tag = 'Testing S1 support'; tagCls = ' tt-tip__tag--up'; }
+        else if (lv.s2 !== null && bar.low <= lv.s2) { tag = 'Testing S2 support'; tagCls = ' tt-tip__tag--up'; }
+      }
+
+      var when = typeof param.time === 'number'
+        ? new Date(param.time * 1000).toISOString().replace('T', ' ').slice(0, 16)
+        : String(param.time);
+
+      tip.innerHTML =
+        '<div class="tt-tip__head"><span>' + esc(sym) + ' · ' + esc(state.timeframe) + '</span><span>' + esc(when) + '</span></div>' +
+        '<div class="tt-tip__row"><span>Open</span><b>' + num(bar.open, digits) + '</b></div>' +
+        '<div class="tt-tip__row"><span>High</span><b>' + num(bar.high, digits) + '</b></div>' +
+        '<div class="tt-tip__row"><span>Low</span><b>' + num(bar.low, digits) + '</b></div>' +
+        '<div class="tt-tip__row"><span>Close</span><b class="' + (bar.close >= bar.open ? 'tt-up' : 'tt-down') + '">' + num(bar.close, digits) + '</b></div>' +
+        '<div class="tt-tip__tag' + tagCls + '">' + esc(tag) + '</div>';
+
+      tip.hidden = false;
+      // Flip the card to the left of the cursor when it would overflow the
+      // panel, and clamp vertically so it never leaves the chart area.
+      var host = state.chart ? state.chart.host : null;
+      var hw = host ? host.clientWidth : 600;
+      var x = param.point.x;
+      var left = x > hw - 210 ? Math.max(4, x - 206) : x + 14;
+      tip.style.left = left + 'px';
+      tip.style.top = Math.max(4, param.point.y - 48) + 'px';
+    });
+  }
+
+  /* Swing-pivot support and resistance.
+
+     A pivot high is a bar whose high exceeds the two bars either side of it; a
+     pivot low is the mirror. The two nearest pivots above the last close become
+     R1 and R2, the two nearest below become S1 and S2 — the same definition the
+     terminal used before the redesign, so a level a trader remembers still
+     lands in the same place.
+
+     Returns null rather than a synthesised level when the series is too short
+     or has no pivot on either side. */
+  function computeLevels(candles) {
+    if (!candles || candles.length < 12) return null;
+
+    var highs = [];
+    var lows = [];
+    for (var i = 2; i < candles.length - 2; i++) {
+      var c = candles[i];
+      if (c.high > candles[i - 1].high && c.high > candles[i - 2].high &&
+          c.high > candles[i + 1].high && c.high > candles[i + 2].high) highs.push(c.high);
+      if (c.low < candles[i - 1].low && c.low < candles[i - 2].low &&
+          c.low < candles[i + 1].low && c.low < candles[i + 2].low) lows.push(c.low);
+    }
+
+    var last = candles[candles.length - 1].close;
+    var above = highs.filter(function (h) { return h > last; }).sort(function (a, b) { return a - b; });
+    var below = lows.filter(function (l) { return l < last; }).sort(function (a, b) { return b - a; });
+    if (!above.length && !below.length) return null;
+
+    return {
+      r1: above.length > 0 ? above[0] : null,
+      r2: above.length > 1 ? above[1] : null,
+      s1: below.length > 0 ? below[0] : null,
+      s2: below.length > 1 ? below[1] : null
+    };
+  }
+
+  /* Remove one bucket of price lines. removePriceLine throws if the line was
+     already detached (which happens when the series is reset), so each call is
+     individually guarded rather than aborting the sweep. */
+  function clearLines(bucket) {
+    if (!state.chart || !state.chart[bucket]) return;
+    var series = state.chart.candles;
+    state.chart[bucket].forEach(function (line) {
+      try { series.removePriceLine(line); } catch (e) { /* already detached */ }
+    });
+    state.chart[bucket] = [];
+  }
+
+  function drawLevels(sym, digits) {
+    if (!state.chart) return;
+    clearLines('lines');
+
+    var legend = $('chart-legend');
+    var lv = state.chartLevels;
+
+    if (!lv || !state.showLevels) {
+      if (legend) legend.innerHTML = '';
+      return;
+    }
+
+    var defs = [
+      ['r1', CHART_COLORS.resistance1, 2.5, 'Solid', 'R1'],
+      ['r2', CHART_COLORS.resistance2, 1.5, 'Dashed', 'R2'],
+      ['s1', CHART_COLORS.support1, 2.5, 'Solid', 'S1'],
+      ['s2', CHART_COLORS.support2, 1.5, 'Dashed', 'S2']
+    ];
+
+    var chips = [];
+    defs.forEach(function (d) {
+      var price = lv[d[0]];
+      if (price === null || price === undefined) return;
+      state.chart.lines.push(state.chart.candles.createPriceLine({
+        price: price,
+        color: d[1],
+        lineWidth: d[2],
+        lineStyle: d[3] === 'Solid' ? LightweightCharts.LineStyle.Solid : LightweightCharts.LineStyle.Dashed,
+        axisLabelVisible: true,
+        title: d[4] + ': ' + num(price, digits)
+      }));
+      chips.push('<span class="tt-level tt-level--' + d[4].charAt(0).toLowerCase() + '">' +
+                 '<i aria-hidden="true"></i>' + d[4] + ' <b>' + num(price, digits) + '</b></span>');
+    });
+
+    if (legend) {
+      legend.innerHTML = chips.length
+        ? chips.join('')
+        : '<span class="tt-hint">No swing pivot in range</span>';
+    }
+  }
+
+  /* Entry, stop and target for the open positions on this symbol.
+
+     The stop is drawn amber and labelled "locked" once it has moved past entry,
+     because a stop in profit is a different fact from a stop at risk and the
+     colour is the fastest way to tell them apart. */
+  function drawTradeOverlays(sym, digits) {
+    if (!state.chart) return;
+    clearLines('tradeLines');
+
+    var hud = $('chart-hud');
+    var mine = (state.positions || []).filter(function (p) {
+      return String(p.symbol || '').toUpperCase() === String(sym || '').toUpperCase();
+    });
+
+    if (!state.showLevels || !mine.length) {
+      if (hud) hud.hidden = true;
+      return;
+    }
+
+    mine.forEach(function (pos) {
+      var side = String(pos.type || pos.side || '').toUpperCase();
+      var isBuy = side === 'BUY' || side === 'LONG';
+      var entry = Number(pos.open_price || 0);
+      var sl = Number(pos.sl || 0);
+      var tp = Number(pos.tp || 0);
+      var lots = Number(pos.volume || 0);
+      var lotText = isFinite(lots) ? lots.toFixed(2) : '—';
+      var series = state.chart.candles;
+
+      if (entry > 0) {
+        state.chart.tradeLines.push(series.createPriceLine({
+          price: entry,
+          color: isBuy ? CHART_COLORS.entryBuy : CHART_COLORS.entrySell,
+          lineWidth: 2,
+          lineStyle: LightweightCharts.LineStyle.Solid,
+          axisLabelVisible: true,
+          title: (isBuy ? 'BUY' : 'SELL') + ' ' + lotText + 'L @ ' + num(entry, digits)
+        }));
+      }
+      if (sl > 0) {
+        var locked = isBuy ? sl >= entry : sl <= entry;
+        state.chart.tradeLines.push(series.createPriceLine({
+          price: sl,
+          color: locked ? CHART_COLORS.stopLocked : CHART_COLORS.stopAtRisk,
+          lineWidth: 2,
+          lineStyle: LightweightCharts.LineStyle.Dashed,
+          axisLabelVisible: true,
+          title: (locked ? 'SL locked' : 'SL') + ': ' + num(sl, digits)
+        }));
+      }
+      if (tp > 0) {
+        state.chart.tradeLines.push(series.createPriceLine({
+          price: tp,
+          color: CHART_COLORS.target,
+          lineWidth: 2,
+          lineStyle: LightweightCharts.LineStyle.Dashed,
+          axisLabelVisible: true,
+          title: 'TP: ' + num(tp, digits)
+        }));
+      }
+    });
+
+    if (!hud) return;
+    var p = mine[0];
+    var pSide = String(p.type || p.side || '').toUpperCase();
+    var pBuy = pSide === 'BUY' || pSide === 'LONG';
+    var pnl = Number(p.profit || 0);
+    var lots2 = Number(p.volume || 0);
+
+    hud.hidden = false;
+    hud.className = 'tt-chart__hud ' + (pBuy ? 'tt-chart__hud--buy' : 'tt-chart__hud--sell');
+    hud.innerHTML =
+      '<div class="tt-chart__hud-top">' +
+        '<span class="tt-chart__hud-side">' + esc(pSide || '—') + '</span>' +
+        '<span class="tt-num">' + (isFinite(lots2) ? lots2.toFixed(2) : '—') + 'L</span>' +
+        (p.ticket !== undefined && p.ticket !== null ? '<span class="tt-chart__hud-ticket">#' + esc(p.ticket) + '</span>' : '') +
+      '</div>' +
+      '<div class="tt-chart__hud-grid">' +
+        '<span>Entry</span><b class="tt-num">' + formatPrice(p.open_price, p.symbol) + '</b>' +
+        '<span>Stop</span><b class="tt-num">' + (Number(p.sl || 0) > 0 ? formatPrice(p.sl, p.symbol) : 'none') + '</b>' +
+        '<span>Target</span><b class="tt-num">' + (Number(p.tp || 0) > 0 ? formatPrice(p.tp, p.symbol) : 'none') + '</b>' +
+        '<span>P&amp;L</span><b class="tt-num ' + signClass(pnl) + '">' + (pnl > 0 ? '+' : '') + num(pnl, 2) + '</b>' +
+      '</div>' +
+      (mine.length > 1
+        ? '<div class="tt-chart__hud-more">+' + (mine.length - 1) + ' more on ' + esc(sym) + '</div>'
+        : '');
+  }
+
+  function updateChartHeader(sym, candles) {
+    var title = $('chart-title');
+    if (title) title.textContent = sym + ' · ' + state.timeframe;
+
+    var el = $('chart-live-price');
+    var last = candles[candles.length - 1];
+    if (!el || !last) return;
+    el.textContent = num(last.close, priceDigits(sym, last.close));
+    el.className = 'tt-num tt-num--lg tt-chart__price ' + (last.close >= last.open ? 'tt-up' : 'tt-down');
+    el.setAttribute('data-state', 'ready');
+  }
+
+  /* Redraw the decorations against the candles already on screen. Called after
+     the position list changes so an overlay follows a fill or a close without
+     waiting for the next candle poll. */
+  function refreshChartDecorations() {
+    if (!state.chart || !state.chartCandles || !state.chartCandles.length) return;
+    var sym = state.chartSymbol || state.symbol;
+    var last = state.chartCandles[state.chartCandles.length - 1];
+    var digits = priceDigits(sym, last.close);
+    drawLevels(sym, digits);
+    drawTradeOverlays(sym, digits);
+  }
+
+  function renderChart(sym, candles) {
+    var c = ensureChart();
+    if (!c) return;
+
+    // De-duplicate by timestamp and sort ascending: the library rejects a
+    // series that is out of order or repeats a time.
+    var seen = {};
+    var bars = [];
+    var vols = [];
+    candles.forEach(function (raw) {
+      var t = Number(raw.time);
+      if (!isFinite(t) || seen[t]) return;
+      var o = Number(raw.open), h = Number(raw.high), l = Number(raw.low), cl = Number(raw.close);
+      if (!isFinite(o) || !isFinite(h) || !isFinite(l) || !isFinite(cl)) return;
+      seen[t] = true;
+      bars.push({ time: t, open: o, high: h, low: l, close: cl });
+      vols.push({
+        time: t,
+        value: Number(raw.volume || 0),
+        color: cl >= o ? 'rgba(0,245,155,0.30)' : 'rgba(255,59,92,0.30)'
+      });
+    });
+    if (!bars.length) return;
+
+    var order = function (a, b) { return a.time - b.time; };
+    bars.sort(order);
+    vols.sort(order);
+
+    var digits = priceDigits(sym, bars[bars.length - 1].close);
+    var firstPaint = (state.chartSymbol !== sym) ||
+                     (state.chartTimeframe !== state.timeframe) ||
+                     !state.chartPainted;
+
+    c.candles.applyOptions({
+      priceFormat: { type: 'price', precision: digits, minMove: Math.pow(10, -digits) }
+    });
+
+    if (firstPaint) {
+      c.candles.setData(bars);
+      if (c.volume) c.volume.setData(vols);
+      c.chart.timeScale().fitContent();
+      state.chartPainted = true;
+    } else {
+      // Update the forming bar only. setData() here would reset the viewport on
+      // every poll and throw the user out of wherever they had scrolled to.
+      try {
+        c.candles.update(bars[bars.length - 1]);
+        if (c.volume && vols.length) c.volume.update(vols[vols.length - 1]);
+      } catch (e) {
+        c.candles.setData(bars);
+        if (c.volume) c.volume.setData(vols);
+      }
+    }
+
+    state.chartSymbol = sym;
+    state.chartTimeframe = state.timeframe;
+    state.chartCandles = bars;
+    state.chartLevels = computeLevels(bars);
+
+    drawLevels(sym, digits);
+    drawTradeOverlays(sym, digits);
+    updateChartHeader(sym, bars);
+  }
+
   function loadChart() {
     var sym = state.symbol;
-    var host = $('chart');
     var overlay = $('chart-overlay');
     if (!sym) {
       if (overlay) setState(overlay, 'empty', 'No instrument selected', null);
       return;
     }
-    var title = $('chart-title');
-    if (title) title.textContent = sym + ' · ' + state.timeframe;
 
+    // The query key is `tf`, not `timeframe`. console.js and terminal.js both
+    // send `tf`; this call sent `timeframe`, which the handler never read, so
+    // the selector silently returned H1 whatever the user picked.
     apiGet('/api/candles?symbol=' + encodeURIComponent(sym) +
-           '&timeframe=' + encodeURIComponent(state.timeframe), TIMEOUT.normal)
+           '&tf=' + encodeURIComponent(state.timeframe), TIMEOUT.normal)
       .then(function (res) {
         var candles = (res.data && res.data.candles) || [];
         if (!res.ok || !candles.length) {
@@ -616,73 +1257,13 @@
           }
           return;
         }
+        if (typeof LightweightCharts === 'undefined') {
+          if (overlay) setState(overlay, 'error', 'Chart library unavailable', 'lightweight-charts did not load.');
+          return;
+        }
         if (overlay) overlay.innerHTML = '';
-        drawChart(candles);
+        renderChart(sym, candles);
       });
-  }
-
-  function drawChart(candles) {
-    var host = $('chart');
-    if (!host || typeof LightweightCharts === 'undefined') {
-      var ov = $('chart-overlay');
-      if (ov) setState(ov, 'error', 'Chart library unavailable', 'lightweight-charts did not load.');
-      return;
-    }
-
-    // De-duplicate and sort ascending — the library throws otherwise.
-    var seen = {};
-    var data = [];
-    candles.forEach(function (c) {
-      var t = Number(c.time);
-      if (!isFinite(t) || seen[t]) return;
-      seen[t] = true;
-      data.push({
-        time: t,
-        open: Number(c.open), high: Number(c.high),
-        low: Number(c.low), close: Number(c.close)
-      });
-    });
-    data.sort(function (a, b) { return a.time - b.time; });
-    if (!data.length) return;
-
-    var width = host.clientWidth || 600;
-    var height = host.clientHeight || 320;
-
-    if (!state.chartSeries) {
-      host.innerHTML = '';
-      var chart = LightweightCharts.createChart(host, {
-        width: width,
-        height: height,
-        layout: { background: { color: 'transparent' }, textColor: '#94a3b8', fontSize: 11 },
-        grid: { vertLines: { color: 'rgba(148,163,184,0.08)' }, horzLines: { color: 'rgba(148,163,184,0.08)' } },
-        rightPriceScale: { borderColor: 'rgba(148,163,184,0.15)' },
-        timeScale: { borderColor: 'rgba(148,163,184,0.15)', timeVisible: true, secondsVisible: false },
-        crosshair: { mode: 0 }
-      });
-      // lightweight-charts v4 API.
-      var series = (typeof chart.addCandlestickSeries === 'function')
-        ? chart.addCandlestickSeries({
-            upColor: '#00f59b', downColor: '#ff3b5c',
-            borderUpColor: '#00f59b', borderDownColor: '#ff3b5c',
-            wickUpColor: '#00f59b', wickDownColor: '#ff3b5c'
-          })
-        : chart.addSeries(LightweightCharts.CandlestickSeries, {
-            upColor: '#00f59b', downColor: '#ff3b5c',
-            borderUpColor: '#00f59b', borderDownColor: '#ff3b5c',
-            wickUpColor: '#00f59b', wickDownColor: '#ff3b5c'
-          });
-      state.chartSeries = { chart: chart, series: series };
-
-      window.addEventListener('resize', function () {
-        if (!state.chartSeries) return;
-        var w = host.clientWidth || 600;
-        var h = host.clientHeight || 320;
-        state.chartSeries.chart.applyOptions({ width: w, height: h });
-      });
-    }
-
-    state.chartSeries.series.setData(data);
-    state.chartSeries.chart.timeScale().fitContent();
   }
 
   /* ── Status bar ───────────────────────────────────────────────────────── */
@@ -739,6 +1320,7 @@
       state.marketStatuses = d.market_statuses || {};
       state.positions = d.positions || [];
       state.services = d.services || {};
+      state.radar = d.radar_opportunities || [];
       state.executionMode = d.execution_mode;
       state.safeMode = d.safe_mode;
       state.telemetryAt = Date.now();
@@ -753,6 +1335,7 @@
       renderWatchlist();
       renderPositions();
       renderReasoning();
+      renderRadar();
       renderStatus();
     });
   }
@@ -1307,6 +1890,7 @@
     tick(loadTelemetry, POLL.telemetry)();
     tick(function () { if (state.view === 'trade') loadChart(); }, POLL.chart)();
     tick(function () { if (state.view === 'analytics') loadReliability(); }, POLL.analytics)();
+    tick(loadPendingOrders, POLL.pending)();
   }
 
   /* ── Boot ─────────────────────────────────────────────────────────────── */
@@ -1321,10 +1905,36 @@
     var refresh = $('watch-refresh');
     if (refresh) refresh.addEventListener('click', function () { loadTelemetry(); loadSelection(); });
 
+    var radarFilter = $('radar-filter');
+    if (radarFilter) {
+      radarFilter.value = state.radarFilter;
+      radarFilter.addEventListener('change', function () {
+        state.radarFilter = radarFilter.value;
+        renderRadar();
+      });
+    }
+
+    var pendingRefresh = $('pending-refresh');
+    if (pendingRefresh) pendingRefresh.addEventListener('click', loadPendingOrders);
+
     var tf = $('chart-timeframe');
     if (tf) {
       tf.value = state.timeframe;
       tf.addEventListener('change', function () { state.timeframe = tf.value; loadChart(); });
+    }
+
+    // Levels toggle. Hides support/resistance and trade overlays together, and
+    // re-draws from the candles already on screen — no refetch needed.
+    var levelsBtn = $('chart-levels');
+    if (levelsBtn) {
+      levelsBtn.setAttribute('aria-pressed', String(state.showLevels));
+      levelsBtn.addEventListener('click', function () {
+        state.showLevels = !state.showLevels;
+        levelsBtn.setAttribute('aria-pressed', String(state.showLevels));
+        levelsBtn.textContent = state.showLevels ? 'Levels on' : 'Levels off';
+        levelsBtn.classList.toggle('is-off', !state.showLevels);
+        refreshChartDecorations();
+      });
     }
 
     var buy = $('ticket-buy');
@@ -1371,6 +1981,7 @@
       loadSelection();
       loadChart();
     });
+    loadPendingOrders();
     schedule();
 
     if (window.HMUI && typeof window.HMUI.announce === 'function') {

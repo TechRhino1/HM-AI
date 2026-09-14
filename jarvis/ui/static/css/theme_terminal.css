@@ -633,6 +633,166 @@
   pointer-events: none;
 }
 
+/* ── Chart header ───────────────────────────────────────────────────────── */
+.tt-panel__head--chart { gap: var(--hm-space-3); flex-wrap: wrap; row-gap: var(--hm-space-1); }
+
+.tt-chart__price {
+  font-weight: var(--hm-weight-semibold);
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+.tt-chart__price[data-state="loading"] { color: var(--hm-text-dim); }
+
+/* Support/resistance legend. One chip per level that actually exists on the
+   chart, each carrying the same colour as its line so the legend and the plot
+   cannot disagree. A level with no swing pivot behind it is absent here. */
+.tt-chart__levels {
+  display: flex; align-items: center; gap: var(--hm-space-2);
+  flex-wrap: wrap; min-width: 0;
+}
+.tt-level {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 1px var(--hm-space-2);
+  border: 1px solid var(--hm-border-subtle);
+  border-radius: var(--hm-radius-pill);
+  background: var(--hm-bg-raised);
+  font-size: var(--hm-text-2xs);
+  font-weight: var(--hm-weight-semibold);
+  letter-spacing: var(--hm-tracking-caps);
+  white-space: nowrap;
+}
+.tt-level i {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 6px currentColor;
+}
+.tt-level b {
+  font-family: var(--tt-num-font);
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--hm-weight-medium);
+  letter-spacing: 0;
+  color: var(--hm-text-primary);
+}
+.tt-level--r1 { color: #ff2a5f; }
+.tt-level--r2 { color: #f43f5e; }
+.tt-level--s1 { color: #00f59b; }
+.tt-level--s2 { color: #10b981; }
+
+/* Controls that sit inside a panel header rather than in a form. */
+.tt-select--compact {
+  width: auto; min-height: 28px;
+  padding: 0 var(--hm-space-2);
+  font-size: var(--hm-text-xs);
+}
+.tt-toggle { min-height: 28px; }
+.tt-toggle[aria-pressed="false"] { color: var(--hm-text-dim); }
+
+/* ── Chart body, trade HUD, crosshair card ──────────────────────────────── */
+.tt-chart__body {
+  position: relative;
+  padding: 0;
+  overflow: hidden;
+  background: var(--hm-bg-sunken);
+}
+
+/* Floating position card. Sits over the plot so the geometry of an open trade
+   — side, size, entry, stop, target and running P&L — is readable without
+   looking away from the chart. Pointer-events are off so it never steals a
+   drag that was meant for the plot underneath. */
+.tt-chart__hud {
+  position: absolute;
+  top: var(--hm-space-2);
+  left: var(--hm-space-2);
+  z-index: 3;
+  display: flex; flex-direction: column; gap: 4px;
+  min-width: 152px;
+  padding: var(--hm-space-2) var(--hm-space-3);
+  border: 1px solid var(--hm-border);
+  border-left-width: 3px;
+  border-radius: var(--hm-radius-sm);
+  background: var(--hm-glass-card);
+  backdrop-filter: var(--hm-blur);
+  box-shadow: 0 6px 22px rgba(3, 5, 10, 0.5);
+  pointer-events: none;
+}
+.tt-chart__hud[hidden] { display: none; }
+.tt-chart__hud--buy { border-left-color: var(--hm-bull); }
+.tt-chart__hud--sell { border-left-color: var(--hm-bear); }
+
+.tt-chart__hud-top {
+  display: flex; align-items: center; gap: var(--hm-space-2);
+  font-size: var(--hm-text-2xs);
+  letter-spacing: var(--hm-tracking-caps);
+}
+.tt-chart__hud-side { font-weight: var(--hm-weight-black); text-transform: uppercase; }
+.tt-chart__hud--buy .tt-chart__hud-side { color: var(--hm-bull); }
+.tt-chart__hud--sell .tt-chart__hud-side { color: var(--hm-bear); }
+.tt-chart__hud-ticket {
+  margin-left: auto;
+  font-family: var(--tt-num-font);
+  color: var(--hm-text-dim);
+}
+.tt-chart__hud-grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 1px var(--hm-space-3);
+  font-size: var(--hm-text-2xs);
+}
+.tt-chart__hud-grid span { color: var(--hm-text-dim); }
+.tt-chart__hud-grid b {
+  text-align: right;
+  font-size: var(--hm-text-2xs);
+  font-family: var(--tt-num-font);
+  font-variant-numeric: tabular-nums;
+  color: var(--hm-text-primary);
+}
+.tt-chart__hud-more {
+  padding-top: 3px;
+  border-top: 1px solid var(--hm-border-subtle);
+  font-size: var(--hm-text-2xs);
+  color: var(--hm-text-dim);
+}
+
+/* Crosshair readout, positioned by dashboard.js and clamped to the plot. */
+.tt-chart__tooltip {
+  position: absolute;
+  z-index: 4;
+  min-width: 172px;
+  padding: var(--hm-space-2);
+  border: 1px solid var(--hm-border);
+  border-radius: var(--hm-radius-sm);
+  background: var(--hm-glass-panel);
+  backdrop-filter: var(--hm-blur);
+  box-shadow: 0 8px 24px rgba(3, 5, 10, 0.55);
+  pointer-events: none;
+  font-size: var(--hm-text-2xs);
+}
+.tt-chart__tooltip[hidden] { display: none; }
+.tt-tip__head {
+  display: flex; justify-content: space-between; gap: var(--hm-space-3);
+  padding-bottom: 4px; margin-bottom: 4px;
+  border-bottom: 1px solid var(--hm-border-subtle);
+  color: var(--hm-text-secondary);
+  font-weight: var(--hm-weight-semibold);
+  letter-spacing: var(--hm-tracking-caps);
+  text-transform: uppercase;
+}
+.tt-tip__row { display: flex; justify-content: space-between; gap: var(--hm-space-3); line-height: 1.55; }
+.tt-tip__row span { color: var(--hm-text-dim); }
+.tt-tip__row b {
+  font-family: var(--tt-num-font);
+  font-variant-numeric: tabular-nums;
+  color: var(--hm-text-primary);
+}
+.tt-tip__tag {
+  margin-top: 4px; padding-top: 4px;
+  border-top: 1px solid var(--hm-border-subtle);
+  font-weight: var(--hm-weight-medium);
+}
+.tt-tip__tag--up { color: var(--hm-bull); }
+.tt-tip__tag--down { color: var(--hm-bear); }
+.tt-tip__tag--flat { color: var(--hm-text-dim); }
+
 /* ── Log / progress ─────────────────────────────────────────────────────── */
 .tt-log {
   font-family: var(--tt-num-font);
@@ -729,6 +889,69 @@
   background: var(--hm-accent-subtle);
   color: var(--hm-accent);
   border-color: color-mix(in srgb, var(--hm-accent) 40%, transparent);
+}
+
+/* ── Scanner radar ──────────────────────────────────────────────────────── */
+/* One card per ranked candidate. The left edge carries the actionable flag, so
+   a row the engine would actually trade is distinguishable at a glance from one
+   it merely scanned. */
+.tt-radar {
+  padding: var(--hm-space-2) var(--hm-space-3);
+  border-bottom: 1px solid var(--hm-border-subtle);
+  border-left: 2px solid transparent;
+  cursor: pointer;
+  transition: background var(--hm-dur-instant) var(--hm-ease);
+}
+.tt-radar:hover { background: var(--hm-bg-hover); }
+.tt-radar--live { border-left-color: var(--hm-bull); }
+.tt-radar__top { display: flex; align-items: center; gap: var(--hm-space-2); }
+.tt-radar__action {
+  font-size: var(--hm-text-2xs);
+  font-weight: var(--hm-weight-bold);
+  letter-spacing: var(--hm-tracking-caps);
+  text-transform: uppercase;
+  color: var(--hm-text-dim);
+}
+.tt-radar__action.is-live { color: var(--hm-bull); }
+.tt-radar__nums {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px var(--hm-space-2);
+  margin-top: 3px;
+  font-size: var(--hm-text-2xs);
+}
+.tt-radar__nums span { color: var(--hm-text-dim); white-space: nowrap; }
+.tt-radar__nums b {
+  font-family: var(--tt-num-font);
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--hm-weight-medium);
+  color: var(--hm-text-primary);
+}
+.tt-radar__meta {
+  margin-top: 3px;
+  font-size: var(--hm-text-2xs);
+  color: var(--hm-text-dim);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+/* ── Surface polish ─────────────────────────────────────────────────────── */
+/* A hairline highlight along the top of each panel head so a panel reads as a
+   surface lit from above, and metric tiles read as discrete cards rather than
+   loose numbers. Rendering cues only — neither carries meaning. */
+.tt-panel__head {
+  background-image: linear-gradient(180deg, rgba(148, 163, 184, 0.06), transparent);
+}
+.tt-panel > .tt-panel__head:first-child { border-top: 0; }
+
+.tt-metrics > .tt-metric {
+  border: 1px solid var(--hm-border-subtle);
+  border-radius: var(--hm-radius-sm);
+  background: var(--hm-bg-raised);
+}
+.tt-metrics > .tt-metric .tt-metric__value { font-variant-numeric: tabular-nums; }
+
+.tt-btn--primary {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), var(--hm-accent-glow);
 }
 
 /* ── Print ──────────────────────────────────────────────────────────────── */

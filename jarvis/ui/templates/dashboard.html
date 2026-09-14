@@ -109,9 +109,11 @@
           <thead>
             <tr>
               <th scope="col">Symbol</th>
-              <th scope="col" class="tt-num">Bid</th>
-              <th scope="col" class="tt-num">Chg</th>
-              <th scope="col" class="tt-num">Spread</th>
+              <th scope="col">Bias</th>
+              <th scope="col" class="tt-num">Conf</th>
+              <th scope="col" class="tt-num">Entry</th>
+              <th scope="col" class="tt-num">R:R</th>
+              <th scope="col">Session</th>
             </tr>
           </thead>
           <tbody id="watch-body" data-state="loading"></tbody>
@@ -124,17 +126,42 @@
         <span class="tt-panel__spacer"></span>
         <span class="tt-chip tt-chip--none" id="selection-tier">—</span>
       </div>
-      <div class="tt-panel__body" id="selection-body" data-state="loading" style="max-height:46%"></div>
+      <div class="tt-panel__body" id="selection-body" data-state="loading" style="max-height:40%"></div>
+
+      <!-- Scanner radar. Rows come from the orchestrator's ranked candidate
+           list (telemetry radar_opportunities) — the same source the legacy
+           terminal's radar used. -->
+      <div class="tt-panel__head">
+        <h2 class="tt-panel__title">Scanner radar</h2>
+        <span class="tt-panel__count" id="radar-count">0</span>
+        <span class="tt-panel__spacer"></span>
+        <label class="tt-sr-only" for="radar-filter">Filter by trading style</label>
+        <select class="tt-select tt-select--compact" id="radar-filter">
+          <option value="ALL">All styles</option>
+          <option value="SWING">Swing</option>
+          <option value="DAY_TRADING">Day</option>
+          <option value="SCALP">Scalp</option>
+        </select>
+      </div>
+      <div class="tt-panel__body" id="radar-body" data-state="loading" style="max-height:46%"></div>
     </div>
 
-    <!-- Chart + positions -->
+    <!-- Chart + positions. The chart carries the instrument's support and
+         resistance levels and, when a position is open on this symbol, its
+         entry / stop / target as price lines plus a floating detail card.
+         Every figure is written by dashboard.js — no value lives in this file. -->
     <div class="tt-panel tt-panel--chart">
-      <div class="tt-panel__head">
+      <div class="tt-panel__head tt-panel__head--chart">
         <h2 class="tt-panel__title" id="chart-title">Chart</h2>
+        <span class="tt-num tt-num--lg tt-chart__price" id="chart-live-price"
+              data-state="loading">—</span>
+        <span class="tt-chart__levels" id="chart-legend"></span>
         <span class="tt-panel__spacer"></span>
+        <button class="tt-btn tt-btn--sm tt-toggle" id="chart-levels"
+                type="button" aria-pressed="true"
+                title="Show support, resistance and trade levels">Levels on</button>
         <label class="tt-sr-only" for="chart-timeframe">Timeframe</label>
-        <select class="tt-select" id="chart-timeframe"
-                style="min-height:28px;width:auto;padding:0 var(--hm-space-2);font-size:var(--hm-text-xs)">
+        <select class="tt-select tt-select--compact" id="chart-timeframe">
           <option value="M5">M5</option>
           <option value="M15">M15</option>
           <option value="H1" selected>H1</option>
@@ -142,8 +169,10 @@
           <option value="D1">D1</option>
         </select>
       </div>
-      <div class="tt-panel__body" style="position:relative">
+      <div class="tt-panel__body tt-chart__body">
         <div class="tt-chart" id="chart"></div>
+        <div class="tt-chart__hud" id="chart-hud" hidden></div>
+        <div class="tt-chart__tooltip" id="chart-tooltip" hidden aria-hidden="true"></div>
         <div class="tt-chart__overlay" id="chart-overlay">
           <div class="tt-state"><span class="tt-state__title">Loading chart…</span></div>
         </div>
@@ -225,6 +254,30 @@
             Sizing, stops and targets are prefilled from the selected setup when one exists.
           </p>
         </div>
+      </div>
+
+      <!-- Pending orders. Sourced from /api/pending_orders, which returns the
+           broker's own working orders rather than anything the UI infers. -->
+      <div class="tt-panel__head">
+        <h2 class="tt-panel__title">Pending orders</h2>
+        <span class="tt-panel__count" id="pending-count">0</span>
+        <span class="tt-panel__spacer"></span>
+        <button class="tt-btn tt-btn--sm" id="pending-refresh" title="Refresh pending orders">Refresh</button>
+      </div>
+      <div class="tt-panel__body tt-panel__body--flush" style="flex:0 0 auto;max-height:32%">
+        <table class="tt-table">
+          <thead>
+            <tr>
+              <th scope="col">Symbol</th>
+              <th scope="col">Type</th>
+              <th scope="col" class="tt-num">Vol</th>
+              <th scope="col" class="tt-num">Price</th>
+              <th scope="col" class="tt-num">SL</th>
+              <th scope="col" class="tt-num">TP</th>
+            </tr>
+          </thead>
+          <tbody id="pending-body" data-state="loading"></tbody>
+        </table>
       </div>
 
       <div class="tt-panel__head">
