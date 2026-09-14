@@ -224,6 +224,43 @@ def main():
         ok = status == 200
         record("GET /api/backtest/jobs", ok, f"status={status}")
 
+        # ── Regime policy ──────────────────────────────────────────────────
+        # Either answer is correct here and both are asserted: 200 with a policy
+        # table once tools/optimise_regime.py has run, or 503 UNAVAILABLE with a
+        # reason when it has not. What must never happen is a 404 (route not
+        # wired) or a 500 (handler raised) — and a bare 200 with no policy would
+        # let a caller mistake "never run" for "nothing tradeable".
+        status, body = request("/api/backtest/regime-policy")
+        payload = {}
+        try:
+            payload = json.loads(body)
+        except ValueError:
+            payload = {}
+        if status == 200:
+            ok = payload.get("status") == "OK" and isinstance(payload.get("policy"), dict)
+            detail = f"status={status} modes={sorted(payload.get('policy', {}))}"
+        else:
+            ok = status == 503 and payload.get("status") == "UNAVAILABLE" and bool(
+                payload.get("error")
+            )
+            detail = f"status={status} status_field={payload.get('status')!r}"
+        record("GET /api/backtest/regime-policy dispatches", ok, detail)
+
+        # The style filter must not blow up on a missing parameter, and must not
+        # return modes that were not asked for.
+        status, body = request("/api/backtest/regime-policy?styles=SCALP")
+        payload = {}
+        try:
+            payload = json.loads(body)
+        except ValueError:
+            payload = {}
+        returned = set((payload.get("policy") or {}).keys())
+        record(
+            "GET /api/backtest/regime-policy honours ?styles=",
+            status in (200, 503) and returned <= {"SCALP"},
+            f"status={status} returned={sorted(returned)}",
+        )
+
         # ── 5. POST auto-select (dry run is hard-wired) ────────────────────
         status, body = request("/api/action/auto-select", {"dry_run": True})
         payload = {}
