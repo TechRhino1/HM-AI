@@ -39,14 +39,30 @@ Consequences to work by:
   typo becomes a swing scan. Validate style names upstream of the engine.
 * **Style → primary timeframe:** SWING→H1, DAY_TRADING→M15, SCALP→M5. `optimizer.PRIMARY_TIMEFRAME`
   is asserted equal to `data_feed.style_timeframes(style)["primary"]` in the test suite.
-* **Console UI:** `/` and `/console` serve `console.html`; `/classic` serves the legacy
-  `index.html`. `console.js` is an IIFE with no exported global. Console CSS consumes the
-  `hm_ui.css` token set and defines no new tokens.
+* **Console UI:** `/` and `/dashboard` serve `dashboard.html` (the advanced terminal); `/console`
+  serves `console.html`; `/classic` serves the legacy `index.html`. `console.js` and `dashboard.js`
+  are IIFEs with no exported global.
+* **`_csv()` in `intelligence_api.py` returns `None`, not `[]`,** when a query parameter is absent.
+  Iterating the result directly raises. Use `set(_csv(query, "x") or [])`.
+* **The broker symbol is what the engine resolves, not the canonical one.** `resolve("WTI")` is
+  always a registry key; `resolve("OILCash#")` is the lookup that can miss `_ALIAS_MAP` and silently
+  fall back to a generic FX spec. `tests/test_symbol_registry.py` guards this for every manifest.
+* **`max_evaluations` is a budget per search, not per optimiser** (`_budget_start`/`_reset_budget`).
+  A low budget with an absolute counter made later modes return the unsearched seed geometry while
+  reporting a full result.
 * **Cross-style consensus** lives in `jarvis/intelligence/mode_aggregator.py`. One style voting
   alone is never tradeable, by construction. Measured mode weights: SWING 0.346, DAY_TRADING
   0.1064, SCALP 0.1287 (all below neutral — all three modes lost money over the 6-month window).
-* **Verification entry points:** `python tools/verify_console_live.py` (21 live HTTP checks, exits
-  non-zero on failure), `tests/test_mode_aggregator.py`, `tests/test_backtest_optimizer.py`.
+* **Regime-conditioned profit optimisation** lives in `jarvis/backtesting/regime_optimizer.py`
+  (run: `python tools/optimise_regime.py`; served at `/api/backtest/regime-policy`). Candidate
+  tables carry a real `regime` column and `select_sequential` already accepted a `regimes=` filter —
+  conditioning is therefore free, because simulations cache on the geometry alone. Its disable
+  thresholds deliberately duplicate `winrate_targeting.regime_edge_table`; a test enforces they
+  agree.
+* **Verification entry points:** `python tools/verify_ui_live.py` (27 live HTTP checks, exits
+  non-zero on failure), `python tools/audit_wiring.py`, `python tools/audit_endpoints.py`,
+  `tests/test_mode_aggregator.py`, `tests/test_backtest_optimizer.py`,
+  `tests/test_regime_optimizer.py`.
 
 ## Pushing to GitHub — a plain `git push` will hang
 
