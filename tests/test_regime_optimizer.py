@@ -359,6 +359,59 @@ class TestPolicyBlocking:
         opt = self._opt()
         assert opt._policy_outcomes([], {}, entry_lo=None, entry_hi=None) == []
 
+    def test_every_regime_disabled_yields_no_trades(self):
+        """The SCALP path on the real data, and it must not be a special case.
+
+        Measured: every one of SCALP's seven conditions is clearly negative AND
+        every regime-specific geometry fails the constraints, so the optimiser's
+        answer is to take zero trades — eliminating a −313 R loss outright. That
+        is a legitimate result, not an error state, so the merge must simply
+        return nothing rather than raising or falling back to the pooled
+        geometry.
+        """
+        g = geom(max_bars=6)
+        b = make_bundle([
+            (10, "BUY", "R1", 0.5),
+            (50, "BUY", "R2", 0.5),
+        ])
+        plan = self._plan(g, g)
+        for v in plan.values():
+            v.enabled = False
+            v.reason = "expectancy clearly negative"
+        opt = self._opt()
+
+        assert opt._policy_outcomes([b], plan, entry_lo=None, entry_hi=None) == []
+
+    def test_a_disabled_regime_does_not_block_an_enabled_one(self):
+        """Disabling frees the slot rather than reserving it.
+
+        If a blocked regime still consumed the one-position window, disabling a
+        losing condition could suppress a profitable trade that overlaps it —
+        making the policy worse than the baseline it is meant to improve.
+        """
+        g = geom(max_bars=20)
+        b = make_bundle([
+            (10, "BUY", "LOSER", 0.5),   # would exit at 29
+            (15, "BUY", "WINNER", 0.5),  # inside that window
+        ])
+        plan = {
+            "LOSER": RegimeVerdict(
+                regime="LOSER", status="searched", candidates=500,
+                deployed_geometry=g, deployed_quantile=0.0,
+                enabled=False, reason="expectancy clearly negative",
+            ),
+            "WINNER": RegimeVerdict(
+                regime="WINNER", status="searched", candidates=500,
+                deployed_geometry=g, deployed_quantile=0.0,
+                enabled=True, reason="test",
+            ),
+        }
+        opt = self._opt()
+
+        chosen = opt._policy_outcomes([b], plan, entry_lo=None, entry_hi=None)
+        assert len(chosen) == 1, "the enabled trade must survive its disabled neighbour"
+        assert str(chosen[0].regime) == "WINNER"
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # The budget window

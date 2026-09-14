@@ -441,18 +441,36 @@ duplication safe. **If one is changed, change both.**
 Run it with `python tools/optimise_regime.py`. The result is served at
 `GET /api/backtest/regime-policy` and rendered on the dashboard's analytics view.
 
-**Measured result (SWING, 20 symbols, 6-month window, 2026-09).** The pooled
-optimum is not a profitable configuration at all — the search finds no feasible
-geometry and falls back to its seed (`tp 1.5`, no selectivity), which loses
-**−122.9 R over 816 out-of-sample trades**. The regime-conditioned policy enables
-4 of 7 conditions and cuts that to **−6.4 R over 20 trades**: a 95 % reduction in
-loss, achieved by *refusing to trade* conditions whose expectancy is clearly
-negative, not by finding a profitable one. No regime's own geometry generalises
-out-of-sample either. This **independently confirms the attribution finding
-above** by a different method, and it is the honest answer to "maximise profit in
-any condition" on this data: the achievable maximum is bounded by the data, and
-the optimiser's contribution here is loss avoidance. It should be re-run whenever
-new data lands — the module reports "no edge" as a result, not a failure.
+**Measured result (2026-09).** Two runs: SWING over all 20 symbols at `--passes 3`, then all
+three modes over 8 liquid symbols at `--passes 1`. The smaller universe is less converged, but the
+direction is identical in both, so the finding does not depend on the sample choice.
+
+| Mode | Baseline OOS total R | Policy OOS total R | Baseline trades | Policy trades | Verdict |
+|---|---|---|---|---|---|
+| SWING (20 sym) | −122.9 | −6.4 | 816 | 20 | improves total R |
+| SWING (8 sym) | −12.9 | −1.6 | 342 | 105 | improves both |
+| DAY_TRADING | −127.9 | −21.8 | 1220 | 262 | improves both |
+| SCALP | −313.4 | **0.0** | 1419 | **0** | takes no trades |
+
+The pooled optimum is not a profitable configuration in any mode — in SWING the search finds no
+feasible geometry at all and falls back to its seed (`tp 1.5`, no selectivity). The policy's value is
+therefore **loss avoidance, not profit generation**: it cuts SWING's out-of-sample loss by 95 % and
+DAY_TRADING's by 83 % by *refusing to trade* conditions whose expectancy is clearly negative.
+
+The SCALP row is the clearest result in the table. All seven conditions are clearly negative **and**
+every regime-specific geometry fails the constraints on the full window, so the optimiser's answer is
+to take **zero trades** — eliminating a −313.4 R loss outright. This independently reproduces, by a
+different method, the measured mode-reliability ordering (`mode_aggregator`: SWING 0.346,
+SCALP 0.1287, DAY_TRADING 0.1064 — all below neutral): SWING is the least-bad mode and SCALP is not
+tradeable on this window.
+
+No regime's own geometry generalises out-of-sample in any mode. This **independently confirms the
+attribution finding above** by a different method, and it is the honest answer to "maximise profit in
+any condition" on this data: the achievable maximum is bounded by the data. Re-run whenever new data
+lands — the module reports "no edge" as a result, not a failure.
+
+The 90.6 % simulation cache-hit rate across the run is the evidence that the "conditioning is free"
+design holds in practice.
 
 ### Reporting contract
 `tools/run_3month_backtest.py` renders seven sections; two of them exist purely
