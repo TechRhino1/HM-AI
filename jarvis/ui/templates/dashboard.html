@@ -284,6 +284,37 @@
         <div class="tt-pad" id="exposure-body" data-state="loading"></div>
       </div>
     </div>
+
+    <!-- Regime policy: which geometry to run in which market condition, and
+         which conditions the optimiser has switched off. Every cell is bound
+         from /api/backtest/regime-policy at runtime; the empty state says the
+         optimiser has not been run rather than implying there is nothing to
+         trade, because those are different facts. -->
+    <div class="tt-panel">
+      <div class="tt-panel__head">
+        <h2 class="tt-panel__title">Regime policy</h2>
+        <span class="tt-panel__spacer"></span>
+        <span class="tt-hint" id="regime-policy-source">—</span>
+      </div>
+      <div class="tt-panel__body">
+        <div class="tt-metrics" id="regime-policy-metrics" data-state="loading"></div>
+        <table class="tt-table">
+          <thead>
+            <tr>
+              <th scope="col">Mode</th>
+              <th scope="col">Condition</th>
+              <th scope="col">Trade</th>
+              <th scope="col">Geometry</th>
+              <th scope="col" class="tt-num">Selectivity</th>
+              <th scope="col" class="tt-num">Trades</th>
+              <th scope="col" class="tt-num">Expectancy</th>
+              <th scope="col">Basis</th>
+            </tr>
+          </thead>
+          <tbody id="regime-policy-body" data-state="loading"></tbody>
+        </table>
+      </div>
+    </div>
   </section>
 
   <!-- ── Backtest ───────────────────────────────────────────────────── -->

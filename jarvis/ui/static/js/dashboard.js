@@ -760,6 +760,7 @@
   /* ── Analytics ────────────────────────────────────────────────────────── */
   function loadAnalytics() {
     loadReliability();
+    loadRegimePolicy();
     renderAnalyticsMetrics();
     renderHistory();
     renderRisk();
@@ -901,6 +902,119 @@
         return '<tr><td><span class="tt-symbol">' + esc(s) + '</span></td>' +
                '<td class="tt-num">' + num(bySymbol[s], 2) + '</td></tr>';
       }).join('') + '</tbody></table>';
+  }
+
+  /* ── Regime policy ────────────────────────────────────────────────────── */
+  // Which geometry to run in which market condition, and which conditions the
+  // optimiser has switched off. Read from the report the optimiser writes; the
+  // dashboard never computes or assumes a policy of its own.
+  function loadRegimePolicy() {
+    var body = $('regime-policy-body');
+    var host = $('regime-policy-metrics');
+    var src = $('regime-policy-source');
+
+    apiGet('/api/backtest/regime-policy', TIMEOUT.normal).then(function (res) {
+      // 503 is not a failure here: it is the honest "the optimiser has not been
+      // run" answer. Showing it as an error would train the operator to ignore
+      // it, and showing an empty policy would imply the engine has nothing to
+      // trade — a different and much more alarming claim.
+      if (res.status === 503) {
+        var reason = (res.data && res.data.error) || 'no regime policy report';
+        setState(body, 'empty', 'No regime policy yet', reason);
+        if (host) setState(host, 'empty', 'Not optimised', reason);
+        if (src) src.textContent = 'never run';
+        return;
+      }
+      if (!res.ok || !res.data || res.data.status !== 'OK') {
+        setState(body, 'error', 'Regime policy unavailable',
+          res.error || ('HTTP ' + res.status));
+        if (host) setState(host, 'error', 'Unavailable', null);
+        if (src) src.textContent = 'unavailable';
+        return;
+      }
+      if (src) {
+        src.textContent = (res.data.source_report || 'report') +
+          (res.data.age_seconds != null ? ' · ' + agoText(res.data.age_seconds) : '');
+      }
+      renderRegimePolicy(res.data);
+    });
+  }
+
+  function renderRegimePolicy(data) {
+    var body = $('regime-policy-body');
+    var host = $('regime-policy-metrics');
+    if (!body) return;
+
+    var policy = data.policy || {};
+    var modes = Object.keys(policy).sort();
+    var rows = [];
+    var totalRegimes = 0, totalEnabled = 0, totalOwn = 0;
+
+    modes.forEach(function (style) {
+      var m = policy[style];
+      if (!m || m.error) return;
+      var regimes = m.regimes || {};
+      Object.keys(regimes).sort().forEach(function (name) {
+        var r = regimes[name] || {};
+        totalRegimes += 1;
+        if (r.enabled) totalEnabled += 1;
+        if (r.uses_own_geometry) totalOwn += 1;
+
+        var g = r.geometry || {};
+        var geomText = g.tp_r != null ? ('tp ' + num(g.tp_r, 2)) : '—';
+        // The quantile is a selectivity statement, so show it as one: "top 1%"
+        // is what an operator needs, not "0.99".
+        var q = Number(r.min_score_quantile);
+        var select = (isFinite(q) && q > 0)
+          ? 'top ' + num((1 - q) * 100, 0) + '%'
+          : 'all setups';
+        var base = r.baseline_expectancy_r;
+        var expText = (base == null)
+          ? '—'
+          : (Number(base) > 0 ? '+' : '') + num(base, 4) + 'R';
+
+        rows.push('<tr>' +
+          '<td><span class="tt-chip tt-chip--muted">' + esc(style) + '</span></td>' +
+          '<td><span class="tt-symbol">' + esc(name) + '</span></td>' +
+          '<td><span class="tt-dir tt-dir--' + (r.enabled ? 'buy' : 'sell') + '">' +
+            (r.enabled ? 'yes' : 'no') + '</span></td>' +
+          '<td class="tt-num">' + esc(geomText) + ' ' +
+            (r.uses_own_geometry
+              ? '<span class="tt-chip tt-chip--high">own</span>'
+              : '<span class="tt-chip tt-chip--muted">pooled</span>') + '</td>' +
+          '<td class="tt-num">' + esc(select) + '</td>' +
+          '<td class="tt-num">' +
+            (r.baseline_trades == null ? '—' : num(r.baseline_trades, 0)) + '</td>' +
+          '<td class="tt-num ' + signClass(base) + '">' + esc(expText) + '</td>' +
+          '<td class="tt-hint">' + esc(r.basis || r.reason || '') + '</td>' +
+          '</tr>');
+      });
+    });
+
+    if (!rows.length) {
+      setState(body, 'empty', 'Policy table is empty',
+        'The report contains no regime rows.');
+      if (host) setState(host, 'empty', 'No rows', null);
+      return;
+    }
+
+    body.removeAttribute('data-state');
+    body.innerHTML = rows.join('');
+
+    if (host) {
+      host.removeAttribute('data-state');
+      host.innerHTML = [
+        ['Modes', String(modes.length)],
+        ['Conditions', String(totalRegimes)],
+        ['Tradeable', String(totalEnabled)],
+        ['Own geometry', String(totalOwn)],
+        ['Objective', String(data.objective || '—')]
+      ].map(function (t) {
+        return '<div class="tt-metric">' +
+          '<span class="tt-metric__label">' + esc(t[0]) + '</span>' +
+          '<span class="tt-metric__value">' + esc(t[1]) + '</span></div>';
+      }).join('');
+    }
   }
 
   /* ── Backtest ─────────────────────────────────────────────────────────── */
