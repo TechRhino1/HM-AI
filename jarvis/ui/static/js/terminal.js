@@ -2535,18 +2535,13 @@
     // =========================================================================
     function renderWatchlistDOM() {
         const symbols = ["XAUUSD", "BTCUSD", "ETHUSD", "SOLUSD", "EURUSD", "GBPUSD", "USDJPY", "US500", "NAS100", "WTI"];
-        const baselineDefaults = {
-            "XAUUSD": { price: 4380.00, change: "+0.45%" },
-            "BTCUSD": { price: 77000.00, change: "+1.82%" },
-            "ETHUSD": { price: 3400.00, change: "+1.25%" },
-            "SOLUSD": { price: 185.00, change: "+2.40%" },
-            "EURUSD": { price: 1.1580, change: "-0.12%" },
-            "GBPUSD": { price: 1.3480, change: "+0.08%" },
-            "USDJPY": { price: 158.50, change: "-0.34%" },
-            "US500": { price: 5850.00, change: "+0.35%" },
-            "NAS100": { price: 20500.00, change: "+0.55%" },
-            "WTI": { price: 76.50, change: "+0.90%" }
-        };
+
+        // No fabricated fallback prices. This function used to seed every row
+        // from a hard-coded table (gold at 4380.00, bitcoin at 77000.00) and
+        // only overwrite it when a live source was found — so with the feed down
+        // the watchlist rendered plausible, wrong prices indistinguishable from
+        // real ones. An em dash is unmistakably "no data".
+        const UNKNOWN = "\u2014";
 
         symbols.forEach(sym => {
             const btn = document.getElementById(`wl-btn-${sym}`);
@@ -2557,8 +2552,8 @@
                 btn.classList.toggle("active", sym === state.symbol);
             }
 
-            let livePrice = baselineDefaults[sym].price;
-            let chgStr = baselineDefaults[sym].change;
+            let livePrice = null;
+            let chgStr = null;
 
             // Search in active positions
             const pos = (state.positions || []).find(p => isSameSymbol(p.symbol, sym));
@@ -2581,11 +2576,18 @@
             }
 
             if (prcEl) {
-                prcEl.textContent = formatPrice(livePrice, sym);
+                prcEl.textContent = (livePrice === null || livePrice === undefined)
+                    ? UNKNOWN
+                    : formatPrice(livePrice, sym);
             }
             if (chgEl) {
-                chgEl.textContent = chgStr;
-                chgEl.className = `wl-change ${chgStr.startsWith('+') ? 'positive' : 'negative'}`;
+                if (chgStr === null) {
+                    chgEl.textContent = UNKNOWN;
+                    chgEl.className = "wl-change";
+                } else {
+                    chgEl.textContent = chgStr;
+                    chgEl.className = `wl-change ${chgStr.startsWith('+') ? 'positive' : 'negative'}`;
+                }
             }
         });
     }
