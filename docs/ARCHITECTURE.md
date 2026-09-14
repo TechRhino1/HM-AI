@@ -396,6 +396,64 @@ variance lives. The next work is **signal research** — new information at entr
 (order-flow, session, volatility regime at entry, cross-asset confirmation), not
 new transforms of the existing features. See `reports/entry_edge_verdict.md`.
 
+### Regime-conditioned optimisation (`jarvis/backtesting/regime_optimizer.py`)
+
+The attribution scan above is a *pooled* statement: it says every regime is
+negative on average. That leaves an obvious question unanswered — a regime can be
+negative under one exit geometry and positive under another, and a pooled average
+cannot see the difference. `regime_optimizer.py` answers it by re-running the
+geometry search **inside each regime** rather than once across the window.
+
+Three design points make it affordable and honest:
+
+* **Conditioning is free.** `_outcomes` caches a simulation on the geometry
+  alone, because a trade's result depends on the forward path and the exit
+  schedule, never on the market-condition label attached afterwards. Scoring one
+  geometry under six regimes therefore costs one simulation plus cheap filtering
+  passes — the same "simulate once, threshold for free" trick the parent module
+  uses for `min_score`, applied to a third axis.
+* **Selectivity is measured inside the regime.** `min_score` is a quantile of the
+  symbol's own score distribution, and the scores in COMPRESSION are not the
+  scores in TREND_BULL. Resolving the quantile against the pooled distribution and
+  then filtering by regime would silently rescale the selectivity while still
+  reporting a "top 10%" run.
+* **One blocking walk across regimes.** The engine holds at most one position per
+  symbol whatever the regime is. Selecting each regime independently would book
+  overlapping trades it can never take, and the phantom overlap would cluster at
+  regime turns — where the P&L is. Regime-eligible candidates from every regime
+  are merged and put through a single `select_sequential` call.
+
+The deploy rule is deliberately conservative: a regime-specific geometry replaces
+the pooled one **only** when it wins a like-for-like comparison (same regime, same
+full window, same objective, same constraints), and the enable/disable decision is
+made last, from the geometry that will actually be deployed. A regime below the
+candidate gate is reported `insufficient_sample` and inherits the pooled geometry
+— it is never handed a geometry fitted to a handful of bars.
+
+The disable thresholds (`disable_margin_r=0.05`, `min_trades_to_disable=12`) are
+deliberately identical to `jarvis.intelligence.winrate_targeting.regime_edge_table`
+and are **re-implemented rather than imported**, because `jarvis.intelligence`
+already imports `jarvis.backtesting` and §2 requires the dependency direction to
+be downward. `tests/test_regime_optimizer.py::test_gates_match_winrate_targeting`
+fails if the two ever drift apart, which is the only thing that makes the
+duplication safe. **If one is changed, change both.**
+
+Run it with `python tools/optimise_regime.py`. The result is served at
+`GET /api/backtest/regime-policy` and rendered on the dashboard's analytics view.
+
+**Measured result (SWING, 20 symbols, 6-month window, 2026-09).** The pooled
+optimum is not a profitable configuration at all — the search finds no feasible
+geometry and falls back to its seed (`tp 1.5`, no selectivity), which loses
+**−122.9 R over 816 out-of-sample trades**. The regime-conditioned policy enables
+4 of 7 conditions and cuts that to **−6.4 R over 20 trades**: a 95 % reduction in
+loss, achieved by *refusing to trade* conditions whose expectancy is clearly
+negative, not by finding a profitable one. No regime's own geometry generalises
+out-of-sample either. This **independently confirms the attribution finding
+above** by a different method, and it is the honest answer to "maximise profit in
+any condition" on this data: the achievable maximum is bounded by the data, and
+the optimiser's contribution here is loss avoidance. It should be re-run whenever
+new data lands — the module reports "no edge" as a result, not a failure.
+
 ### Reporting contract
 `tools/run_3month_backtest.py` renders seven sections; two of them exist purely
 to keep the headline honest:
@@ -516,6 +574,15 @@ python -m pytest tests/ -q --ignore=tests/test_india_perf.py
   profit lock beyond +2R, one-way stop on retracement.
 - `test_institutional_entry_exit.py` — SCALP/DAY_TRADING must route through the
   canonical policy, not a private stage table.
+- `test_symbol_registry.py::test_broker_symbol_resolves_like_its_canonical_name` —
+  the **broker** symbol (what the engine passes to `resolve()`) must give the same
+  spec as its canonical name. The pre-existing manifest test only checked the
+  canonical name, which is always a registry key, so it could not see that
+  `OILCash#` was falling through to the generic FX spec.
+- `test_regime_optimizer.py::test_policy_blocks_across_regimes_not_within` — one
+  position at a time must hold across regimes, not within each.
+- `test_regime_optimizer.py::test_gates_match_winrate_targeting` — the
+  re-implemented disable thresholds must not drift from the calibrator's.
 - Learning-loop R sign correctness.
 - Drift protection retains ≥ 70 % of signal under a 40-loss streak.
 
