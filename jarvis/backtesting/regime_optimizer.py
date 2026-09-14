@@ -91,7 +91,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
@@ -100,9 +100,9 @@ from jarvis.backtesting.optimizer import (
     PRIMARY_TIMEFRAME,
     STYLES,
     BacktestOptimizer,
-    GeometryEvaluation,
     OptimizerSpec,
     SeriesBundle,
+    objective_value,
 )
 from jarvis.backtesting.trade_simulator import (
     Geometry,
@@ -110,7 +110,6 @@ from jarvis.backtesting.trade_simulator import (
     select_sequential,
     summarise,
 )
-from jarvis.market.data_feed import normalise_style
 
 logger = logging.getLogger("JARVIS_RegimeOptimizer")
 
@@ -191,43 +190,79 @@ def regime_decision(
 # ─────────────────────────────────────────────────────────────────────────────
 @dataclass
 class RegimeVerdict:
-    """Everything decided about one (mode, regime) pair."""
+    """Everything decided about one (mode, regime) pair.
+
+    The two questions are kept strictly separate, because conflating them is how
+    a regime-conditioned optimiser ships a curve-fit:
+
+      * **May this regime be traded at all?** — ``enabled``. Answered from the
+        pooled geometry's performance restricted to this regime, and only ever
+        answered "no" on a well-sampled, clearly negative expectancy.
+      * **Does this regime deserve its OWN geometry?** — ``geometry_basis``.
+        Answered only by beating the pooled geometry *on this regime*, measured
+        on the full window under the same constraints. A regime that loses this
+        comparison still trades; it just trades the pooled geometry.
+    """
 
     regime: str
     status: str  # "searched" | "insufficient_sample"
     candidates: int
-    trades_in_sample: int = 0
-    trades_out_of_sample: int = 0
-    geometry: Optional[Geometry] = None
-    min_score_quantile: Optional[float] = None
-    min_score_resolved: Dict[str, float] = field(default_factory=dict)
-    in_sample: Dict[str, Any] = field(default_factory=dict)
-    out_of_sample: Dict[str, Any] = field(default_factory=dict)
-    full_window: Dict[str, Any] = field(default_factory=dict)
+
+    # The pooled geometry, RESTRICTED to this regime. The neutral baseline every
+    # regime is judged against. Free to compute: the baseline simulation is
+    # already in the cache.
+    baseline_within_regime: Dict[str, Any] = field(default_factory=dict)
+
+    # The regime-specific search, when one was run.
+    searched_geometry: Optional[Geometry] = None
+    searched_quantile: Optional[float] = None
+    searched_in_sample: Dict[str, Any] = field(default_factory=dict)
+    searched_out_of_sample: Dict[str, Any] = field(default_factory=dict)
+    searched_full_window: Dict[str, Any] = field(default_factory=dict)
     walk_forward: Dict[str, Any] = field(default_factory=dict)
     validation_folds: List[Dict[str, Any]] = field(default_factory=list)
     feasible: bool = False
+
+    # What the policy actually deploys.
+    deployed_geometry: Optional[Geometry] = None
+    deployed_quantile: Optional[float] = None
+    geometry_basis: str = ""
+
     enabled: bool = True
     reason: str = ""
     evaluations: int = 0
+
+    @property
+    def uses_own_geometry(self) -> bool:
+        return self.geometry_basis.startswith("regime geometry")
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "regime": self.regime,
             "status": self.status,
             "candidates": self.candidates,
-            "geometry": self.geometry.to_dict() if self.geometry else None,
-            "geometry_key": self.geometry.key() if self.geometry else None,
-            "min_score_quantile": self.min_score_quantile,
-            "min_score_resolved": self.min_score_resolved,
-            "feasible": self.feasible,
-            "enabled": self.enabled,
-            "reason": self.reason,
-            "in_sample": self.in_sample,
-            "out_of_sample": self.out_of_sample,
-            "full_window": self.full_window,
+            "baseline_within_regime": self.baseline_within_regime,
+            "searched_geometry": (
+                self.searched_geometry.to_dict() if self.searched_geometry else None
+            ),
+            "searched_geometry_key": (
+                self.searched_geometry.key() if self.searched_geometry else None
+            ),
+            "searched_quantile": self.searched_quantile,
+            "searched_in_sample": self.searched_in_sample,
+            "searched_out_of_sample": self.searched_out_of_sample,
+            "searched_full_window": self.searched_full_window,
             "walk_forward": self.walk_forward,
             "validation_folds": self.validation_folds,
+            "feasible": self.feasible,
+            "deployed_geometry_key": (
+                self.deployed_geometry.key() if self.deployed_geometry else None
+            ),
+            "deployed_quantile": self.deployed_quantile,
+            "uses_own_geometry": self.uses_own_geometry,
+            "geometry_basis": self.geometry_basis,
+            "enabled": self.enabled,
+            "reason": self.reason,
             "evaluations": self.evaluations,
         }
 
@@ -291,12 +326,12 @@ class RegimeConditionedOptimizer(BacktestOptimizer):
         merged: List[TradeOutcome] = []
         for b in bundles:
             for regime, verdict in plan.items():
-                if not verdict.enabled or verdict.geometry is None:
+                if not verdict.enabled or verdict.deployed_geometry is None:
                     continue
-                if verdict.min_score_quantile is None:
+                if verdict.deployed_quantile is None:
                     continue
-                threshold = b.min_score_for(verdict.min_score_quantile, {regime})
-                for o in self._outcomes(b, verdict.geometry):
+                threshold = b.min_score_for(verdict.deployed_quantile, {regime})
+                for o in self._outcomes(b, verdict.deployed_geometry):
                     if str(o.regime) != regime:
                         continue
                     if entry_lo is not None and o.entry_idx < entry_lo:
@@ -390,106 +425,133 @@ class RegimeConditionedOptimizer(BacktestOptimizer):
                 f"OOS exp={baseline_verdict['out_of_sample_expectancy_r']:+.4f}R"
             )
 
-            # ── Per-regime searches ─────────────────────────────────────────
+            # ── Per-regime evaluation and search ────────────────────────────
+            baseline_q = float(baseline.geometry.min_score)
+
             plan: Dict[str, RegimeVerdict] = {}
             for regime, count in mass.items():
-                if count < self.min_candidates:
-                    plan[regime] = RegimeVerdict(
-                        regime=regime,
-                        status="insufficient_sample",
-                        candidates=int(count),
-                        enabled=False,
-                        reason=(
-                            f"{count} candidates < {self.min_candidates} required to "
-                            f"fit a geometry for this regime"
-                        ),
-                    )
-                    self._say(
-                        f"    {regime}: SKIPPED — {count} candidates "
-                        f"(< {self.min_candidates})"
-                    )
-                    continue
-
-                self._reset_budget()
-                self._say(f"    {regime}: searching on {count} candidates")
-                search = self._coordinate_descent(
-                    bundles, entry_lo=0, entry_hi=split_idx, regimes={regime}
-                )
-                oos = self._score(
-                    search.geometry, bundles,
-                    entry_lo=split_idx, entry_hi=None, regimes={regime},
-                )
-                verdict = self.walk_forward_verdict(search.metrics, oos.metrics)
-                folds = self._fold_metrics(
-                    bundles, search.geometry,
-                    entry_lo=split_idx, entry_hi=n_bars,
-                    folds=spec.walk_forward_folds, regimes={regime},
-                )
-                full = self.evaluate(
-                    search.geometry, bundles,
+                # Judge EVERY regime against the pooled geometry restricted to
+                # it. Free to compute (the baseline simulation is cached) and the
+                # only neutral reference for the deploy comparison.
+                within = self.evaluate(
+                    baseline.geometry, bundles,
                     entry_lo=None, entry_hi=None, count=False, regimes={regime},
                 )
 
-                feasible = search.score != float("-inf")
-                # The disable decision is made on the FULL window, not on the
-                # search window: the question "does this regime have an edge" is
-                # about the regime, and answering it from the first 70% of the
-                # data would discard a third of the evidence for no reason. The
-                # *geometry* was fitted on the search window; the *decision* to
-                # trade the regime at all is a coarser judgement and can afford
-                # the larger sample.
-                enabled, reason = regime_decision(
-                    int(full.get("trades", 0) or 0),
-                    float(full.get("expectancy_r", 0.0) or 0.0),
-                    min_trades=self.regime_min_trades,
-                    disable_margin_r=self.disable_margin_r,
-                )
-                if not feasible:
-                    # A regime whose best geometry cannot clear the objective's
-                    # constraints is not tradeable whatever its raw expectancy:
-                    # the constraints are what keep the search from "winning" on
-                    # three enormous trades.
-                    enabled = False
-                    reason = (
-                        f"no geometry cleared the constraints "
-                        f"(min_trades={spec.min_trades}, max_dd_r={spec.max_dd_r}, "
-                        f"positive expectancy) — {reason}"
-                    )
-
-                quantile = float(search.geometry.min_score)
-                resolved = {
-                    b.symbol: round(b.min_score_for(quantile, {regime}), 6)
-                    for b in bundles
-                }
-
-                plan[regime] = RegimeVerdict(
+                verdict = RegimeVerdict(
                     regime=regime,
                     status="searched",
                     candidates=int(count),
-                    trades_in_sample=int(search.metrics.get("trades", 0) or 0),
-                    trades_out_of_sample=int(oos.metrics.get("trades", 0) or 0),
-                    geometry=search.geometry,
-                    min_score_quantile=quantile,
-                    min_score_resolved=resolved,
-                    in_sample=search.metrics,
-                    out_of_sample=oos.metrics,
-                    full_window=full,
-                    walk_forward=verdict,
-                    validation_folds=folds,
-                    feasible=feasible,
-                    enabled=enabled,
-                    reason=reason,
-                    evaluations=self._budget_spent(),
+                    baseline_within_regime=within,
+                    # Default: inherit the pooled geometry. Only a measured win
+                    # replaces it — a regime is never handed a geometry fitted on
+                    # too little data just because a search could produce one.
+                    deployed_geometry=baseline.geometry,
+                    deployed_quantile=baseline_q,
+                    geometry_basis="pooled geometry",
                 )
 
-                self._say(
-                    f"      -> {search.geometry.key()} | "
-                    f"IS exp={verdict['in_sample_expectancy_r']:+.4f}R "
-                    f"OOS exp={verdict['out_of_sample_expectancy_r']:+.4f}R "
-                    f"full exp={float(full.get('expectancy_r', 0.0) or 0.0):+.4f}R "
-                    f"trades={int(full.get('trades', 0) or 0)} | "
-                    f"{'ENABLED' if enabled else 'DISABLED'}"
+                if count < self.min_candidates:
+                    verdict.status = "insufficient_sample"
+                    verdict.geometry_basis = (
+                        f"pooled geometry — only {count} candidates "
+                        f"(< {self.min_candidates}), too few to fit a regime geometry"
+                    )
+                    self._say(
+                        f"    {regime}: {count} candidates — inherits the pooled "
+                        f"geometry (which returns "
+                        f"{float(within.get('expectancy_r', 0) or 0):+.4f}R over "
+                        f"{int(within.get('trades', 0) or 0)} trades here)"
+                    )
+                else:
+                    self._reset_budget()
+                    self._say(f"    {regime}: searching on {count} candidates")
+                    search = self._coordinate_descent(
+                        bundles, entry_lo=0, entry_hi=split_idx, regimes={regime}
+                    )
+                    oos = self._score(
+                        search.geometry, bundles,
+                        entry_lo=split_idx, entry_hi=None, regimes={regime},
+                    )
+                    regime_wf = self.walk_forward_verdict(search.metrics, oos.metrics)
+                    folds = self._fold_metrics(
+                        bundles, search.geometry,
+                        entry_lo=split_idx, entry_hi=n_bars,
+                        folds=spec.walk_forward_folds, regimes={regime},
+                    )
+                    full = self.evaluate(
+                        search.geometry, bundles,
+                        entry_lo=None, entry_hi=None, count=False, regimes={regime},
+                    )
+
+                    verdict.searched_geometry = search.geometry
+                    verdict.searched_quantile = float(search.geometry.min_score)
+                    verdict.searched_in_sample = search.metrics
+                    verdict.searched_out_of_sample = oos.metrics
+                    verdict.searched_full_window = full
+                    verdict.walk_forward = regime_wf
+                    verdict.validation_folds = folds
+                    verdict.feasible = search.score != float("-inf")
+                    verdict.evaluations = self._budget_spent()
+
+                    # ── Deploy only a MEASURED win ──────────────────────────
+                    # Both geometries are scored by the same objective, on the
+                    # same regime, over the same full window, under the same
+                    # constraints. ``objective_value`` returns -inf when a
+                    # constraint fails, so a geometry fitted to nine trades
+                    # cannot win when ``min_trades`` says thirty — the constraint
+                    # guarding the pooled search guards the regime search free.
+                    own = objective_value(full, spec)
+                    base = objective_value(within, spec)
+                    if own > base:
+                        verdict.deployed_geometry = search.geometry
+                        verdict.deployed_quantile = float(search.geometry.min_score)
+                        verdict.geometry_basis = (
+                            f"regime geometry beats the pooled geometry on this "
+                            f"regime ({own:.4f} > {base:.4f} on {spec.objective})"
+                        )
+                    elif own == float("-inf"):
+                        verdict.geometry_basis = (
+                            "pooled geometry — the regime geometry failed the "
+                            "constraints on the full window"
+                        )
+                    else:
+                        verdict.geometry_basis = (
+                            "pooled geometry — the regime geometry did not beat it "
+                            f"({own:.4f} <= {base:.4f} on {spec.objective})"
+                        )
+
+                    self._say(
+                        f"      -> {search.geometry.key()} | "
+                        f"IS exp={regime_wf['in_sample_expectancy_r']:+.4f}R "
+                        f"OOS exp={regime_wf['out_of_sample_expectancy_r']:+.4f}R "
+                        f"full exp={float(full.get('expectancy_r', 0.0) or 0.0):+.4f}R "
+                        f"trades={int(full.get('trades', 0) or 0)} | "
+                        f"{'OWN GEOMETRY' if verdict.uses_own_geometry else 'keeps pooled'}"
+                    )
+
+                # ── Enable / disable, decided on the geometry we DEPLOY ─────
+                # The order matters and is easy to get backwards. Deciding
+                # tradeability from the pooled geometry's within-regime numbers
+                # would switch a regime off because the *default* settings lose
+                # there, even when the geometry fitted for that regime turns it
+                # profitable — which is precisely the case regime conditioning
+                # exists to find. So the decision is made last, on the metrics the
+                # deployed geometry actually produces.
+                deploy_metrics = (
+                    verdict.searched_full_window
+                    if verdict.uses_own_geometry and verdict.searched_full_window
+                    else within
                 )
+                enabled, reason = regime_decision(
+                    int(deploy_metrics.get("trades", 0) or 0),
+                    float(deploy_metrics.get("expectancy_r", 0.0) or 0.0),
+                    min_trades=self.regime_min_trades,
+                    disable_margin_r=self.disable_margin_r,
+                )
+                verdict.enabled = enabled
+                verdict.reason = reason
+                plan[regime] = verdict
 
             # ── Measure the policy against the baseline, out-of-sample ──────
             enabled_regimes = {r for r, v in plan.items() if v.enabled}
@@ -537,6 +599,18 @@ class RegimeConditionedOptimizer(BacktestOptimizer):
                     "regimes_withheld": sum(
                         1 for v in plan.values() if v.status != "searched"
                     ),
+                    # Which regimes actually earned a geometry of their own, as
+                    # opposed to inheriting the pooled one. This is the honest
+                    # headline number: a policy that deploys no regime geometry
+                    # is a plain pooled optimiser with a regime filter, and the
+                    # report should say so rather than imply otherwise.
+                    "regimes_with_own_geometry": sorted(
+                        r for r, v in plan.items() if v.uses_own_geometry
+                    ),
+                    "regimes_on_pooled_geometry": sorted(
+                        r for r, v in plan.items()
+                        if not v.uses_own_geometry and v.enabled
+                    ),
                     "out_of_sample": policy_oos,
                     "full_window": policy_full,
                     "validation_folds": policy_folds,
@@ -546,11 +620,15 @@ class RegimeConditionedOptimizer(BacktestOptimizer):
                 "cache_hits": self._cache_hits,
             })
 
+            n_own = sum(1 for v in plan.values() if v.uses_own_geometry)
             self._say(
-                f"    policy: {len(enabled_regimes)}/{len(plan)} regimes enabled | "
+                f"    policy: {len(enabled_regimes)}/{len(plan)} regimes enabled, "
+                f"{n_own} with their own geometry | "
                 f"OOS baseline exp={float(baseline_oos.metrics.get('expectancy_r', 0) or 0):+.4f}R "
+                f"/ {float(baseline_oos.metrics.get('total_r', 0) or 0):+.1f}R "
                 f"({int(baseline_oos.metrics.get('trades', 0) or 0)} trades) -> "
                 f"policy exp={float(policy_oos.get('expectancy_r', 0) or 0):+.4f}R "
+                f"/ {float(policy_oos.get('total_r', 0) or 0):+.1f}R "
                 f"({int(policy_oos.get('trades', 0) or 0)} trades) | "
                 f"{comparison['verdict']}"
             )
@@ -602,8 +680,14 @@ class RegimeConditionedOptimizer(BacktestOptimizer):
 
         Reported as an explicit verdict rather than a bare number, because
         "policy expectancy is higher" is only a win if it is not achieved by
-        taking three trades. A policy that shrinks the sample below the
-        constraint floor is reported as such.
+        taking three trades — and "policy total R is higher" is only a win if it
+        is not achieved by taking ten times the exposure.
+
+        The interesting outcome on this data is the third case: the policy
+        matches the baseline's total R while taking a fraction of the trades.
+        That is a real improvement — the same money for less risk, less cost and
+        less capital tied up — and the verdict says so rather than dismissing it
+        for failing to raise an already-similar number.
         """
         b_exp = float(baseline.get("expectancy_r", 0.0) or 0.0)
         p_exp = float(policy.get("expectancy_r", 0.0) or 0.0)
@@ -612,14 +696,35 @@ class RegimeConditionedOptimizer(BacktestOptimizer):
         b_total = float(baseline.get("total_r", 0.0) or 0.0)
         p_total = float(policy.get("total_r", 0.0) or 0.0)
 
+        # How much of the baseline's total R survives, and how much of its trade
+        # count was avoided. ``None`` where the baseline has nothing to retain,
+        # so a ratio is never fabricated from a zero denominator.
+        retention = round(p_total / b_total, 4) if abs(b_total) > 1e-9 else None
+        trade_reduction = (
+            round(1.0 - (p_trades / b_trades), 4) if b_trades > 0 else None
+        )
+
         if p_trades == 0:
             verdict = "policy takes no trades out-of-sample"
-        elif p_exp > b_exp and p_total > b_total:
-            verdict = "policy improves both expectancy and total R out-of-sample"
-        elif p_exp > b_exp:
-            verdict = "policy improves expectancy but not total R (smaller sample)"
+        elif p_total > b_total and p_exp > b_exp:
+            verdict = "policy improves both total R and expectancy out-of-sample"
         elif p_total > b_total:
             verdict = "policy improves total R but not expectancy"
+        elif p_exp > b_exp and retention is not None and retention >= 0.95:
+            verdict = (
+                f"policy matches the baseline's total R ({retention:.0%} of it) with "
+                f"better expectancy and "
+                f"{trade_reduction:.0%} fewer trades"
+                if trade_reduction is not None else
+                "policy matches total R with better expectancy"
+            )
+        elif p_exp > b_exp:
+            verdict = (
+                f"policy improves expectancy but retains only {retention:.0%} of "
+                f"total R"
+                if retention is not None else
+                "policy improves expectancy but not total R"
+            )
         else:
             verdict = "policy does not improve the held-out result"
 
@@ -632,6 +737,8 @@ class RegimeConditionedOptimizer(BacktestOptimizer):
             "policy_trades": p_trades,
             "expectancy_delta_r": round(p_exp - b_exp, 4),
             "total_r_delta": round(p_total - b_total, 3),
+            "total_r_retention": retention,
+            "trade_reduction": trade_reduction,
             "verdict": verdict,
         }
 
