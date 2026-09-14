@@ -129,6 +129,78 @@ def main():
             f"leaks={leaks_by_file}" if leaks_by_file else "all templates clean",
         )
 
+        # The dashboard's timeframe selector was inert for a while: it sent
+        # `timeframe=` while the handler read `tf=`, so every request silently
+        # came back as H1 whatever the user picked. Assert that both spellings
+        # are honoured AND that two different timeframes really do return
+        # different series — accepting the parameter and then ignoring it would
+        # pass a weaker check.
+        series = {}
+        for label, qs in (
+            ("tf", "symbol=XAUUSD&tf=H1"),
+            ("timeframe", "symbol=XAUUSD&timeframe=H1"),
+            ("M5", "symbol=XAUUSD&tf=M5"),
+        ):
+            status, body = request("/api/candles?" + qs)
+            try:
+                payload = json.loads(body)
+            except ValueError:
+                payload = {}
+            candles = payload.get("candles") or []
+            series[label] = {
+                "status": status,
+                "tf": payload.get("timeframe"),
+                "n": len(candles),
+                "first": candles[0]["time"] if candles else None,
+            }
+
+        record(
+            "GET /api/candles accepts both tf and timeframe",
+            series["tf"]["tf"] == "H1" and series["timeframe"]["tf"] == "H1",
+            f"tf={series['tf']['tf']} timeframe={series['timeframe']['tf']}",
+        )
+        record(
+            "GET /api/candles honours the requested timeframe",
+            series["M5"]["tf"] == "M5" and series["M5"]["first"] != series["tf"]["first"],
+            f"H1 first={series['tf']['first']} M5 first={series['M5']['first']}",
+        )
+
+        # The chart surface is created at runtime, so a missing container is
+        # invisible to every HTTP check above: the panel simply never draws.
+        status, body = request("/dashboard")
+        chart_ids = [
+            "chart-live-price", "chart-legend", "chart-hud",
+            "chart-tooltip", "chart-levels", "chart-timeframe",
+        ]
+        missing_ids = [i for i in chart_ids if f'id="{i}"' not in body]
+        record(
+            "the dashboard ships the full chart surface",
+            status == 200 and not missing_ids,
+            f"missing={missing_ids}" if missing_ids else "all present",
+        )
+
+        try:
+            with open(os.path.join(repo_root, "jarvis", "ui", "static", "js", "dashboard.js"),
+                      encoding="utf-8") as fh:
+                dash_js = fh.read()
+        except OSError as exc:
+            dash_js = ""
+            js_note = str(exc)
+        else:
+            js_note = ""
+        record(
+            "dashboard.js requests candles with the parameter the handler reads",
+            "/api/candles?symbol=" in dash_js and "&tf=" in dash_js and "&timeframe=" not in dash_js,
+            js_note or ("ok" if "&tf=" in dash_js else "no &tf= in the candles call"),
+        )
+
+        status, body = request("/api/pending_orders")
+        record(
+            "GET /api/pending_orders dispatches",
+            status in (200, 503),
+            f"status={status}",
+        )
+
         status, body = request("/console")
         record(
             "GET /console serves the previous console",
