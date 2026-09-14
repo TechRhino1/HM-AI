@@ -413,7 +413,10 @@ class JarvisRequestHandler(BaseHTTPRequestHandler):
                 })
             elif path == "/api/candles":
                 sym = query.get("symbol", ["XAUUSD"])[0]
-                tf = query.get("tf", ["H1"])[0]
+                # Accept `timeframe` as well as `tf`, matching /api/rates and
+                # /api/historical/data below. A caller that sends the longer name
+                # used to get a silent H1 fallback rather than an error.
+                tf = query.get("tf", query.get("timeframe", ["H1"]))[0]
                 cache_key = f"{sym}_{tf}"
                 now = time.time()
                 cached = self._CANDLES_CACHE.get(cache_key)
