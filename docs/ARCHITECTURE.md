@@ -601,6 +601,21 @@ python -m pytest tests/ -q --ignore=tests/test_india_perf.py
   position at a time must hold across regimes, not within each.
 - `test_regime_optimizer.py::test_gates_match_winrate_targeting` — the
   re-implemented disable thresholds must not drift from the calibrator's.
+- `test_ui_wiring.py` — the UI↔API contract. Three defects that returned HTTP 200
+  and rendered a blank or frozen panel, so no HTTP check could see them:
+  the candles call sending `timeframe=` while the handler read `tf=` (the
+  timeframe selector was inert); `renderPositions` reading `price_open` /
+  `price_current` when the schema serialises `open_price` / `current_price` (the
+  Entry and Now columns were permanently dashes); and the controller querying
+  element ids the template need not define. Mutation-tested: reverting either
+  fix fails the suite.
+- `tools/verify_dashboard_render.js` — runs the real `dashboard.js` in a Node
+  `vm` against a stubbed DOM and a recording chart library, then asserts on what
+  the module asked the library to draw. This is the only layer that can see the
+  chart, because the chart is built at runtime: it proves the swing pivots
+  become R1/R2/S1/S2 price lines, that the volume series is populated, that the
+  open position's entry/stop/target lines carry the trade details, and that the
+  in-chart HUD is filled. 26 checks.
 - Learning-loop R sign correctness.
 - Drift protection retains ≥ 70 % of signal under a 40-loss streak.
 
@@ -656,4 +671,67 @@ the guard working.
 | `jarvis/intelligence/signal_engine.py` is orphaned — 545 lines, zero references anywhere | Its regime-adaptive evidence weights (`REGIME_WEIGHTS`, `weights_for_regime`) are **not** wired into `DecisionEngine`, which has no evidence weighting at all. It is a third, unused approach to regime adaptation alongside `realtime_optimizer.get_adjustments(symbol, regime)` (DB-driven P&L adjustment, live) and `regime_optimizer.py` (per-regime exit geometry). Either wire it or delete it — leaving it invites someone to assume it runs | `jarvis/intelligence/signal_engine.py` |
 | A full 3-mode regime sweep over all 20 symbols takes hours | `--passes 3` over M15/M5 means ~200 geometry evaluations per search and 8 searches per mode, each simulating 182k–209k candidates. Budget `--passes 1` and a reduced `--symbols` list for an interactive run | `tools/optimise_regime.py` |
 | `_static_market_values` only catches bare numeric literals | A fabricated value written as a formatted string (`"4,380.00"` built in JS) is invisible to it. The check is a strong net, not a proof | `tools/verify_ui_live.py` |
+| `tools/verify_dashboard_render.js` stubs the DOM | It proves the controller issues the right drawing calls and queries only ids the template defines; it cannot prove the result *looks* right. No browser is installed in this environment, so layout, overlap and colour contrast remain unverified by machine | `tools/verify_dashboard_render.js` |
+
+---
+
+## 13. The dashboard UI contract
+
+The dashboard (`jarvis/ui/templates/dashboard.html` + `static/js/dashboard.js`,
+served at `/`, `/dashboard`) is a three-view terminal — Trade, Analytics,
+Backtest — sitting on the `hm_ui.css` token set with `theme_terminal.css` as its
+component layer. `/console` and `/classic` still serve the older surfaces.
+
+### The one rule
+
+**No element carries a market value.** Every price, P&L, count and timestamp is
+written by `dashboard.js` from an API response; where a value is unknown the
+element shows a dash or an explicit state. A trading UI that renders a
+plausible-looking price when its feed is down is worse than one that renders
+nothing, because the fabricated value is indistinguishable from a real one.
+`tools/verify_ui_live.py` scans every template on disk for bare numeric literals
+and fails if one appears.
+
+### The chart
+
+Built at runtime against the vendored `lightweight-charts` v4, which means a
+missing container or an unloaded library is silent — hence
+`tools/verify_dashboard_render.js`, which drives the real controller against a
+stubbed DOM and asserts on the drawing calls it makes.
+
+Four properties are load-bearing:
+
+1. **Live ticks update, they do not reload.** The first paint calls `setData()`;
+   later polls call `update()` on the forming bar only. `setData()` on every poll
+   resets the viewport and throws the user out of wherever they had scrolled to.
+2. **Levels are derived, never invented.** `computeLevels()` finds swing pivots —
+   a bar whose high exceeds the two bars either side — and takes the two nearest
+   above the last close as R1/R2 and the two nearest below as S1/S2. Where a side
+   has no pivot that level is *absent*: `null`, no line drawn, and the legend
+   reads "No swing pivot in range". A synthesised level reads as a real price.
+3. **Overlays are the trade.** Entry, stop and target are price lines whose axis
+   labels carry side, size and price, with a floating HUD repeating them and the
+   live P&L. A stop that has moved past entry is drawn amber and labelled
+   "locked" — a stop in profit is a different fact from a stop at risk.
+4. **The chart and the table are the same data.** Candle precision comes from
+   `priceDigits()`, which mirrors the backend's per-symbol resolution, so a price
+   read off the axis and the same price read off a table row agree digit for
+   digit.
+
+### Restored surfaces
+
+The redesign had dropped three surfaces the previous terminal had. All three are
+back, each bound to a real endpoint and each with an honest empty state:
+
+| Surface | Source | Empty state |
+|---|---|---|
+| Support/resistance + trade overlays | computed from the candle series | "No swing pivot in range" |
+| Scanner radar | `telemetry.radar_opportunities` | "No scan published" |
+| Pending orders | `GET /api/pending_orders` | "No working orders" |
+
+The radar's accent comes from `is_actionable` on the candidate, so a row the
+engine would not trade renders without it and the list never implies that
+everything in it is tradeable. MT5 reports a pending order's type as a numeric
+enum; `pendingTypeName()` maps it to a name, because "2" under a column headed
+Type tells the user nothing.
 
