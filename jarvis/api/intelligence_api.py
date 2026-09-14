@@ -73,6 +73,27 @@ __all__ = [
 
 REPORTS_DIR = os.path.join(REPO_ROOT, "reports", "optimizer")
 
+
+def _latest_regime_report() -> Optional[str]:
+    """The newest ``regime_*.json`` in the optimiser report directory.
+
+    Returns ``None`` when the directory is absent or holds no regime report, so
+    the caller can report "never run" instead of serving an empty policy. Sorted
+    by mtime rather than filename so a clock-skewed or hand-renamed file cannot
+    masquerade as the newest run.
+    """
+    try:
+        names = [
+            os.path.join(REPORTS_DIR, n)
+            for n in os.listdir(REPORTS_DIR)
+            if n.startswith("regime_") and n.endswith(".json")
+        ]
+    except OSError:
+        return None
+    if not names:
+        return None
+    return max(names, key=os.path.getmtime)
+
 # Auto-selection cache. The full scan is a real pipeline run, so a short TTL
 # keeps the console responsive without re-running it on every poll. Reliability
 # is re-read on a slower cadence because it only changes when a backtest is
@@ -544,6 +565,8 @@ class IntelligenceService:
                 return self._get_meta(handler)
             if path.startswith("/api/backtest/jobs"):
                 return self._get_jobs(path, query, handler)
+            if path.startswith("/api/backtest/regime-policy"):
+                return self._get_regime_policy(query, handler)
             if path.startswith("/api/backtest/meta"):
                 return self._get_meta(handler)
         except Exception as exc:
@@ -596,6 +619,89 @@ class IntelligenceService:
             },
             "orchestrator_attached": self._orchestrator is not None,
             "reports_dir": os.path.relpath(REPORTS_DIR, REPO_ROOT),
+        })
+        return True
+
+    def _get_regime_policy(self, query: Dict[str, List[str]], handler: Any) -> bool:
+        """The newest regime-conditioned policy, in engine-consumable form.
+
+        Reads the most recent ``reports/optimizer/regime_*.json`` written by
+        ``tools/optimise_regime.py`` and returns, per trading mode, the geometry
+        and selectivity the engine should use **in each market condition**, plus
+        which conditions are switched off entirely.
+
+        Returns 503 with a reason when no run exists rather than an empty but
+        successful policy. "The optimiser has never been run" and "the optimiser
+        found nothing tradeable" are different facts, and a caller that cannot
+        tell them apart would end up gating live trading on a missing file.
+        """
+        path = _latest_regime_report()
+        if path is None:
+            _json(handler, {
+                "status": "UNAVAILABLE",
+                "error": (
+                    "no regime policy report found — run tools/optimise_regime.py"
+                ),
+                "reports_dir": os.path.relpath(REPORTS_DIR, REPO_ROOT),
+            }, 503)
+            return True
+
+        with open(path, "r", encoding="utf-8") as fh:
+            report = json.load(fh)
+
+        # ``_csv`` returns None when the parameter is absent, not an empty list —
+        # iterating it directly would 500 on every request without ?styles=.
+        want = set(_csv(query, "styles") or [])
+        policy: Dict[str, Any] = {}
+        for mode in report.get("modes", []):
+            style = str(mode.get("style", "")).upper()
+            if want and style not in want:
+                continue
+            if "error" in mode:
+                policy[style] = {"error": mode["error"]}
+                continue
+
+            table: Dict[str, Any] = {}
+            for r in mode.get("regimes", []):
+                table[str(r.get("regime"))] = {
+                    "enabled": bool(r.get("enabled")),
+                    # ``deployed_geometry`` is the geometry the policy actually
+                    # uses — the regime's own when it earned one, otherwise the
+                    # pooled default. ``uses_own_geometry`` distinguishes them so
+                    # a caller never has to guess which it received.
+                    "geometry": r.get("deployed_geometry"),
+                    "min_score_quantile": r.get("deployed_quantile"),
+                    "uses_own_geometry": bool(r.get("uses_own_geometry")),
+                    "basis": r.get("geometry_basis"),
+                    "reason": r.get("reason"),
+                    "candidates": r.get("candidates"),
+                    "baseline_expectancy_r": (
+                        r.get("baseline_within_regime") or {}
+                    ).get("expectancy_r"),
+                    "baseline_trades": (
+                        r.get("baseline_within_regime") or {}
+                    ).get("trades"),
+                }
+
+            policy[style] = {
+                "primary_timeframe": mode.get("primary_timeframe"),
+                "regimes": table,
+                "enabled_regimes": (mode.get("policy") or {}).get("enabled_regimes", []),
+                "regimes_with_own_geometry": (
+                    mode.get("policy") or {}
+                ).get("regimes_with_own_geometry", []),
+                "out_of_sample": (mode.get("policy") or {}).get("out_of_sample"),
+                "vs_baseline": mode.get("policy_vs_baseline"),
+            }
+
+        _json(handler, {
+            "status": "OK",
+            "generated_utc": report.get("generated_utc"),
+            "objective": (report.get("spec") or {}).get("objective"),
+            "gates": report.get("gates"),
+            "source_report": os.path.basename(path),
+            "age_seconds": round(max(0.0, time.time() - os.path.getmtime(path)), 1),
+            "policy": policy,
         })
         return True
 

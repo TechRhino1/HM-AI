@@ -255,6 +255,9 @@ class RegimeVerdict:
             "walk_forward": self.walk_forward,
             "validation_folds": self.validation_folds,
             "feasible": self.feasible,
+            "deployed_geometry": (
+                self.deployed_geometry.to_dict() if self.deployed_geometry else None
+            ),
             "deployed_geometry_key": (
                 self.deployed_geometry.key() if self.deployed_geometry else None
             ),
