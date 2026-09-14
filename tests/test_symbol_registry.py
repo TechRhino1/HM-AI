@@ -53,6 +53,58 @@ def test_registry_matches_broker_manifest(symbol, meta):
     )
 
 
+def test_broker_symbol_resolves_like_its_canonical_name():
+    """The symbol the ENGINE passes is the BROKER's, not the canonical name.
+
+    This is the hole ``test_registry_matches_broker_manifest`` leaves open. That
+    test resolves the manifest's ``symbol`` field ("WTI"), which is a key in the
+    registry and therefore always resolves. But the running engine asks about the
+    ``broker_symbol`` ("OILCash#"), and *that* is the lookup that can miss the
+    alias table and fall through to the generic FX spec.
+
+    Oil did exactly that. Every other cash CFD carried its ``XxxCash#`` alias
+    (US500Cash#, US30Cash#, GER40Cash#, UK100Cash#) but oil did not, and
+    "OILCASH#" contains none of the canonical names so the fuzzy pass could not
+    rescue it either. The result was a contract size of 100,000 instead of 100 —
+    position sizing out by a factor of 1000 — and a pip of 0.0001 instead of
+    0.01, with no error raised.
+    """
+    checked = 0
+    for path in sorted(glob.glob(MANIFEST_GLOB)):
+        with open(path, encoding="utf-8") as fh:
+            payload = json.load(fh)
+        broker = payload.get("broker_symbol")
+        canonical = payload.get("symbol")
+        if not broker or not canonical:
+            continue
+        checked += 1
+
+        broker_spec = resolve(broker)
+        canon_spec = resolve(canonical)
+
+        assert broker_spec.contract_size == canon_spec.contract_size, (
+            f"{broker} resolves to contract_size={broker_spec.contract_size} but "
+            f"its canonical name {canonical} has {canon_spec.contract_size}. The "
+            f"engine passes the BROKER symbol to resolve() - add {broker!r} to "
+            f"_ALIAS_MAP in jarvis/data/symbol_registry.py."
+        )
+        assert broker_spec.pip_size == canon_spec.pip_size, (
+            f"{broker} pip_size={broker_spec.pip_size} != {canonical} "
+            f"pip_size={canon_spec.pip_size}"
+        )
+        assert broker_spec.digits == canon_spec.digits, (
+            f"{broker} digits={broker_spec.digits} != {canonical} "
+            f"digits={canon_spec.digits}"
+        )
+        assert broker_spec.max_spread_pips == canon_spec.max_spread_pips, (
+            f"{broker} max_spread_pips={broker_spec.max_spread_pips} != "
+            f"{canonical} {canon_spec.max_spread_pips}"
+        )
+
+    if not checked:
+        pytest.skip("no broker manifests present")
+
+
 @pytest.mark.skipif(not _MANIFESTS, reason="no fetched broker manifests present")
 @pytest.mark.parametrize("symbol,meta", _MANIFESTS, ids=[s for s, _ in _MANIFESTS])
 def test_spread_cap_admits_the_instruments_own_typical_spread(symbol, meta):

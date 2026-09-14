@@ -170,7 +170,15 @@ _ALIAS_MAP: Dict[str, str] = {
     "FTSE100": "UK100", "FTSE": "UK100", "UK100.I": "UK100",
     "XAGUSD#": "XAGUSD", "XAGUSD.I#": "XAGUSD", "SILVER": "XAGUSD", "SILVER.i#": "XAGUSD",
     "SILVER.I#": "XAGUSD", "XAG": "XAGUSD",
+    # Every other cash CFD carries its broker "Cash#" alias (US500Cash#,
+    # US30Cash#, US100Cash#, NAS100Cash#, GER40Cash#, UK100Cash#). Oil was the
+    # one omission, and because "OILCASH#" contains none of the canonical names
+    # the fuzzy pass could not rescue it either: the broker symbol for WTI fell
+    # all the way through to the generic FX spec, giving oil a contract size of
+    # 100,000 instead of 100 and a pip of 0.0001 instead of 0.01. Position
+    # sizing was therefore out by a factor of 1000 and spread gating by 100.
     "USOIL": "WTI", "OIL": "WTI", "CRUDE": "WTI", "USOIL.I#": "WTI", "OIL.I#": "WTI", "CL": "WTI",
+    "OILCash#": "WTI", "USOILCash#": "WTI",
     "USDCHF#": "USDCHF", "USDCHF.I#": "USDCHF",
     "NZDUSD#": "NZDUSD", "NZDUSD.I#": "NZDUSD",
     "EURJPY#": "EURJPY", "EURJPY.I#": "EURJPY",
