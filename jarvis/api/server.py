@@ -285,7 +285,8 @@ class JarvisRequestHandler(BaseHTTPRequestHandler):
 
         try:
             public_get_endpoints = {
-                "/", "/index.html", "/console", "/console.html",
+                "/", "/index.html", "/dashboard", "/dashboard.html",
+                "/console", "/console.html",
                 "/classic", "/classic.html",
                 "/stocks", "/stocks.html", "/screener",
                 "/india", "/india.html", "/india/stocks", "/nse", "/bse",
@@ -311,7 +312,9 @@ class JarvisRequestHandler(BaseHTTPRequestHandler):
                 self._send_json({"status": "UNAUTHORIZED", "error": "Authentication required"}, status_code=401)
                 return
 
-            if path in ("/", "/index.html", "/console", "/console.html"):
+            if path in ("/", "/index.html", "/dashboard", "/dashboard.html"):
+                self._serve_dashboard_ui()
+            elif path in ("/console", "/console.html"):
                 self._serve_console_ui()
             elif path in ("/classic", "/classic.html"):
                 self._serve_terminal_ui()
@@ -974,8 +977,16 @@ class JarvisRequestHandler(BaseHTTPRequestHandler):
         else:
             self.send_error(404, f"Template {template_name} not found")
 
+    def _serve_dashboard_ui(self):
+        """Primary surface: the advanced trading terminal (dashboard.html).
+
+        Built on theme_terminal.css and bound entirely to live API data — no
+        market value is hard-coded in the template or its controller.
+        """
+        self._serve_template("dashboard.html")
+
     def _serve_console_ui(self):
-        """Primary desk console (the redesigned, responsive UI)."""
+        """Previous desk console, retained at /console."""
         self._serve_template("console.html")
 
     def _serve_terminal_ui(self):

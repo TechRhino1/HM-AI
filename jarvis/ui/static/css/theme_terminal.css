@@ -1,0 +1,739 @@
+/* ===========================================================================
+   JARVIS — Advanced Trading Terminal Theme (theme_terminal.css)
+
+   WHAT THIS IS
+   ------------
+   A theme + component layer for a professional trading dashboard. It sits ON
+   TOP of hm_ui.css and consumes its tokens; it does not redefine them. Every
+   colour, space, radius and duration below is either a --hm-* token or a new
+   --tt-* token derived from one, so the whole surface can be re-themed by
+   overriding custom properties alone.
+
+   DESIGN INTENT
+   -------------
+   1. DENSITY IS A FEATURE. A trader watching twelve instruments needs twelve
+      rows visible, not twelve scrolls. Rows are 28px, not 44px. The 44px
+      touch target is preserved for interactive controls (buttons, tabs) but
+      NOT for data rows, which are read far more often than tapped.
+
+   2. NUMBERS ARE TYPOGRAPHY. Every price, P&L and percentage uses tabular
+      figures and a fixed decimal count so digits do not jitter as values
+      tick. Right-alignment is mandatory: a column of left-aligned numbers
+      cannot be compared at a glance.
+
+   3. COLOUR CARRIES MEANING, NEVER DECORATION. Bull/bear/flat, heat, and
+      confidence tiers are the only semantic colours. Nothing is tinted for
+      looks.
+
+   4. EVERY STATE IS DESIGNED. Loading, empty, stale and error are first-class
+      — because a trading UI that renders a blank panel when the feed dies is
+      worse than one that says so. See the .tt-state-* classes.
+
+   5. NO HARD-CODED CONTENT. Every value-bearing element in the dashboard is
+      populated from the API. This file contains zero market data.
+   =========================================================================== */
+
+/* ── Theme tokens ───────────────────────────────────────────────────────── */
+:root {
+  /* Numeric typography: one place to change how every number reads. */
+  --tt-num-font: var(--hm-font-mono);
+  --tt-num-size: 0.8125rem;
+  --tt-num-weight: var(--hm-weight-medium);
+  --tt-num-tracking: -0.01em;
+
+  /* Row density. */
+  --tt-row-h: 28px;
+  --tt-row-h-comfy: 34px;
+  --tt-head-h: 26px;
+
+  /* Semantic market colours, aliased from the base palette so a re-theme is
+     still a single override. */
+  --tt-up: var(--hm-bull);
+  --tt-down: var(--hm-bear);
+  --tt-flat: var(--hm-neutral);
+  --tt-up-bg: var(--hm-bull-subtle);
+  --tt-down-bg: var(--hm-bear-subtle);
+
+  /* Heat ramp for P&L intensity. Deliberately low-alpha so text stays legible
+     on top of any cell in the ramp. */
+  --tt-heat-1: color-mix(in srgb, var(--hm-bull) 10%, transparent);
+  --tt-heat-2: color-mix(in srgb, var(--hm-bull) 20%, transparent);
+  --tt-heat-3: color-mix(in srgb, var(--hm-bull) 32%, transparent);
+  --tt-heat-4: color-mix(in srgb, var(--hm-bull) 46%, transparent);
+  --tt-heat-neg-1: color-mix(in srgb, var(--hm-bear) 10%, transparent);
+  --tt-heat-neg-2: color-mix(in srgb, var(--hm-bear) 20%, transparent);
+  --tt-heat-neg-3: color-mix(in srgb, var(--hm-bear) 32%, transparent);
+  --tt-heat-neg-4: color-mix(in srgb, var(--hm-bear) 46%, transparent);
+
+  /* Confidence tiers — a distinct hue per tier so they are distinguishable
+     without relying on text alone. */
+  --tt-tier-high: var(--hm-bull);
+  --tt-tier-medium: var(--hm-accent);
+  --tt-tier-low: var(--hm-warn);
+  --tt-tier-none: var(--hm-text-dim);
+
+  /* Panel chrome. */
+  --tt-panel-bg: var(--hm-bg-surface);
+  --tt-panel-head-bg: var(--hm-bg-raised);
+  --tt-grid-line: var(--hm-border-subtle);
+
+  /* Tick flash — the transient highlight when a value changes. */
+  --tt-flash-dur: 600ms;
+  --tt-flash-up: color-mix(in srgb, var(--hm-bull) 26%, transparent);
+  --tt-flash-down: color-mix(in srgb, var(--hm-bear) 26%, transparent);
+}
+
+/* Reduced motion removes the flash rather than shortening it — a 20ms flash
+   is worse than none. */
+@media (prefers-reduced-motion: reduce) {
+  :root { --tt-flash-dur: 0ms; }
+}
+
+/* ── Reset scoped to the dashboard ──────────────────────────────────────── */
+.tt-app *, .tt-app *::before, .tt-app *::after { box-sizing: border-box; }
+
+.tt-app {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--hm-bg-base);
+  color: var(--hm-text-primary);
+  font-family: var(--hm-font-sans);
+  font-size: var(--hm-text-sm);
+  line-height: var(--hm-leading-normal);
+  -webkit-font-smoothing: antialiased;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  grid-template-areas: "rail" "main" "status";
+}
+
+/* ── Numeric type ───────────────────────────────────────────────────────── */
+.tt-num {
+  font-family: var(--tt-num-font);
+  font-size: var(--tt-num-size);
+  font-weight: var(--tt-num-weight);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: var(--tt-num-tracking);
+  text-align: right;
+  white-space: nowrap;
+}
+.tt-num--lg { font-size: var(--hm-text-lg); font-weight: var(--hm-weight-semibold); }
+.tt-num--xl { font-size: var(--hm-text-2xl); font-weight: var(--hm-weight-bold); }
+
+.tt-up { color: var(--tt-up); }
+.tt-down { color: var(--tt-down); }
+.tt-flat { color: var(--tt-flat); }
+
+/* ── App rail (top) ─────────────────────────────────────────────────────── */
+.tt-rail {
+  grid-area: rail;
+  display: flex;
+  align-items: center;
+  gap: var(--hm-space-4);
+  padding: 0 var(--hm-space-4);
+  min-height: var(--hm-hud-height);
+  background: var(--hm-bg-raised);
+  border-bottom: 1px solid var(--hm-border);
+  position: sticky;
+  top: 0;
+  z-index: var(--hm-z-hud);
+  flex-wrap: wrap;
+}
+
+.tt-brand {
+  display: flex;
+  align-items: center;
+  gap: var(--hm-space-2);
+  font-weight: var(--hm-weight-bold);
+  letter-spacing: var(--hm-tracking-caps);
+  text-transform: uppercase;
+  font-size: var(--hm-text-xs);
+  color: var(--hm-text-primary);
+  white-space: nowrap;
+}
+.tt-brand__mark {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--hm-accent);
+  box-shadow: 0 0 0 3px var(--hm-accent-glow);
+}
+
+/* Session state — a single dot the trader can trust at a glance. */
+.tt-session {
+  display: flex; align-items: center; gap: var(--hm-space-2);
+  font-size: var(--hm-text-2xs);
+  text-transform: uppercase;
+  letter-spacing: var(--hm-tracking-caps);
+  color: var(--hm-text-secondary);
+  white-space: nowrap;
+}
+.tt-session__dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--hm-text-dim);
+}
+.tt-session[data-state="open"] .tt-session__dot { background: var(--hm-bull); }
+.tt-session[data-state="pre"] .tt-session__dot { background: var(--hm-warn); }
+.tt-session[data-state="closed"] .tt-session__dot { background: var(--hm-text-dim); }
+
+.tt-rail__spacer { flex: 1 1 auto; }
+
+.tt-rail__group {
+  display: flex; align-items: center; gap: var(--hm-space-3);
+  flex-wrap: wrap;
+}
+
+/* ── Nav tabs ───────────────────────────────────────────────────────────── */
+.tt-tabs { display: flex; gap: 2px; }
+.tt-tab {
+  appearance: none;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--hm-text-secondary);
+  font: inherit;
+  font-size: var(--hm-text-xs);
+  font-weight: var(--hm-weight-medium);
+  padding: var(--hm-space-2) var(--hm-space-3);
+  min-height: var(--hm-touch-target);
+  border-radius: var(--hm-radius-sm);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background var(--hm-dur-fast) var(--hm-ease),
+              color var(--hm-dur-fast) var(--hm-ease);
+}
+.tt-tab:hover { background: var(--hm-bg-hover); color: var(--hm-text-primary); }
+.tt-tab[aria-selected="true"] {
+  background: var(--hm-accent-subtle);
+  color: var(--hm-accent);
+  border-color: color-mix(in srgb, var(--hm-accent) 40%, transparent);
+}
+.tt-tab:focus-visible {
+  outline: 2px solid var(--hm-accent);
+  outline-offset: 2px;
+}
+
+/* ── Main grid ──────────────────────────────────────────────────────────── */
+.tt-main {
+  grid-area: main;
+  display: grid;
+  gap: 1px;
+  background: var(--tt-grid-line);
+  min-height: 0;
+}
+.tt-view { display: none; min-height: 0; }
+.tt-view[data-active="true"] { display: grid; }
+
+/* Trade view: watchlist | chart | order ticket. */
+#view-trade.tt-view[data-active="true"] {
+  grid-template-columns: minmax(260px, 320px) minmax(0, 1fr) minmax(280px, 340px);
+}
+#view-analytics.tt-view[data-active="true"] {
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 420px);
+}
+#view-backtest.tt-view[data-active="true"] {
+  grid-template-columns: minmax(300px, 380px) minmax(0, 1fr);
+}
+
+/* ── Panel ──────────────────────────────────────────────────────────────── */
+.tt-panel {
+  background: var(--tt-panel-bg);
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.tt-panel__head {
+  display: flex; align-items: center; gap: var(--hm-space-2);
+  height: var(--tt-head-h);
+  padding: 0 var(--hm-space-3);
+  background: var(--tt-panel-head-bg);
+  border-bottom: 1px solid var(--hm-border-subtle);
+  flex: 0 0 auto;
+}
+.tt-panel__title {
+  font-size: var(--hm-text-2xs);
+  font-weight: var(--hm-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: var(--hm-tracking-caps);
+  color: var(--hm-text-secondary);
+  margin: 0;
+  white-space: nowrap;
+}
+.tt-panel__count {
+  font-family: var(--tt-num-font);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--hm-text-2xs);
+  color: var(--hm-text-dim);
+  padding: 1px var(--hm-space-1);
+  border-radius: var(--hm-radius-sm);
+  background: var(--hm-bg-base);
+}
+.tt-panel__spacer { flex: 1 1 auto; }
+.tt-panel__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.tt-panel__body--flush { padding: 0; }
+.tt-panel__foot {
+  flex: 0 0 auto;
+  padding: var(--hm-space-2) var(--hm-space-3);
+  border-top: 1px solid var(--hm-border-subtle);
+  background: var(--tt-panel-head-bg);
+}
+
+/* Scrollbars: thin, theme-consistent, non-intrusive. */
+.tt-panel__body::-webkit-scrollbar { width: 8px; height: 8px; }
+.tt-panel__body::-webkit-scrollbar-track { background: transparent; }
+.tt-panel__body::-webkit-scrollbar-thumb {
+  background: var(--hm-border-strong);
+  border-radius: var(--hm-radius-pill);
+}
+.tt-panel__body::-webkit-scrollbar-thumb:hover { background: var(--hm-text-dim); }
+
+/* ── Dense data table ───────────────────────────────────────────────────── */
+.tt-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: var(--hm-text-xs);
+}
+.tt-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  height: var(--tt-head-h);
+  padding: 0 var(--hm-space-2);
+  background: var(--tt-panel-head-bg);
+  border-bottom: 1px solid var(--hm-border);
+  font-size: var(--hm-text-2xs);
+  font-weight: var(--hm-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: var(--hm-tracking-caps);
+  color: var(--hm-text-dim);
+  text-align: left;
+  white-space: nowrap;
+}
+.tt-table th.tt-num, .tt-table td.tt-num { text-align: right; }
+.tt-table tbody td {
+  height: var(--tt-row-h);
+  padding: 0 var(--hm-space-2);
+  border-bottom: 1px solid var(--hm-border-subtle);
+  vertical-align: middle;
+  white-space: nowrap;
+}
+.tt-table tbody tr { transition: background var(--hm-dur-instant) var(--hm-ease); }
+.tt-table tbody tr:hover { background: var(--hm-bg-hover); }
+.tt-table tbody tr[aria-selected="true"] {
+  background: var(--hm-bg-active);
+  box-shadow: inset 2px 0 0 var(--hm-accent);
+}
+.tt-table tbody tr[data-clickable="true"] { cursor: pointer; }
+
+.tt-symbol {
+  font-weight: var(--hm-weight-semibold);
+  color: var(--hm-text-primary);
+  letter-spacing: 0.01em;
+}
+
+/* Tick flash: applied by JS for one frame when a value changes. */
+@keyframes tt-flash-up {
+  from { background: var(--tt-flash-up); }
+  to   { background: transparent; }
+}
+@keyframes tt-flash-down {
+  from { background: var(--tt-flash-down); }
+  to   { background: transparent; }
+}
+.tt-flash-up { animation: tt-flash-up var(--tt-flash-dur) var(--hm-ease-out); }
+.tt-flash-down { animation: tt-flash-down var(--tt-flash-dur) var(--hm-ease-out); }
+
+/* Heat cells for P&L columns. */
+.tt-heat-1 { background: var(--tt-heat-1); }
+.tt-heat-2 { background: var(--tt-heat-2); }
+.tt-heat-3 { background: var(--tt-heat-3); }
+.tt-heat-4 { background: var(--tt-heat-4); }
+.tt-heat-neg-1 { background: var(--tt-heat-neg-1); }
+.tt-heat-neg-2 { background: var(--tt-heat-neg-2); }
+.tt-heat-neg-3 { background: var(--tt-heat-neg-3); }
+.tt-heat-neg-4 { background: var(--tt-heat-neg-4); }
+
+/* ── Chips ──────────────────────────────────────────────────────────────── */
+.tt-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px var(--hm-space-2);
+  border-radius: var(--hm-radius-sm);
+  font-size: var(--hm-text-2xs);
+  font-weight: var(--hm-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: var(--hm-tracking-caps);
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+.tt-chip--high   { color: var(--tt-tier-high);   border-color: color-mix(in srgb, var(--tt-tier-high) 45%, transparent); }
+.tt-chip--medium { color: var(--tt-tier-medium); border-color: color-mix(in srgb, var(--tt-tier-medium) 45%, transparent); }
+.tt-chip--low    { color: var(--tt-tier-low);    border-color: color-mix(in srgb, var(--tt-tier-low) 45%, transparent); }
+.tt-chip--none   { color: var(--tt-tier-none);   border-color: var(--hm-border); }
+.tt-chip--buy    { color: var(--tt-up);   background: var(--tt-up-bg); }
+.tt-chip--sell   { color: var(--tt-down); background: var(--tt-down-bg); }
+.tt-chip--muted  { color: var(--hm-text-dim); border-color: var(--hm-border-subtle); }
+
+/* Direction marker: a shape as well as a colour, so it survives greyscale. */
+.tt-dir { display: inline-flex; align-items: center; gap: 4px; font-weight: var(--hm-weight-semibold); }
+.tt-dir::before { content: ""; width: 0; height: 0; border-left: 4px solid transparent; border-right: 4px solid transparent; }
+.tt-dir--buy::before  { border-bottom: 6px solid var(--tt-up); }
+.tt-dir--sell::before { border-top: 6px solid var(--tt-down); }
+.tt-dir--flat::before { width: 8px; height: 2px; border: 0; background: var(--tt-flat); }
+
+/* ── Metric tiles ───────────────────────────────────────────────────────── */
+.tt-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 1px;
+  background: var(--tt-grid-line);
+}
+.tt-metric {
+  background: var(--tt-panel-bg);
+  padding: var(--hm-space-3);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.tt-metric__label {
+  font-size: var(--hm-text-2xs);
+  text-transform: uppercase;
+  letter-spacing: var(--hm-tracking-caps);
+  color: var(--hm-text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tt-metric__value {
+  font-family: var(--tt-num-font);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--hm-text-lg);
+  font-weight: var(--hm-weight-semibold);
+  letter-spacing: var(--tt-num-tracking);
+  color: var(--hm-text-primary);
+}
+.tt-metric__sub {
+  font-size: var(--hm-text-2xs);
+  color: var(--hm-text-dim);
+}
+
+/* ── Gauge (confidence / risk) ──────────────────────────────────────────── */
+.tt-gauge { display: flex; align-items: center; gap: var(--hm-space-3); }
+.tt-gauge__bar {
+  position: relative;
+  flex: 1 1 auto;
+  height: 6px;
+  border-radius: var(--hm-radius-pill);
+  background: var(--hm-bg-base);
+  overflow: hidden;
+}
+.tt-gauge__fill {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--hm-accent);
+  transition: width var(--hm-dur-normal) var(--hm-ease-out);
+}
+
+/* ── Sparkline ──────────────────────────────────────────────────────────── */
+.tt-spark { display: block; width: 100%; height: 22px; overflow: visible; }
+.tt-spark__line { fill: none; stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+.tt-spark__area { stroke: none; opacity: 0.16; }
+
+/* ── Reasoning list ("why this trade") ──────────────────────────────────── */
+.tt-reasons { list-style: none; margin: 0; padding: 0; }
+.tt-reasons li {
+  display: flex;
+  gap: var(--hm-space-2);
+  padding: var(--hm-space-2) var(--hm-space-3);
+  border-bottom: 1px solid var(--hm-border-subtle);
+  font-size: var(--hm-text-xs);
+  line-height: var(--hm-leading-normal);
+}
+.tt-reasons__key {
+  flex: 0 0 auto;
+  min-width: 84px;
+  color: var(--hm-text-dim);
+  text-transform: uppercase;
+  font-size: var(--hm-text-2xs);
+  letter-spacing: var(--hm-tracking-caps);
+  padding-top: 1px;
+}
+.tt-reasons__val { flex: 1 1 auto; color: var(--hm-text-secondary); min-width: 0; }
+.tt-reasons__val strong { color: var(--hm-text-primary); }
+
+/* ── Forms ──────────────────────────────────────────────────────────────── */
+.tt-field { display: flex; flex-direction: column; gap: 4px; margin-bottom: var(--hm-space-3); }
+.tt-field__label {
+  font-size: var(--hm-text-2xs);
+  text-transform: uppercase;
+  letter-spacing: var(--hm-tracking-caps);
+  color: var(--hm-text-dim);
+}
+.tt-input, .tt-select, .tt-textarea {
+  width: 100%;
+  min-height: var(--hm-touch-target);
+  padding: var(--hm-space-2) var(--hm-space-3);
+  background: var(--hm-bg-base);
+  color: var(--hm-text-primary);
+  border: 1px solid var(--hm-border);
+  border-radius: var(--hm-radius-sm);
+  font: inherit;
+  font-size: var(--hm-text-sm);
+}
+.tt-textarea { min-height: 64px; resize: vertical; font-family: var(--tt-num-font); }
+.tt-input:focus-visible, .tt-select:focus-visible, .tt-textarea:focus-visible {
+  outline: 2px solid var(--hm-accent);
+  outline-offset: 1px;
+  border-color: var(--hm-accent);
+}
+.tt-input::placeholder, .tt-textarea::placeholder { color: var(--hm-text-dim); }
+.tt-hint { font-size: var(--hm-text-2xs); color: var(--hm-text-dim); }
+
+.tt-check {
+  display: flex; align-items: center; gap: var(--hm-space-2);
+  font-size: var(--hm-text-xs); color: var(--hm-text-secondary);
+  min-height: 28px; cursor: pointer;
+}
+.tt-check input { accent-color: var(--hm-accent); width: 15px; height: 15px; cursor: pointer; }
+
+/* ── Buttons ────────────────────────────────────────────────────────────── */
+.tt-btn {
+  appearance: none;
+  display: inline-flex; align-items: center; justify-content: center;
+  gap: var(--hm-space-2);
+  min-height: var(--hm-touch-target);
+  padding: 0 var(--hm-space-4);
+  background: var(--hm-bg-raised);
+  color: var(--hm-text-primary);
+  border: 1px solid var(--hm-border);
+  border-radius: var(--hm-radius-sm);
+  font: inherit;
+  font-size: var(--hm-text-sm);
+  font-weight: var(--hm-weight-medium);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background var(--hm-dur-fast) var(--hm-ease),
+              border-color var(--hm-dur-fast) var(--hm-ease);
+}
+.tt-btn:hover { background: var(--hm-bg-hover); border-color: var(--hm-border-strong); }
+.tt-btn:focus-visible { outline: 2px solid var(--hm-accent); outline-offset: 2px; }
+.tt-btn[disabled], .tt-btn[aria-disabled="true"] { opacity: 0.5; cursor: not-allowed; }
+.tt-btn--primary {
+  background: var(--hm-accent);
+  border-color: var(--hm-accent);
+  color: var(--hm-text-inverse);
+  font-weight: var(--hm-weight-semibold);
+}
+.tt-btn--primary:hover { background: var(--hm-accent-hover); border-color: var(--hm-accent-hover); }
+.tt-btn--buy  { background: var(--tt-up);   border-color: var(--tt-up);   color: var(--hm-text-inverse); font-weight: var(--hm-weight-bold); }
+.tt-btn--sell { background: var(--tt-down); border-color: var(--tt-down); color: var(--hm-text-inverse); font-weight: var(--hm-weight-bold); }
+.tt-btn--sm { min-height: 28px; padding: 0 var(--hm-space-3); font-size: var(--hm-text-xs); }
+.tt-btn--block { width: 100%; }
+
+/* ── State surfaces: loading / empty / stale / error ───────────────────── */
+.tt-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--hm-space-2);
+  padding: var(--hm-space-6) var(--hm-space-4);
+  text-align: center;
+  color: var(--hm-text-dim);
+  font-size: var(--hm-text-xs);
+  min-height: 96px;
+}
+.tt-state__title { color: var(--hm-text-secondary); font-weight: var(--hm-weight-medium); }
+.tt-state--error .tt-state__title { color: var(--hm-bear); }
+.tt-state--stale .tt-state__title { color: var(--hm-warn); }
+
+/* Skeleton shimmer for loading. */
+.tt-skeleton {
+  background: linear-gradient(90deg,
+    var(--hm-bg-raised) 25%,
+    var(--hm-bg-hover) 37%,
+    var(--hm-bg-raised) 63%);
+  background-size: 400% 100%;
+  animation: tt-shimmer 1.4s ease-in-out infinite;
+  border-radius: var(--hm-radius-sm);
+  height: 12px;
+}
+@keyframes tt-shimmer {
+  0%   { background-position: 100% 50%; }
+  100% { background-position: 0 50%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tt-skeleton { animation: none; background: var(--hm-bg-raised); }
+}
+
+/* Staleness banner — shown when data is older than its expected cadence. */
+.tt-stale-banner {
+  display: flex; align-items: center; gap: var(--hm-space-2);
+  padding: var(--hm-space-2) var(--hm-space-3);
+  background: var(--hm-warn-subtle);
+  color: var(--hm-warn);
+  font-size: var(--hm-text-xs);
+  border-bottom: 1px solid color-mix(in srgb, var(--hm-warn) 35%, transparent);
+}
+
+/* ── Status bar (bottom) ────────────────────────────────────────────────── */
+.tt-status {
+  grid-area: status;
+  display: flex; align-items: center; gap: var(--hm-space-4);
+  padding: 0 var(--hm-space-4);
+  min-height: 26px;
+  background: var(--hm-bg-raised);
+  border-top: 1px solid var(--hm-border);
+  font-size: var(--hm-text-2xs);
+  color: var(--hm-text-dim);
+  flex-wrap: wrap;
+}
+.tt-status__item { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
+.tt-status__item b { color: var(--hm-text-secondary); font-weight: var(--hm-weight-medium); }
+
+/* ── Toast ──────────────────────────────────────────────────────────────── */
+.tt-toasts {
+  position: fixed;
+  right: var(--hm-space-4);
+  bottom: calc(var(--hm-space-4) + 26px);
+  display: flex; flex-direction: column; gap: var(--hm-space-2);
+  z-index: var(--hm-z-toast);
+  max-width: min(360px, calc(100vw - var(--hm-space-6)));
+}
+.tt-toast {
+  padding: var(--hm-space-3) var(--hm-space-4);
+  background: var(--hm-bg-overlay);
+  border: 1px solid var(--hm-border-strong);
+  border-left-width: 3px;
+  border-radius: var(--hm-radius);
+  box-shadow: var(--hm-shadow-lg);
+  font-size: var(--hm-text-xs);
+  color: var(--hm-text-primary);
+  animation: tt-toast-in var(--hm-dur-normal) var(--hm-ease-out);
+}
+.tt-toast--error { border-left-color: var(--hm-bear); }
+.tt-toast--warn  { border-left-color: var(--hm-warn); }
+.tt-toast--ok    { border-left-color: var(--hm-bull); }
+@keyframes tt-toast-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* ── Chart host ─────────────────────────────────────────────────────────── */
+.tt-chart { position: relative; width: 100%; height: 100%; min-height: 240px; }
+.tt-chart__overlay {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  pointer-events: none;
+}
+
+/* ── Log / progress ─────────────────────────────────────────────────────── */
+.tt-log {
+  font-family: var(--tt-num-font);
+  font-size: var(--hm-text-2xs);
+  line-height: 1.5;
+  color: var(--hm-text-secondary);
+  padding: var(--hm-space-2) var(--hm-space-3);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.tt-progress {
+  height: 4px;
+  background: var(--hm-bg-base);
+  border-radius: var(--hm-radius-pill);
+  overflow: hidden;
+}
+.tt-progress__fill {
+  height: 100%;
+  background: var(--hm-accent);
+  transition: width var(--hm-dur-normal) var(--hm-ease-out);
+}
+
+/* ── Utility ────────────────────────────────────────────────────────────── */
+.tt-row { display: flex; align-items: center; gap: var(--hm-space-2); }
+.tt-col { display: flex; flex-direction: column; gap: var(--hm-space-2); }
+.tt-wrap { flex-wrap: wrap; }
+.tt-grow { flex: 1 1 auto; min-width: 0; }
+.tt-pad { padding: var(--hm-space-3); }
+.tt-truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tt-muted { color: var(--hm-text-dim); }
+.tt-hidden { display: none !important; }
+.tt-sr-only {
+  position: absolute; width: 1px; height: 1px;
+  padding: 0; margin: -1px; overflow: hidden;
+  clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+}
+
+/* ── Responsive ─────────────────────────────────────────────────────────── */
+/* Tablet: drop to two panes, the ticket moves below the chart. */
+@media (max-width: 1279px) {
+  #view-trade.tt-view[data-active="true"] {
+    grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) auto;
+  }
+  #view-trade .tt-panel--ticket { grid-column: 1 / -1; }
+  #view-analytics.tt-view[data-active="true"],
+  #view-backtest.tt-view[data-active="true"] {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+}
+
+/* Phone: one pane at a time, chosen by the pane bar. */
+@media (max-width: 767px) {
+  .tt-app { grid-template-rows: auto auto 1fr auto; grid-template-areas: "rail" "panebar" "main" "status"; }
+  #view-trade.tt-view[data-active="true"],
+  #view-analytics.tt-view[data-active="true"],
+  #view-backtest.tt-view[data-active="true"] {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+  }
+  .tt-app[data-pane="chart"] .tt-panel--watchlist,
+  .tt-app[data-pane="chart"] .tt-panel--ticket,
+  .tt-app[data-pane="watchlist"] .tt-panel--chart,
+  .tt-app[data-pane="watchlist"] .tt-panel--ticket,
+  .tt-app[data-pane="ticket"] .tt-panel--chart,
+  .tt-app[data-pane="ticket"] .tt-panel--watchlist { display: none; }
+
+  .tt-pane-bar { display: flex; }
+  .tt-rail { padding: 0 var(--hm-space-2); gap: var(--hm-space-2); }
+  .tt-rail__group--secondary { display: none; }
+}
+
+.tt-pane-bar {
+  grid-area: panebar;
+  display: none;
+  gap: 2px;
+  padding: var(--hm-space-1);
+  background: var(--hm-bg-raised);
+  border-bottom: 1px solid var(--hm-border);
+}
+.tt-pane-bar__btn {
+  flex: 1 1 0;
+  appearance: none;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--hm-text-secondary);
+  font: inherit; font-size: var(--hm-text-xs);
+  min-height: 36px;
+  border-radius: var(--hm-radius-sm);
+  cursor: pointer;
+}
+.tt-pane-bar__btn[aria-selected="true"] {
+  background: var(--hm-accent-subtle);
+  color: var(--hm-accent);
+  border-color: color-mix(in srgb, var(--hm-accent) 40%, transparent);
+}
+
+/* ── Print ──────────────────────────────────────────────────────────────── */
+@media print {
+  .tt-rail, .tt-status, .tt-pane-bar, .tt-toasts { display: none !important; }
+  .tt-app { display: block; background: #fff; color: #000; }
+  .tt-panel { break-inside: avoid; border: 1px solid #ccc; }
+}

@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<title>JARVIS — Trading Terminal</title>
+
+<!-- Base token set. The theme below consumes these and defines no duplicates. -->
+<link rel="stylesheet" href="/static/css/hm_ui.css">
+<link rel="stylesheet" href="/static/css/theme_terminal.css">
+<link rel="stylesheet" href="/static/css/auth.css">
+
+<!--
+  DYNAMIC-DATA CONTRACT
+  ---------------------
+  No element in this file contains a market value. Every price, P&L, count,
+  symbol and timestamp is written by dashboard.js from an API response. Where a
+  value is not yet known the element carries `data-state="loading"` and the
+  stylesheet renders a skeleton — never a plausible-looking placeholder. A
+  trading UI that shows a fabricated price when the feed is down is worse than
+  one that shows nothing.
+-->
+</head>
+<body class="tt-app" data-view="trade" data-pane="watchlist">
+
+<a class="tt-sr-only" href="#main">Skip to main content</a>
+
+<!-- ═══ Rail ═══════════════════════════════════════════════════════════ -->
+<header class="tt-rail" role="banner">
+  <div class="tt-brand">
+    <span class="tt-brand__mark" aria-hidden="true"></span>
+    JARVIS
+  </div>
+
+  <div class="tt-session" id="session-state" data-state="unknown"
+       title="Market session">
+    <span class="tt-session__dot" aria-hidden="true"></span>
+    <span id="session-label">—</span>
+  </div>
+
+  <nav class="tt-tabs" role="tablist" aria-label="Primary views">
+    <button class="tt-tab" role="tab" data-view-btn="trade"
+            aria-selected="true" aria-controls="view-trade">Trade</button>
+    <button class="tt-tab" role="tab" data-view-btn="analytics"
+            aria-selected="false" aria-controls="view-analytics">Analytics</button>
+    <button class="tt-tab" role="tab" data-view-btn="backtest"
+            aria-selected="false" aria-controls="view-backtest">Backtest</button>
+  </nav>
+
+  <span class="tt-rail__spacer"></span>
+
+  <!-- Account strip: every figure comes from /api/telemetry_state. -->
+  <div class="tt-rail__group" id="account-strip" aria-label="Account summary">
+    <div class="tt-metric" style="padding:0 var(--hm-space-3)">
+      <span class="tt-metric__label">Equity</span>
+      <span class="tt-metric__value tt-num" id="acc-equity"
+            data-state="loading" style="font-size:var(--hm-text-sm)">—</span>
+    </div>
+    <div class="tt-metric" style="padding:0 var(--hm-space-3)">
+      <span class="tt-metric__label">Open P&amp;L</span>
+      <span class="tt-metric__value tt-num" id="acc-profit"
+            data-state="loading" style="font-size:var(--hm-text-sm)">—</span>
+    </div>
+    <div class="tt-metric" style="padding:0 var(--hm-space-3)">
+      <span class="tt-metric__label">Free margin</span>
+      <span class="tt-metric__value tt-num" id="acc-margin"
+            data-state="loading" style="font-size:var(--hm-text-sm)">—</span>
+    </div>
+    <div class="tt-metric" style="padding:0 var(--hm-space-3)">
+      <span class="tt-metric__label">Risk</span>
+      <span class="tt-metric__value" id="acc-risk"
+            data-state="loading" style="font-size:var(--hm-text-sm)">—</span>
+    </div>
+  </div>
+
+  <div class="tt-rail__group tt-rail__group--secondary">
+    <span class="tt-chip tt-chip--none" id="conn-chip" title="Broker connection">—</span>
+    <span class="tt-chip tt-chip--muted" id="exec-mode" title="Execution mode">—</span>
+    <span class="tt-num tt-muted" id="clock" style="text-align:left">—</span>
+    <span id="auth-header-widget"></span>
+  </div>
+</header>
+
+<!-- ═══ Pane bar (phone only) ══════════════════════════════════════════ -->
+<nav class="tt-pane-bar" aria-label="Pane selector">
+  <button class="tt-pane-bar__btn" data-pane-btn="watchlist" aria-selected="true">Watchlist</button>
+  <button class="tt-pane-bar__btn" data-pane-btn="chart" aria-selected="false">Chart</button>
+  <button class="tt-pane-bar__btn" data-pane-btn="ticket" aria-selected="false">Ticket</button>
+</nav>
+
+<!-- ═══ Main ═══════════════════════════════════════════════════════════ -->
+<main class="tt-main" id="main">
+
+  <!-- ── Trade ──────────────────────────────────────────────────────── -->
+  <section class="tt-view" id="view-trade" data-view-panel="trade"
+           data-active="true" role="tabpanel" aria-label="Trade">
+
+    <!-- Watchlist + AI auto-selection -->
+    <div class="tt-panel tt-panel--watchlist">
+      <div class="tt-panel__head">
+        <h2 class="tt-panel__title">Watchlist</h2>
+        <span class="tt-panel__count" id="watch-count">0</span>
+        <span class="tt-panel__spacer"></span>
+        <button class="tt-btn tt-btn--sm" id="watch-refresh" title="Refresh watchlist">Refresh</button>
+      </div>
+      <div class="tt-panel__body tt-panel__body--flush">
+        <table class="tt-table" id="watch-table">
+          <thead>
+            <tr>
+              <th scope="col">Symbol</th>
+              <th scope="col" class="tt-num">Bid</th>
+              <th scope="col" class="tt-num">Chg</th>
+              <th scope="col" class="tt-num">Spread</th>
+            </tr>
+          </thead>
+          <tbody id="watch-body" data-state="loading"></tbody>
+        </table>
+      </div>
+
+      <div class="tt-panel__head">
+        <h2 class="tt-panel__title">AI selection</h2>
+        <span class="tt-panel__count" id="selection-count">0</span>
+        <span class="tt-panel__spacer"></span>
+        <span class="tt-chip tt-chip--none" id="selection-tier">—</span>
+      </div>
+      <div class="tt-panel__body" id="selection-body" data-state="loading" style="max-height:46%"></div>
+    </div>
+
+    <!-- Chart + positions -->
+    <div class="tt-panel tt-panel--chart">
+      <div class="tt-panel__head">
+        <h2 class="tt-panel__title" id="chart-title">Chart</h2>
+        <span class="tt-panel__spacer"></span>
+        <label class="tt-sr-only" for="chart-timeframe">Timeframe</label>
+        <select class="tt-select" id="chart-timeframe"
+                style="min-height:28px;width:auto;padding:0 var(--hm-space-2);font-size:var(--hm-text-xs)">
+          <option value="M5">M5</option>
+          <option value="M15">M15</option>
+          <option value="H1" selected>H1</option>
+          <option value="H4">H4</option>
+          <option value="D1">D1</option>
+        </select>
+      </div>
+      <div class="tt-panel__body" style="position:relative">
+        <div class="tt-chart" id="chart"></div>
+        <div class="tt-chart__overlay" id="chart-overlay">
+          <div class="tt-state"><span class="tt-state__title">Loading chart…</span></div>
+        </div>
+      </div>
+
+      <div class="tt-panel__head">
+        <h2 class="tt-panel__title">Open positions</h2>
+        <span class="tt-panel__count" id="pos-count">0</span>
+        <span class="tt-panel__spacer"></span>
+        <span class="tt-num tt-muted" id="pos-total">—</span>
+      </div>
+      <div class="tt-panel__body tt-panel__body--flush" style="flex:0 0 auto;max-height:38%">
+        <table class="tt-table">
+          <thead>
+            <tr>
+              <th scope="col">Symbol</th>
+              <th scope="col">Side</th>
+              <th scope="col" class="tt-num">Vol</th>
+              <th scope="col" class="tt-num">Entry</th>
+              <th scope="col" class="tt-num">Now</th>
+              <th scope="col" class="tt-num">P&amp;L</th>
+            </tr>
+          </thead>
+          <tbody id="pos-body" data-state="loading"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Order ticket + reasoning -->
+    <div class="tt-panel tt-panel--ticket">
+      <div class="tt-panel__head">
+        <h2 class="tt-panel__title">Order ticket</h2>
+        <span class="tt-panel__spacer"></span>
+        <span class="tt-chip tt-chip--muted" id="ticket-source">manual</span>
+      </div>
+      <div class="tt-panel__body">
+        <div class="tt-pad tt-col" style="gap:var(--hm-space-3)">
+          <div class="tt-field">
+            <label class="tt-field__label" for="ticket-symbol">Symbol</label>
+            <input class="tt-input" id="ticket-symbol" autocomplete="off"
+                   spellcheck="false" placeholder="Search symbol…">
+          </div>
+
+          <div class="tt-field">
+            <span class="tt-field__label">Direction</span>
+            <div class="tt-row">
+              <button class="tt-btn tt-btn--buy tt-grow" id="ticket-buy">BUY</button>
+              <button class="tt-btn tt-btn--sell tt-grow" id="ticket-sell">SELL</button>
+            </div>
+          </div>
+
+          <div class="tt-row" style="gap:var(--hm-space-3)">
+            <div class="tt-field tt-grow" style="margin:0">
+              <label class="tt-field__label" for="ticket-volume">Volume (lots)</label>
+              <input class="tt-input tt-num" id="ticket-volume" type="number"
+                     step="0.01" min="0.01" value="0.10" style="text-align:left">
+            </div>
+            <div class="tt-field tt-grow" style="margin:0">
+              <label class="tt-field__label" for="ticket-price">Price</label>
+              <input class="tt-input tt-num" id="ticket-price" type="number"
+                     step="any" placeholder="market" style="text-align:left">
+            </div>
+          </div>
+
+          <div class="tt-row" style="gap:var(--hm-space-3)">
+            <div class="tt-field tt-grow" style="margin:0">
+              <label class="tt-field__label" for="ticket-sl">Stop loss</label>
+              <input class="tt-input tt-num" id="ticket-sl" type="number"
+                     step="any" placeholder="none" style="text-align:left">
+            </div>
+            <div class="tt-field tt-grow" style="margin:0">
+              <label class="tt-field__label" for="ticket-tp">Take profit</label>
+              <input class="tt-input tt-num" id="ticket-tp" type="number"
+                     step="any" placeholder="none" style="text-align:left">
+            </div>
+          </div>
+
+          <p class="tt-hint" id="ticket-hint">
+            Sizing, stops and targets are prefilled from the selected setup when one exists.
+          </p>
+        </div>
+      </div>
+
+      <div class="tt-panel__head">
+        <h2 class="tt-panel__title">Why this trade</h2>
+        <span class="tt-panel__spacer"></span>
+        <span class="tt-chip tt-chip--none" id="reason-tier">—</span>
+      </div>
+      <div class="tt-panel__body" id="reason-body" data-state="loading" style="flex:1 1 auto"></div>
+    </div>
+  </section>
+
+  <!-- ── Analytics ──────────────────────────────────────────────────── -->
+  <section class="tt-view" id="view-analytics" data-view-panel="analytics"
+           data-active="false" role="tabpanel" aria-label="Analytics" hidden>
+
+    <div class="tt-panel">
+      <div class="tt-panel__head">
+        <h2 class="tt-panel__title">Performance</h2>
+        <span class="tt-panel__spacer"></span>
+        <span class="tt-num tt-muted" id="analytics-updated">—</span>
+      </div>
+      <div class="tt-panel__body">
+        <div class="tt-metrics" id="analytics-metrics" data-state="loading"></div>
+
+        <div class="tt-panel__head">
+          <h2 class="tt-panel__title">Mode reliability</h2>
+          <span class="tt-panel__spacer"></span>
+          <span class="tt-hint" id="reliability-source">—</span>
+        </div>
+        <div id="reliability-body" data-state="loading"></div>
+
+        <div class="tt-panel__head">
+          <h2 class="tt-panel__title">Trade history</h2>
+          <span class="tt-panel__count" id="hist-count">0</span>
+        </div>
+        <table class="tt-table">
+          <thead>
+            <tr>
+              <th scope="col">Closed</th>
+              <th scope="col">Symbol</th>
+              <th scope="col">Side</th>
+              <th scope="col" class="tt-num">Vol</th>
+              <th scope="col" class="tt-num">P&amp;L</th>
+            </tr>
+          </thead>
+          <tbody id="hist-body" data-state="loading"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="tt-panel">
+      <div class="tt-panel__head">
+        <h2 class="tt-panel__title">Risk &amp; exposure</h2>
+      </div>
+      <div class="tt-panel__body">
+        <div class="tt-metrics" id="risk-metrics" data-state="loading"></div>
+        <div class="tt-pad" id="exposure-body" data-state="loading"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Backtest ───────────────────────────────────────────────────── -->
+  <section class="tt-view" id="view-backtest" data-view-panel="backtest"
+           data-active="false" role="tabpanel" aria-label="Backtest" hidden>
+
+    <div class="tt-panel">
+      <div class="tt-panel__head">
+        <h2 class="tt-panel__title">Requirements</h2>
+        <span class="tt-panel__spacer"></span>
+        <span class="tt-chip tt-chip--muted" id="bt-engine">—</span>
+      </div>
+      <div class="tt-panel__body">
+        <form class="tt-pad" id="bt-form">
+          <div class="tt-field">
+            <label class="tt-field__label" for="bt-objective">Objective</label>
+            <select class="tt-select" id="bt-objective"></select>
+            <span class="tt-hint">What the search maximises, subject to the constraints below.</span>
+          </div>
+
+          <div class="tt-field">
+            <label class="tt-field__label" for="bt-modes">Modes</label>
+            <select class="tt-select" id="bt-modes" multiple size="3"></select>
+          </div>
+
+          <div class="tt-field">
+            <label class="tt-field__label" for="bt-symbols">Symbols</label>
+            <textarea class="tt-textarea" id="bt-symbols" rows="2"
+                      placeholder="Leave blank for the whole universe"></textarea>
+            <span class="tt-hint" id="bt-universe-hint">—</span>
+          </div>
+
+          <div class="tt-row" style="gap:var(--hm-space-3)">
+            <div class="tt-field tt-grow" style="margin:0">
+              <label class="tt-field__label" for="bt-mintrades">Min trades</label>
+              <input class="tt-input tt-num" id="bt-mintrades" type="number" min="1" value="30" style="text-align:left">
+            </div>
+            <div class="tt-field tt-grow" style="margin:0">
+              <label class="tt-field__label" for="bt-maxdd">Max DD (R)</label>
+              <input class="tt-input tt-num" id="bt-maxdd" type="number" min="0" step="1" value="40" style="text-align:left">
+            </div>
+          </div>
+
+          <div class="tt-row" style="gap:var(--hm-space-3)">
+            <div class="tt-field tt-grow" style="margin:0">
+              <label class="tt-field__label" for="bt-passes">Passes</label>
+              <input class="tt-input tt-num" id="bt-passes" type="number" min="1" value="3" style="text-align:left">
+            </div>
+            <div class="tt-field tt-grow" style="margin:0">
+              <label class="tt-field__label" for="bt-evals">Max evals</label>
+              <input class="tt-input tt-num" id="bt-evals" type="number" min="1" value="400" style="text-align:left">
+            </div>
+            <div class="tt-field tt-grow" style="margin:0">
+              <label class="tt-field__label" for="bt-split">In-sample %</label>
+              <input class="tt-input tt-num" id="bt-split" type="number" min="30" max="90" value="70" style="text-align:left">
+            </div>
+          </div>
+
+          <fieldset style="border:1px solid var(--hm-border);border-radius:var(--hm-radius-sm);padding:var(--hm-space-2) var(--hm-space-3);margin:0 0 var(--hm-space-3)">
+            <legend class="tt-field__label">Search grid</legend>
+            <div class="tt-row tt-wrap" id="bt-grid"></div>
+          </fieldset>
+
+          <div class="tt-row">
+            <button class="tt-btn tt-btn--primary tt-grow" type="submit" id="bt-run">Run backtest</button>
+            <button class="tt-btn" type="button" id="bt-cancel" aria-disabled="true">Cancel</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div class="tt-panel">
+      <div class="tt-panel__head">
+        <h2 class="tt-panel__title">Progress</h2>
+        <span class="tt-panel__spacer"></span>
+        <span class="tt-chip tt-chip--none" id="bt-status">idle</span>
+      </div>
+      <div class="tt-panel__body">
+        <div class="tt-pad">
+          <div class="tt-progress" role="progressbar" aria-label="Backtest progress"
+               aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="bt-progress">
+            <div class="tt-progress__fill" id="bt-progress-fill" style="width:0%"></div>
+          </div>
+          <div class="tt-log" id="bt-log" aria-live="polite"></div>
+        </div>
+
+        <div class="tt-panel__head">
+          <h2 class="tt-panel__title">Results</h2>
+          <span class="tt-panel__spacer"></span>
+          <span class="tt-hint" id="bt-result-meta">—</span>
+        </div>
+        <div id="bt-results" data-state="empty">
+          <div class="tt-state">
+            <span class="tt-state__title">No results yet</span>
+            <span>Configure the requirements and run a backtest.</span>
+          </div>
+        </div>
+
+        <div class="tt-panel__head">
+          <h2 class="tt-panel__title">Recent jobs</h2>
+        </div>
+        <table class="tt-table">
+          <thead>
+            <tr>
+              <th scope="col">Job</th>
+              <th scope="col">Status</th>
+              <th scope="col" class="tt-num">Progress</th>
+              <th scope="col">Started</th>
+            </tr>
+          </thead>
+          <tbody id="bt-history" data-state="loading"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+</main>
+
+<!-- ═══ Status bar ═════════════════════════════════════════════════════ -->
+<footer class="tt-status" role="status" aria-live="polite">
+  <span class="tt-status__item">Feed <b id="status-feed">—</b></span>
+  <span class="tt-status__item">Last tick <b id="status-tick">—</b></span>
+  <span class="tt-status__item">Symbols <b id="status-symbols">—</b></span>
+  <span class="tt-status__item">Positions <b id="status-positions">—</b></span>
+  <span class="tt-status__item">Latency <b id="status-latency">—</b></span>
+  <span class="tt-rail__spacer"></span>
+  <span class="tt-status__item" id="status-version">—</span>
+</footer>
+
+<div class="tt-toasts" id="toasts" aria-live="assertive" aria-atomic="false"></div>
+
+<script src="/static/js/vendor/lightweight-charts.standalone.production.js"></script>
+<script src="/static/js/hm_ui.js"></script>
+<script src="/static/js/auth.js"></script>
+<script src="/static/js/dashboard.js"></script>
+</body>
+</html>

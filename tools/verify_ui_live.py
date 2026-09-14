@@ -20,6 +20,7 @@ Two things this script deliberately proves rather than assumes:
 """
 import json
 import os
+import re
 import sys
 import threading
 import time
@@ -35,6 +36,24 @@ PORT = 8599
 BASE = f"http://127.0.0.1:{PORT}"
 
 results = []
+
+
+# Decimal literals that look like a market price or a monetary amount rather
+# than a layout constant. Used to prove the dashboard does not bake values into
+# its markup: a price rendered server-side is stale the moment it is sent.
+_PRICE_RE = re.compile(r">\s*[-+]?\d{1,3}(?:,\d{3})*(?:\.\d{2,5})?\s*<")
+
+
+def _static_market_values(html: str) -> list[str]:
+    """Market-looking values sitting in element text rather than bound at runtime."""
+    hits = []
+    for m in _PRICE_RE.finditer(html or ""):
+        literal = m.group(0).strip().strip("<>").strip()
+        # Counters that start at zero are legitimate initial state, not data.
+        if literal in {"0", "1", "100"}:
+            continue
+        hits.append(literal)
+    return hits
 
 
 def record(name, ok, detail=""):
@@ -65,14 +84,31 @@ def main():
         # ── 1. Page routing ────────────────────────────────────────────────
         status, body = request("/")
         record(
-            "GET / serves the new console",
-            status == 200 and "cx-topbar" in body and "console.js" in body,
+            "GET / serves the advanced trading dashboard",
+            status == 200 and "tt-app" in body and "dashboard.js" in body,
             f"status={status} bytes={len(body)}",
         )
 
-        status, body = request("/console.html")
+        status, body = request("/dashboard.html")
         record(
-            "GET /console.html serves the same console",
+            "GET /dashboard.html serves the same dashboard",
+            status == 200 and "tt-app" in body,
+            f"status={status} bytes={len(body)}",
+        )
+
+        # The dashboard must not bake market values into the markup. A price
+        # rendered server-side would be stale the moment it left the process.
+        status, body = request("/")
+        leaks = _static_market_values(body)
+        record(
+            "dashboard HTML contains no hard-coded market values",
+            status == 200 and not leaks,
+            f"status={status} leaks={leaks[:6]}" if leaks else f"status={status} clean",
+        )
+
+        status, body = request("/console")
+        record(
+            "GET /console serves the previous console",
             status == 200 and "cx-topbar" in body,
             f"status={status} bytes={len(body)}",
         )
@@ -99,9 +135,11 @@ def main():
             f"status={status}",
         )
 
-        # ── 2. Console assets ──────────────────────────────────────────────
+        # ── 2. Assets ──────────────────────────────────────────────────────
         for asset, needle in (
+            ("/static/css/theme_terminal.css", "tt-panel"),
             ("/static/css/console.css", "cx-topbar"),
+            ("/static/js/dashboard.js", "JARVIS"),
             # console.js is an IIFE and deliberately exports no global, so match
             # a distinctive string from the file body instead.
             ("/static/js/console.js", "JARVIS Console"),
