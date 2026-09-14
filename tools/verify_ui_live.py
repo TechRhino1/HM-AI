@@ -106,6 +106,29 @@ def main():
             f"status={status} leaks={leaks[:6]}" if leaks else f"status={status} clean",
         )
 
+        # Every template on disk, not only the ones served above. A fabricated
+        # value in a page nobody checked is exactly how the legacy terminal came
+        # to display 4380.00 for gold while the feed was down — the value was in
+        # the markup, so it rendered before any request had been made.
+        repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        tdir = os.path.join(repo_root, "jarvis", "ui", "templates")
+        leaks_by_file = {}
+        try:
+            for name in sorted(os.listdir(tdir)):
+                if not name.endswith(".html"):
+                    continue
+                with open(os.path.join(tdir, name), encoding="utf-8") as fh:
+                    found = _static_market_values(fh.read())
+                if found:
+                    leaks_by_file[name] = found[:4]
+        except OSError as exc:
+            leaks_by_file = {"<unreadable>": [str(exc)]}
+        record(
+            "no template hard-codes a market value",
+            not leaks_by_file,
+            f"leaks={leaks_by_file}" if leaks_by_file else "all templates clean",
+        )
+
         status, body = request("/console")
         record(
             "GET /console serves the previous console",
