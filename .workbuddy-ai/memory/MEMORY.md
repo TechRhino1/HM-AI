@@ -48,6 +48,25 @@ Consequences to work by:
 * **Verification entry points:** `python tools/verify_console_live.py` (21 live HTTP checks, exits
   non-zero on failure), `tests/test_mode_aggregator.py`, `tests/test_backtest_optimizer.py`.
 
+## Pushing to GitHub — a plain `git push` will hang
+
+`git push` on this machine **stalls silently** (no error, no prompt) because `helper-selector` is
+first in the credential chain and blocks for ~40s+ before GCM ever runs. `git credential fill`
+hanging at rc=124 is the confirming signature; `git ls-remote` succeeding proves the network is
+fine and the problem is the write path only.
+
+**Always push with the selector bypassed:**
+
+```bash
+GCM="C:/Users/Itrai/.workbuddy-ai/binaries/PortableGit/versions/1.2.0/mingw64/bin/git-credential-manager.exe"
+timeout 180 git -c credential.helper= -c credential.helper="!$GCM" push origin main > /tmp/pushout.txt 2>&1
+echo "exit=$?"; cat /tmp/pushout.txt
+```
+
+Setting upstream tracking does **not** fix this — the bypass is still required. Redirect to a file
+and read `$?`; piping masks the exit code. Then verify the remote SHA via `git ls-remote` rather
+than trusting the local push message. Remote: `https://github.com/TechRhino1/HM-AI.git`.
+
 ## Commit-message hazard
 
 Backticks inside a `git commit -m` argument are interpreted by bash and get substituted away. Use
