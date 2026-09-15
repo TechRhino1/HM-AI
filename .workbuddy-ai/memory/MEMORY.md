@@ -128,6 +128,11 @@ break-even). What remains is the directional call.
   newest bucket never forms one. Fix as a landmine; don't expect P&L to move.
 * **The M5/SCALP candidate set is truncated to bar 60–14,398 of 37,440.** Replaying it gives
   PF 1.09–1.74 — the opposite sign to the live optimiser. Every SCALP number is unsafe.
+* **Under an honest cost model only WTI (+0.087R) and XAUUSD (+0.042R) stay positive.** Correcting
+  costs drains 0.162R/trade on average (median 0.118) and scales with spread ÷ stop distance, so
+  it is brutal for SOLUSD (−0.69R) and trivial for XAUUSD (−0.0075R). GER40 (+0.044R) and NAS100
+  (+0.015R) both go negative — a "3–5 symbol salvageable band" is an artefact of the broken
+  cost model. PF ≥ 1.3 is reachable by no symbol at tp=1.5; WTI's 1.202 is the ceiling.
 * A fabricated XAUUSD series is still on the default load path (`acquisition.py:73` →
   `"MT5_DefaultBroker"`); 4,320 rows, 1,216 weekend bars, spread ≡ 0.
 

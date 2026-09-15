@@ -43,6 +43,12 @@ class BacktestEngine:
     def _calc_commission(self, symbol: str, lots: float, price: float = 0.0) -> float:
         cfg = get_symbol_profile_config(symbol)
         comm_per_lot = getattr(cfg, "commission_per_lot", 0.0)
+        if not comm_per_lot:
+            # Every shipped SymbolProfileConfig carries commission_per_lot = 0.0,
+            # which silently overrode the constructor argument and made every
+            # backtest commission-free. Fall back to the engine's own figure so
+            # a caller passing commission_per_lot=5.0 is actually charged.
+            comm_per_lot = float(self.commission_per_lot or 0.0)
         return round(lots * comm_per_lot, 4)
 
     # How many bars of each role the context builder gets. Matches the legacy
@@ -174,6 +180,7 @@ class BacktestEngine:
         spec = resolve_symbol(symbol)
         actual_slippage_delta = self.slippage_pips * spec.pip_size
         cooldown_mgr = LossCooldownManager()
+        skipped_min_lot = 0
         
         sym_upper = symbol.upper()
         is_jpy = "JPY" in sym_upper
@@ -199,8 +206,15 @@ class BacktestEngine:
             elif "tick_volume" in full_df_indexed.columns:
                 agg_dict["tick_volume"] = "sum"
 
-            full_df_h4 = full_df_indexed.resample("4h").agg(agg_dict).dropna().reset_index()
-            full_df_d1 = full_df_indexed.resample("1D").agg(agg_dict).dropna().reset_index()
+            # label="right" stamps each bucket with its CLOSE time, so the
+            # `time <= bar_time` filter can only admit a bucket that has already
+            # finished. With pandas' default label="left" the bucket is stamped
+            # with its open, and an in-progress H4/D1 bar - which in a
+            # full-series resample already contains its future bars - was
+            # visible to the decision. _prepare_mtf/_slice_mtf do the equivalent
+            # on the real-MTF path with an explicit close time.
+            full_df_h4 = full_df_indexed.resample("4h", closed="left", label="right").agg(agg_dict).dropna().reset_index()
+            full_df_d1 = full_df_indexed.resample("1D", closed="left", label="right").agg(agg_dict).dropna().reset_index()
             if "index" in full_df_h4.columns and "time" not in full_df_h4.columns:
                 full_df_h4.rename(columns={"index": "time"}, inplace=True)
             if "index" in full_df_d1.columns and "time" not in full_df_d1.columns:
@@ -212,8 +226,15 @@ class BacktestEngine:
             elif "tick_volume" in full_df_indexed.columns:
                 agg_dict["tick_volume"] = "sum"
 
-            full_df_h4 = full_df_indexed.resample("4h").agg(agg_dict).dropna().reset_index()
-            full_df_d1 = full_df_indexed.resample("1D").agg(agg_dict).dropna().reset_index()
+            # label="right" stamps each bucket with its CLOSE time, so the
+            # `time <= bar_time` filter can only admit a bucket that has already
+            # finished. With pandas' default label="left" the bucket is stamped
+            # with its open, and an in-progress H4/D1 bar - which in a
+            # full-series resample already contains its future bars - was
+            # visible to the decision. _prepare_mtf/_slice_mtf do the equivalent
+            # on the real-MTF path with an explicit close time.
+            full_df_h4 = full_df_indexed.resample("4h", closed="left", label="right").agg(agg_dict).dropna().reset_index()
+            full_df_d1 = full_df_indexed.resample("1D", closed="left", label="right").agg(agg_dict).dropna().reset_index()
             if "index" in full_df_h4.columns and "time" not in full_df_h4.columns:
                 full_df_h4.rename(columns={"index": "time"}, inplace=True)
             if "index" in full_df_d1.columns and "time" not in full_df_d1.columns:
@@ -298,7 +319,11 @@ class BacktestEngine:
                         stag_limit = base_stag
 
                 if open_trade["bars_held"] >= stag_limit and open_trade["mfe"] < (risk_dist * 0.25):
+                    # A stagnation exit is a market order, so it takes adverse
+                    # slippage. Only stop exits used to be charged, which made
+                    # the time stop look free.
                     exit_price = float(current_bar["close"])
+                    exit_price -= actual_slippage_delta if open_trade["type"] == "BUY" else -actual_slippage_delta
                     pips = ((exit_price - open_trade["entry"]) if open_trade["type"] == "BUY" else (open_trade["entry"] - exit_price)) / spec.pip_size
                     pnl_raw = pips * spec.pip_value_per_lot * open_trade["lots"]
                     comm = self._calc_commission(symbol, open_trade["lots"], exit_price)
@@ -638,6 +663,11 @@ class BacktestEngine:
                         entry_price = float(next_bar["open"])
                         if decision.bias == "BUY":
                             entry_price += spread_pips * spec.pip_size  # Ask = Bid + Spread
+                        else:
+                            # A short is filled at the bid, so it pays the spread
+                            # too. Charging it on longs only made every SELL
+                            # trade cost-free in the backtest.
+                            entry_price -= spread_pips * spec.pip_size
                         price_shift = entry_price - decision.entry_price
                         sl_price = decision.stop_loss + price_shift
                         
@@ -708,7 +738,16 @@ class BacktestEngine:
                         
                         if dollar_risk_per_lot > 0:
                             raw_lots = planned_risk_dollars / dollar_risk_per_lot
-                            lots = max(sym_info["volume_min"], min(auth_res["lots"], round(raw_lots, 2)))
+                            lots = min(auth_res["lots"], round(raw_lots, 2))
+                            if lots < sym_info["volume_min"]:
+                                # The planned risk cannot be expressed at the
+                                # minimum lot. The floor used to be applied
+                                # AFTER the risk cap, so the trade silently
+                                # opened at up to 2x the intended risk (and up
+                                # to 10x once MT5 re-quantizes to the broker's
+                                # real minimum) with no check at all.
+                                skipped_min_lot += 1
+                                continue
                         else:
                             lots = auth_res["lots"]
 
@@ -780,6 +819,7 @@ class BacktestEngine:
         if open_trade is not None:
             final_bar = df_h1.iloc[-1]
             exit_price = float(final_bar["close"])
+            exit_price -= actual_slippage_delta if open_trade["type"] == "BUY" else -actual_slippage_delta
             spec = resolve_symbol(symbol)
             pips = ((exit_price - open_trade["entry"]) if open_trade["type"] == "BUY" else (open_trade["entry"] - exit_price)) / spec.pip_size
             pnl_raw = pips * spec.pip_value_per_lot * open_trade["lots"]

@@ -7,8 +7,11 @@ session hours, and XM Ultra Low Standard account specifications.
 CRITICAL INVARIANCE: Everything related to XAUUSD / Gold is strictly preserved
 and 100% untouched.
 """
+import logging
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple, Any
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -197,6 +200,79 @@ SYMBOL_PROFILES: Dict[str, SymbolProfileConfig] = {
         margin_pct=0.2
     ),
 
+    # Registered 2026-09-15: GER40 and UK100 were absent from this table and so
+    # fell through to the generic FOREX template below, which gave them a
+    # contract size of 100,000 instead of 1.0 - a 100,000x sizing error.
+    "GER40": SymbolProfileConfig(
+        symbol="GER40",
+        canonical="GER40",
+        asset_class="INDEX",
+        strategy_weights={
+            "TREND_PULLBACK": 3.6,
+            "CHOCH_STRUCTURAL_REVERSAL": 2.8,
+            "TREND_FOLLOWING": 1.0,
+            "RANGE_MEAN_REVERSION": 0.0,
+            "LIQUIDITY_SWEEP_REVERSAL": 0.0,
+            "BREAKOUT_EXPANSION": 0.0,
+        },
+        banned_strategies=["BREAKOUT_EXPANSION", "RANGE_MEAN_REVERSION", "LIQUIDITY_SWEEP_REVERSAL"],
+        sl_atr_multiplier=2.80,
+        min_target_rr=1.8,
+        asym_rr=3.6,
+        anti_wick_buffer_atr=0.35,
+        fast_cash_r=1.30,
+        fast_cash_volume_pct=0.55,
+        be_trigger_r=1.00,
+        runner_trail_atr=2.60,
+        session_restriction=True,
+        allowed_utc_hours=(8, 17),
+        contract_size=1.0,
+        pip_size=1.0,
+        pip_value_per_lot=1.0,
+        digits=2,
+        typical_spread_pips=2.0,
+        max_allowed_spread_pips=6.0,
+        commission_per_lot=0.0,
+        min_volume=0.01,
+        volume_step=0.01,
+        margin_pct=0.2
+    ),
+
+    "UK100": SymbolProfileConfig(
+        symbol="UK100",
+        canonical="UK100",
+        asset_class="INDEX",
+        strategy_weights={
+            "TREND_PULLBACK": 3.6,
+            "CHOCH_STRUCTURAL_REVERSAL": 2.8,
+            "TREND_FOLLOWING": 1.0,
+            "RANGE_MEAN_REVERSION": 0.0,
+            "LIQUIDITY_SWEEP_REVERSAL": 0.0,
+            "BREAKOUT_EXPANSION": 0.0,
+        },
+        banned_strategies=["BREAKOUT_EXPANSION", "RANGE_MEAN_REVERSION", "LIQUIDITY_SWEEP_REVERSAL"],
+        sl_atr_multiplier=2.80,
+        min_target_rr=1.8,
+        asym_rr=3.6,
+        anti_wick_buffer_atr=0.35,
+        fast_cash_r=1.30,
+        fast_cash_volume_pct=0.55,
+        be_trigger_r=1.00,
+        runner_trail_atr=2.60,
+        session_restriction=True,
+        allowed_utc_hours=(8, 17),
+        contract_size=1.0,
+        pip_size=1.0,
+        pip_value_per_lot=1.0,
+        digits=2,
+        typical_spread_pips=1.6,
+        max_allowed_spread_pips=8.5,
+        commission_per_lot=0.0,
+        min_volume=0.01,
+        volume_step=0.01,
+        margin_pct=0.2
+    ),
+
     "NAS100": SymbolProfileConfig(
         symbol="NAS100",
         canonical="NAS100",
@@ -270,6 +346,44 @@ SYMBOL_PROFILES: Dict[str, SymbolProfileConfig] = {
     # =========================================================================
     # 3. COMMODITIES (XM Ultra Low Standard Specs: $0 Commission)
     # =========================================================================
+    # Registered 2026-09-15: XAGUSD was absent from this table and so fell
+    # through to the generic FOREX template, giving it a 100,000 contract size
+    # and 5 digits instead of 5,000 and 3 - a 20x sizing error.
+    "XAGUSD": SymbolProfileConfig(
+        symbol="XAGUSD",
+        canonical="XAGUSD",
+        asset_class="COMMODITY",
+        strategy_weights={
+            "TREND_PULLBACK": 3.0,
+            "CHOCH_STRUCTURAL_REVERSAL": 2.4,
+            "TREND_FOLLOWING": 1.2,
+            "LIQUIDITY_SWEEP_REVERSAL": 1.5,
+            "RANGE_MEAN_REVERSION": 0.0,
+            "BREAKOUT_EXPANSION": 0.0,
+        },
+        banned_strategies=["BREAKOUT_EXPANSION", "RANGE_MEAN_REVERSION"],
+        sl_atr_multiplier=1.80,
+        min_target_rr=2.0,
+        asym_rr=3.0,
+        anti_wick_buffer_atr=0.40,
+        fast_cash_r=1.20,
+        fast_cash_volume_pct=0.50,
+        be_trigger_r=1.00,
+        runner_trail_atr=2.20,
+        session_restriction=False,
+        allowed_utc_hours=None,
+        contract_size=5000.0,
+        pip_size=0.01,
+        pip_value_per_lot=50.0,
+        digits=3,
+        typical_spread_pips=4.0,
+        max_allowed_spread_pips=12.0,
+        commission_per_lot=0.0,
+        min_volume=0.01,
+        volume_step=0.01,
+        margin_pct=0.2
+    ),
+
     "XAUUSD": SymbolProfileConfig(
         symbol="XAUUSD",
         canonical="XAUUSD",
@@ -443,7 +557,15 @@ def get_symbol_profile_config(symbol: str) -> SymbolProfileConfig:
     canonical = _ALIAS_TO_CANONICAL.get(key, key)
     if canonical in SYMBOL_PROFILES:
         return SYMBOL_PROFILES[canonical]
-    # Fallback to general Forex template if symbol is unknown
+    # Fallback to general Forex template if symbol is unknown. This used to be
+    # completely silent, which is how GER40/UK100 ended up sized 100,000x wrong
+    # for months. Make it loud so an unregistered symbol cannot slip through.
+    logger.error(
+        "symbol_profile_config: %r is not registered; falling back to the "
+        "generic FOREX template (contract_size=100_000, pip_size=0.0001, "
+        "digits=5). Position sizing for this symbol will be wrong unless it is "
+        "an actual FX major.", symbol,
+    )
     return SymbolProfileConfig(
         symbol=symbol,
         canonical=canonical,

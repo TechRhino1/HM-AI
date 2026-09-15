@@ -57,7 +57,7 @@
 
 <h1>Trade Plan Profitability Audit — HM-AI / JARVIS</h1>
 <div class="sub">
-  Generated 2026-09-16 00:56 · Source: local replay of <code>data/market/real/&lt;SYM&gt;/*_183d.parquet</code>
+  Generated 2026-09-16 01:15 · Source: local replay of <code>data/market/real/&lt;SYM&gt;/*_183d.parquet</code>
   (MT5 real bars, 2026-03-15 → 2026-09-11/13) through
   <code>jarvis/backtesting/trade_simulator.py</code> · Seed geometry tp=1.5R,
   costs as configured · 20 symbols × 3 styles
@@ -508,13 +508,15 @@ $10.77 risk per trade on $10,000, while the smallest placeable oil lot risks $21
 <thead><tr><th>Band</th><th>Symbols</th><th>Measured PF (H1)</th><th>Honest target</th></tr></thead>
 <tbody>
 <tr><td class="ok"><b>Salvageable</b></td>
-  <td class="mono">WTI, XAUUSD, GER40</td><td>1.08 – 1.31</td>
-  <td>PF 1.15–1.30 after calibration and meta-labelling, on the subset of regimes where they work.
-  Not 1.3 across all regimes.</td></tr>
-<tr><td class="warn"><b>Break-even-ish</b></td>
-  <td class="mono">NAS100, US30, US500, USDCAD, XAGUSD</td><td>0.96 – 1.03</td>
-  <td>PF 1.00–1.10 at best. Tradeable only with materially tighter cost assumptions than the
-  broker actually offers.</td></tr>
+  <td class="mono">WTI, XAUUSD</td><td>1.09 – 1.20</td>
+  <td>The only two that survive honest costs (+0.087R and +0.042R). Target PF 1.10–1.25 after
+  calibration and meta-labelling, on the regimes where they work — <b>not</b> 1.3 across all
+  regimes.</td></tr>
+<tr><td class="warn"><b>Break-even-ish, negative at honest costs</b></td>
+  <td class="mono">GER40, NAS100, US30, US500, USDCAD, XAGUSD</td><td>0.96 – 1.08</td>
+  <td>Look marginal, are not: every one turns negative once round-turn spread and commission are
+  charged (GER40 +0.044R → −0.058R, NAS100 +0.015R → −0.037R). Do not allocate on the strength of
+  the uncorrected numbers.</td></tr>
 <tr><td class="bad"><b>Not viable</b></td>
   <td class="mono">AUDUSD, USDJPY, EURJPY, EURUSD, USDCHF, GBPUSD, SOLUSD, UK100, NZDUSD, GBPJPY, BTCUSD, ETHUSD</td>
   <td>0.57 – 0.93</td>
@@ -527,11 +529,96 @@ unsalvageable as configured — the system is worst exactly where it claims to b
 (PF 1.203, n=844) is the only regime with measured positive expectancy; it is the natural first
 candidate for a focused product, and 844 trades is a thin sample that must be confirmed
 out-of-sample before it is believed.</p>
-<p><b>The achievable portfolio target</b>, if P0-1 through P0-3 land: PF 1.15–1.25 on a
-3–5 symbol book (WTI, XAUUSD, GER40 plus the best of the break-even band), DD ≤ 10% only at a
-risk fraction of roughly 0.05–0.11% per trade — which is below the broker's minimum lot on most
-of those symbols. <b>The binding constraint is not the signal alone; it is that the signal's edge
-is too small to be expressed at a tradeable size.</b></p>
+<p><b>The achievable portfolio target</b>, if P0-1 through P0-3 land: PF 1.10–1.25 on a two-symbol
+book (WTI, XAUUSD), and DD ≤ 10% only at a risk fraction of roughly 0.06–0.11% per trade — which
+is below the broker's minimum lot on both. <b>The binding constraint is not the signal alone; it is
+that the signal's edge is too small to be expressed at a tradeable size.</b> A two-symbol,
+one-regime product is a real but very small business; a twenty-symbol one is not, and no amount of
+parameter work will make it one.</p>
+</div>
+
+<h2>6. What the numbers become once the cost model is honest</h2>
+<p>The figures above still use a cost model that charges nothing for commission, nothing for a
+SELL's spread, and no slippage on market exits. Correcting it costs
+<b>0.1618R per trade on average</b>, but the damage is very uneven — and it re-ranks the
+universe. Costs are expressed in R using each symbol's own median stop distance, so the comparison
+is scale-free:</p>
+
+<div class="card" style="padding:8px 12px">
+<table>
+<thead><tr><th>Symbol</th><th class="num">PF (as measured)</th><th class="num">Expectancy (as measured)</th>
+<th class="num">Cost understatement</th><th class="num">Expectancy at honest costs</th></tr></thead>
+<tbody>
+<tr><td class='mono'>WTI</td><td class='num warn'>1.202</td><td class='num'>+0.1114</td><td class='num bad'>-0.0249</td><td class='num ok'><b>+0.0865</b></td></tr>
+<tr><td class='mono'>XAUUSD</td><td class='num warn'>1.085</td><td class='num'>+0.0493</td><td class='num bad'>-0.0075</td><td class='num ok'><b>+0.0418</b></td></tr>
+<tr><td class='mono'>NAS100</td><td class='num warn'>1.025</td><td class='num'>+0.0148</td><td class='num bad'>-0.0516</td><td class='num bad'><b>-0.0368</b></td></tr>
+<tr><td class='mono'>GER40</td><td class='num warn'>1.076</td><td class='num'>+0.0444</td><td class='num bad'>-0.1023</td><td class='num bad'><b>-0.0579</b></td></tr>
+<tr><td class='mono'>XAGUSD</td><td class='num bad'>0.961</td><td class='num'>-0.0236</td><td class='num bad'>-0.0401</td><td class='num bad'><b>-0.0637</b></td></tr>
+<tr><td class='mono'>US30</td><td class='num bad'>0.977</td><td class='num'>-0.0139</td><td class='num bad'>-0.0557</td><td class='num bad'><b>-0.0696</b></td></tr>
+<tr><td class='mono'>GBPJPY</td><td class='num bad'>0.904</td><td class='num'>-0.0599</td><td class='num bad'>-0.0839</td><td class='num bad'><b>-0.1438</b></td></tr>
+<tr><td class='mono'>BTCUSD</td><td class='num bad'>0.868</td><td class='num'>-0.0832</td><td class='num bad'>-0.0625</td><td class='num bad'><b>-0.1457</b></td></tr>
+<tr><td class='mono'>USDCAD</td><td class='num bad'>0.994</td><td class='num'>-0.0039</td><td class='num bad'>-0.1974</td><td class='num bad'><b>-0.2013</b></td></tr>
+<tr><td class='mono'>GBPUSD</td><td class='num bad'>0.758</td><td class='num'>-0.1604</td><td class='num bad'>-0.1154</td><td class='num bad'><b>-0.2758</b></td></tr>
+<tr><td class='mono'>EURJPY</td><td class='num bad'>0.736</td><td class='num'>-0.1783</td><td class='num bad'>-0.0995</td><td class='num bad'><b>-0.2778</b></td></tr>
+<tr><td class='mono'>US500</td><td class='num bad'>0.964</td><td class='num'>-0.0220</td><td class='num bad'>-0.2670</td><td class='num bad'><b>-0.2891</b></td></tr>
+<tr><td class='mono'>USDJPY</td><td class='num bad'>0.716</td><td class='num'>-0.1930</td><td class='num bad'>-0.1201</td><td class='num bad'><b>-0.3131</b></td></tr>
+<tr><td class='mono'>EURUSD</td><td class='num bad'>0.738</td><td class='num'>-0.1763</td><td class='num bad'>-0.1385</td><td class='num bad'><b>-0.3148</b></td></tr>
+<tr><td class='mono'>USDCHF</td><td class='num bad'>0.752</td><td class='num'>-0.1663</td><td class='num bad'>-0.1694</td><td class='num bad'><b>-0.3356</b></td></tr>
+<tr><td class='mono'>NZDUSD</td><td class='num bad'>0.795</td><td class='num'>-0.1350</td><td class='num bad'>-0.2115</td><td class='num bad'><b>-0.3466</b></td></tr>
+<tr><td class='mono'>ETHUSD</td><td class='num bad'>0.928</td><td class='num'>-0.0442</td><td class='num bad'>-0.3597</td><td class='num bad'><b>-0.4039</b></td></tr>
+<tr><td class='mono'>UK100</td><td class='num bad'>0.761</td><td class='num'>-0.1591</td><td class='num bad'>-0.2634</td><td class='num bad'><b>-0.4225</b></td></tr>
+<tr><td class='mono'>AUDUSD</td><td class='num bad'>0.568</td><td class='num'>-0.3162</td><td class='num bad'>-0.1750</td><td class='num bad'><b>-0.4912</b></td></tr>
+<tr><td class='mono'>SOLUSD</td><td class='num bad'>0.755</td><td class='num'>-0.1610</td><td class='num bad'>-0.6916</td><td class='num bad'><b>-0.8525</b></td></tr>
+</tbody></table>
+<div class="note">Round-turn spread taken from the broker's own stored <code>spread</code> column on
+the entry bars, plus $5/lot round-turn commission. The understatement is largest where the stop is
+tightest relative to the spread — SOLUSD loses a further 0.69R per trade once the cost is charged
+properly, XAUUSD only 0.0075R.</div>
+</div>
+
+<div class="card verdict">
+  <b>Only 2 of 20 symbols keep a positive expectancy once costs are charged
+  correctly: WTI, XAUUSD.</b> GER40 (+0.044R) and NAS100 (+0.015R), which looked like the
+  edge of the salvageable band, both turn negative. PF ≥ 1.3 is reachable by <b>no symbol</b> at
+  tp=1.5R — WTI's 1.202 is the ceiling, and it survives honest costs at +0.087R.
+</div>
+
+<h2>7. Fixes applied in this pass</h2>
+<div class="card">
+<table>
+<thead><tr><th>Fix</th><th>Where</th><th>Effect</th></tr></thead>
+<tbody>
+<tr><td>Commission argument was accepted and ignored — every shipped profile is
+  <code>commission_per_lot=0.0</code>, so every backtest ran free</td>
+  <td class="path">engine.py::_calc_commission</td>
+  <td>Now falls back to the constructor value when the profile is zero</td></tr>
+<tr><td>Spread charged on BUY entry only — every SELL traded cost-free</td>
+  <td class="path">engine.py:639-640</td><td>Symmetric: shorts now fill at the bid</td></tr>
+<tr><td>Slippage charged on stop exits only, so the time stop looked free</td>
+  <td class="path">engine.py (stagnation + final close)</td>
+  <td>Market exits now take adverse slippage; TP stays a limit fill</td></tr>
+<tr><td>Lot floor applied <i>after</i> the risk cap, allowing unbounded realised risk</td>
+  <td class="path">engine.py:711</td><td>Trade is skipped when the plan cannot be expressed at the
+  minimum lot</td></tr>
+<tr><td>H4/D1 resample exposed in-progress, future-bearing buckets</td>
+  <td class="path">engine.py:202-203,215-216 · signal_scan.py:148-149</td>
+  <td><code>label="right"</code> — a bucket is only visible once it has closed</td></tr>
+<tr><td>GER40 / UK100 / XAGUSD missing from the profile table → generic FX template
+  (contract size 100,000 instead of 1.0 / 5,000)</td>
+  <td class="path">symbol_profile_config.py</td>
+  <td>Registered with correct contract size, pip size and digits</td></tr>
+<tr><td>Unregistered symbols fell back silently</td>
+  <td class="path">symbol_profile_config.py::get_symbol_profile_config</td>
+  <td>Now logs an error naming the symbol</td></tr>
+<tr><td>Fabricated XAUUSD series (4,320 rows, 1,216 weekend bars, spread ≡ 0) on the default
+  load path</td>
+  <td class="path">data/market/MT5_DefaultBroker/</td>
+  <td>Moved to <code>data/market/_quarantine_synthetic/</code></td></tr>
+</tbody></table>
+<p class="note">Guarded by <code>tests/test_backtest_cost_integrity.py</code> (9 tests). The
+look-ahead test is discriminating, not decorative: against the old resample it records
+<b>115 violations</b> of the no-look-ahead property; against the fixed one, zero. Full suite:
+702 passed.</p>
 </div>
 
 <div class="disc">

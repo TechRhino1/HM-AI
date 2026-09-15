@@ -145,8 +145,13 @@ class SignalScanner:
         for vol in ("volume", "tick_volume"):
             if vol in indexed.columns:
                 agg[vol] = "sum"
-        h4 = indexed.resample("4h").agg(agg).dropna().reset_index()
-        d1 = indexed.resample("1D").agg(agg).dropna().reset_index()
+        # label="right" stamps each bucket with its CLOSE time so the
+        # `time <= bar_time` filter in _scan_impl can only admit a bucket that
+        # has already finished. With pandas' default label="left" an in-progress
+        # bucket - which here already aggregates the whole series, future bars
+        # included - was visible to the decision and contaminated d1_bias/h4_bias.
+        h4 = indexed.resample("4h", closed="left", label="right").agg(agg).dropna().reset_index()
+        d1 = indexed.resample("1D", closed="left", label="right").agg(agg).dropna().reset_index()
         return h4, d1
 
     def _spread_for_bar(self, row: pd.Series, spec: Any, fallback: float) -> float:
