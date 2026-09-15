@@ -23,6 +23,10 @@ from jarvis.data.schemas import (
 from jarvis.intelligence.strategy_selector import StrategySelector
 from jarvis.intelligence.hypothesis_engine import HypothesisEngine
 from jarvis.intelligence.confidence import ConfidenceCalibrationEngine
+from jarvis.intelligence.honest_base_rates import (
+    get_base_rate as get_honest_base_rate,
+    describe_gap as describe_honest_gap,
+)
 from jarvis.learning.online_ml_predictor import OnlineMLPredictor
 from jarvis.market.news import GLOBAL_NEWS_ENGINE
 from jarvis.data.symbol_registry import resolve as resolve_symbol
@@ -193,6 +197,28 @@ class DecisionEngine:
         final_win_p = round((0.45 * calibrated_win_p) + (0.55 * ml_win_p), 2)
         loss_p = round(1.0 - final_win_p, 2)
 
+        # --- Measured counterpart to the hand-authored gate probability (P0-1) ---
+        # `final_win_p` is 100% hand-authored and 0% fitted: a hand-typed reliability
+        # table blended with a hand-authored linear score. Refitting it on honest,
+        # cost-bearing MT5 data produced 0/20 skillful symbols, and mean |AUC-0.5|
+        # *shrank* from 0.0353 to 0.0211 as the sample doubled -- the score is noise.
+        #
+        # So we deliberately do neither of the two tempting things: we do not gate on
+        # the measured rate (win rates ~0.33-0.44 sit against a 40% break-even, so it
+        # would reject nearly every trade), and we do not try to fit the gate either.
+        # We log the gap, so the overstatement is visible on every single trade.
+        honest_base_rate = None
+        try:
+            _honest_style = getattr(context, "trade_style", None) or "SWING"
+            honest_base_rate = get_honest_base_rate(context.symbol, _honest_style)
+            if honest_base_rate is not None:
+                logger.info(
+                    f"[{context.symbol}] HONEST BASE RATE | "
+                    + describe_honest_gap(final_win_p, honest_base_rate, tp=rr_ratio)
+                )
+        except Exception as _honest_exc:  # observability must never break the loop
+            logger.debug(f"[{context.symbol}] honest base rate unavailable: {_honest_exc}")
+
         planned_risk_dollars = max(0.50, account_balance * (risk_per_trade_pct / 100.0))
         planned_win_dollars = planned_risk_dollars * rr_ratio
         
@@ -201,7 +227,7 @@ class DecisionEngine:
         pip_size = spec.pip_size
         
         if tentative_bias not in ["BUY", "SELL"]:
-            return final_win_p, loss_p, 0.0, hypotheses, calibrated_win_p
+            return final_win_p, loss_p, 0.0, hypotheses, calibrated_win_p, honest_base_rate
 
         est_lots = max(0.01, planned_risk_dollars / (max(risk_dist, 1e-4) * contract_size))
         pip_val_per_lot = spec.pip_value_per_lot
@@ -210,7 +236,7 @@ class DecisionEngine:
 
         ev = (final_win_p * planned_win_dollars) - (loss_p * planned_risk_dollars) - spread_cost - expected_slippage
         ev = round(float(ev), 2)
-        return final_win_p, loss_p, ev, hypotheses, calibrated_win_p
+        return final_win_p, loss_p, ev, hypotheses, calibrated_win_p, honest_base_rate
 
     def _apply_quality_gate(
         self,
@@ -697,7 +723,7 @@ class DecisionEngine:
                 ai_score = max(0.0, ai_score - (of_res["strength"] * 10.0))
                 logger.debug(f"[{context.symbol}] Institutional Order Flow opposes {tentative_bias}! Penalizing AI score to {ai_score:.1f}")
 
-        final_win_p, loss_p, ev, hypotheses, calibrated_win_p = self._compute_blended_probability(
+        final_win_p, loss_p, ev, hypotheses, calibrated_win_p, honest_base_rate = self._compute_blended_probability(
             context, regime, analyst_reports, devil_report, tentative_bias, rr_ratio, risk_dist, account_balance, risk_per_trade_pct
         )
         
@@ -1197,6 +1223,7 @@ class DecisionEngine:
             waiting_reasons=waiting_reasons,
             rejection_reasons=rejection_reasons,
             decision=decision_action,
+            honest_base_rate=(honest_base_rate.as_dict() if honest_base_rate is not None else None),
             execution_authorized=gate_passed,
             context=context,
             pattern_sample_size=pattern_memory.get("sample_size", 0) if "pattern_memory" in locals() and pattern_memory else 0,

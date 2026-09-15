@@ -242,6 +242,10 @@ class DecisionObject:
     dissection_tier: str = "UNKNOWN"
     master_confluence_score: float = 0.0
     master_confluence_tier: str = "UNKNOWN"
+    # Measured counterpart to `model_confidence` / `probabilities`, derived from
+    # real MT5 bars (see jarvis.intelligence.honest_base_rates). Read-only: it
+    # reports what the symbol actually did, and is never used to gate or resize.
+    honest_base_rate: Optional[Dict[str, Any]] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -287,7 +291,8 @@ class DecisionObject:
             "dissection_score": self.dissection_score,
             "dissection_tier": self.dissection_tier,
             "master_confluence_score": self.master_confluence_score,
-            "master_confluence_tier": self.master_confluence_tier
+            "master_confluence_tier": self.master_confluence_tier,
+            "honest_base_rate": self.honest_base_rate
         }
 
 @dataclass
