@@ -40,14 +40,17 @@
 
   // Per-request budgets in ms. Chosen from measured behaviour: local endpoints
   // answer in well under a second, but the external-provider routes (stocks,
-  // india) hang indefinitely without a ceiling.
+  // india) hang indefinitely without a ceiling. The provider budget is longer
+  // because those routes do a cold-cache sweep on first call and then answer
+  // from cache; the panel renders its loading state meanwhile.
   var TIMEOUT = {
     fast: 8000,
     normal: 15000,
+    provider: 30000,
     slow: 60000
   };
 
-  var VIEWS = ['trade', 'analytics', 'backtest'];
+  var VIEWS = ['trade', 'news', 'analyst', 'markets', 'analytics', 'backtest'];
   var PANES = ['watchlist', 'chart', 'ticket'];
 
   var state = {
@@ -79,6 +82,23 @@
     chartTimeframe: null, // timeframe the drawn series belongs to
     chartPainted: false,  // false until the first setData() has run
     showLevels: true,     // support/resistance + trade overlays on the chart
+    chartSource: 'native',// 'native' | 'tradingview'
+    tvSymbol: null,       // symbol the TradingView widget was built for
+    tvInterval: null,     // timeframe the TradingView widget was built for
+    tvState: 'idle',      // idle | loading | ready | failed
+    news: [],             // events from /api/news, in server order
+    newsAt: 0,            // client clock when the calendar arrived
+    newsSkew: null,       // ms this machine's clock runs ahead of the server
+    newsImpact: 'ALL',    // impact filter
+    newsCurrency: 'ALL',  // currency filter
+    newsSelected: null,   // key of the event open in the detail panel
+    newsHeroKey: null,    // event the "next release" panel is featuring
+    equities: null,       // /api/stocks/screener payload
+    equityRows: [],
+    heatmap: null,        // /api/stocks/heatmap payload
+    indiaIndices: null,   // /api/india/indices payload
+    indiaFii: null,       // /api/india/fii_dii payload
+    indiaOptionChain: null,
     lastValues: {}        // for flash-on-change
   };
 
@@ -302,6 +322,9 @@
 
     if (view === 'analytics') { loadAnalytics(); }
     if (view === 'backtest') { loadBacktestMeta(); loadJobs(); }
+    if (view === 'news') { loadNews(); }
+    if (view === 'analyst') { renderDevilAdvocate(); renderQualityGate(); renderObjections(); }
+    if (view === 'markets') { loadMarkets(); }
     if (view === 'trade') {
       loadChart();
       // The chart container was display:none while another view was active, so
@@ -1016,6 +1039,25 @@
     state.chart[bucket] = [];
   }
 
+  /* The legend chips for the derived levels. Split out from drawLevels() so the
+     TradingView source can keep reporting the feed's own support and resistance
+     even though it draws them in an external widget we do not control. */
+  function levelChipsHtml(digits) {
+    var lv = state.chartLevels;
+    if (!lv) return '';
+    var defs = [
+      ['r1', 'R1'], ['r2', 'R2'], ['s1', 'S1'], ['s2', 'S2']
+    ];
+    var chips = [];
+    defs.forEach(function (d) {
+      var price = lv[d[0]];
+      if (price === null || price === undefined) return;
+      chips.push('<span class="tt-level tt-level--' + d[1].charAt(0).toLowerCase() + '">' +
+                 '<i aria-hidden="true"></i>' + d[1] + ' <b>' + num(price, digits) + '</b></span>');
+    });
+    return chips.join('');
+  }
+
   function drawLevels(sym, digits) {
     if (!state.chart) return;
     clearLines('lines');
@@ -1035,7 +1077,6 @@
       ['s2', CHART_COLORS.support2, 1.5, 'Dashed', 'S2']
     ];
 
-    var chips = [];
     defs.forEach(function (d) {
       var price = lv[d[0]];
       if (price === null || price === undefined) return;
@@ -1047,14 +1088,11 @@
         axisLabelVisible: true,
         title: d[4] + ': ' + num(price, digits)
       }));
-      chips.push('<span class="tt-level tt-level--' + d[4].charAt(0).toLowerCase() + '">' +
-                 '<i aria-hidden="true"></i>' + d[4] + ' <b>' + num(price, digits) + '</b></span>');
     });
 
     if (legend) {
-      legend.innerHTML = chips.length
-        ? chips.join('')
-        : '<span class="tt-hint">No swing pivot in range</span>';
+      var chips = levelChipsHtml(digits);
+      legend.innerHTML = chips || '<span class="tt-hint">No swing pivot in range</span>';
     }
   }
 
@@ -1064,18 +1102,17 @@
      because a stop in profit is a different fact from a stop at risk and the
      colour is the fastest way to tell them apart. */
   function drawTradeOverlays(sym, digits) {
-    if (!state.chart) return;
-    clearLines('tradeLines');
-
-    var hud = $('chart-hud');
     var mine = (state.positions || []).filter(function (p) {
       return String(p.symbol || '').toUpperCase() === String(sym || '').toUpperCase();
     });
 
-    if (!state.showLevels || !mine.length) {
-      if (hud) hud.hidden = true;
-      return;
-    }
+    // The card is rendered from telemetry, not from the candles, so it is drawn
+    // whether or not there is a native series to hang price lines off.
+    renderTradeHud(mine);
+
+    if (!state.chart) return;
+    clearLines('tradeLines');
+    if (!state.showLevels || !mine.length) return;
 
     mine.forEach(function (pos) {
       var side = String(pos.type || pos.side || '').toUpperCase();
@@ -1119,8 +1156,16 @@
         }));
       }
     });
+  }
 
+  /* The floating trade card over the chart. Sourced from the broker's position
+     record rather than from the price series, so it remains correct in
+     TradingView mode where the candles are drawn by an external widget. */
+  function renderTradeHud(mine) {
+    var hud = $('chart-hud');
     if (!hud) return;
+    if (!state.showLevels || !mine || !mine.length) { hud.hidden = true; return; }
+
     var p = mine[0];
     var pSide = String(p.type || p.side || '').toUpperCase();
     var pBuy = pSide === 'BUY' || pSide === 'LONG';
@@ -1142,7 +1187,7 @@
         '<span>P&amp;L</span><b class="tt-num ' + signClass(pnl) + '">' + (pnl > 0 ? '+' : '') + num(pnl, 2) + '</b>' +
       '</div>' +
       (mine.length > 1
-        ? '<div class="tt-chart__hud-more">+' + (mine.length - 1) + ' more on ' + esc(sym) + '</div>'
+        ? '<div class="tt-chart__hud-more">+' + (mine.length - 1) + ' more on ' + esc(p.symbol || '') + '</div>'
         : '');
   }
 
@@ -1171,9 +1216,6 @@
   }
 
   function renderChart(sym, candles) {
-    var c = ensureChart();
-    if (!c) return;
-
     // De-duplicate by timestamp and sort ascending: the library rejects a
     // series that is out of order or repeats a time.
     var seen = {};
@@ -1203,6 +1245,31 @@
                      (state.chartTimeframe !== state.timeframe) ||
                      !state.chartPainted;
 
+    state.chartSymbol = sym;
+    state.chartTimeframe = state.timeframe;
+    state.chartCandles = bars;
+    state.chartLevels = computeLevels(bars);
+    updateChartHeader(sym, bars);
+
+    // TradingView mode. The candles are drawn by an external widget we do not
+    // control, so no price lines are drawn — but the feed's own support and
+    // resistance still appear in the legend and the trade card still renders,
+    // because both are derived from data rather than from the native series.
+    if (state.chartSource === 'tradingview') {
+      var legend = $('chart-legend');
+      if (legend) {
+        var chips = state.showLevels ? levelChipsHtml(digits) : '';
+        legend.innerHTML = state.showLevels
+          ? (chips || '<span class="tt-hint">No swing pivot in range</span>')
+          : '';
+      }
+      drawTradeOverlays(sym, digits);
+      return;
+    }
+
+    var c = ensureChart();
+    if (!c) return;
+
     c.candles.applyOptions({
       priceFormat: { type: 'price', precision: digits, minMove: Math.pow(10, -digits) }
     });
@@ -1224,14 +1291,8 @@
       }
     }
 
-    state.chartSymbol = sym;
-    state.chartTimeframe = state.timeframe;
-    state.chartCandles = bars;
-    state.chartLevels = computeLevels(bars);
-
     drawLevels(sym, digits);
     drawTradeOverlays(sym, digits);
-    updateChartHeader(sym, bars);
   }
 
   function loadChart() {
@@ -1250,6 +1311,17 @@
       .then(function (res) {
         var candles = (res.data && res.data.candles) || [];
         if (!res.ok || !candles.length) {
+          // In TradingView mode the overlay sits over the external widget, so a
+          // candle failure there is reported as a legend note rather than by
+          // covering the chart the user is actually reading.
+          if (state.chartSource === 'tradingview') {
+            var legend = $('chart-legend');
+            if (legend) {
+              legend.innerHTML = '<span class="tt-hint">' +
+                esc(res.ok ? 'No candles for ' + sym : 'Feed unavailable') + '</span>';
+            }
+            return;
+          }
           if (overlay) {
             setState(overlay, res.ok ? 'empty' : 'error',
               res.ok ? 'No candles for ' + sym : 'Chart unavailable',
@@ -1257,13 +1329,1504 @@
           }
           return;
         }
-        if (typeof LightweightCharts === 'undefined') {
+        if (state.chartSource !== 'tradingview' && typeof LightweightCharts === 'undefined') {
           if (overlay) setState(overlay, 'error', 'Chart library unavailable', 'lightweight-charts did not load.');
           return;
         }
         if (overlay) overlay.innerHTML = '';
         renderChart(sym, candles);
       });
+  }
+
+  /* ── TradingView chart source ─────────────────────────────────────────────
+     An alternative to the native chart, not a replacement: the native series
+     carries the derived support/resistance and the trade overlays, and this is
+     the same instrument drawn by TradingView's own widget for a second opinion.
+
+     Three rules:
+
+     1. THE SCRIPT IS LOADED ON DEMAND. tv.js is a third-party bundle; pulling
+        it on every page load would cost every user a network round trip for a
+        feature most sessions never open. It is fetched the first time this
+        source is selected.
+
+     2. FAILURE IS EXPLICIT AND LOCAL. A blocked CDN is common on a locked-down
+        machine. The panel says the widget could not load and points at the
+        native chart, rather than showing an empty box.
+
+     3. THE REQUESTED TICKER IS ON SCREEN. A broker symbol has to be translated
+        to a TradingView one, and that mapping is a best guess for anything not
+        in the table below. Printing the resolved ticker means a wrong mapping
+        is visible as a wrong ticker instead of silently showing a different
+        instrument.
+  */
+
+  var TV_SCRIPT_SRC = 'https://s3.tradingview.com/tv.js';
+  var tvScriptPromise = null;
+
+  var TV_INTERVALS = {
+    M1: '1', M5: '5', M15: '15', M30: '30',
+    H1: '60', H4: '240', D1: 'D', W1: 'W'
+  };
+
+  /* Broker symbol -> TradingView ticker. Ported from the legacy terminal so the
+     mapping a returning user expects is preserved. */
+  function tradingViewSymbol(rawSym) {
+    var s = String(rawSym || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    if (!s) return 'OANDA:XAUUSD';
+
+    // Metals and energy
+    if (s.indexOf('XAU') >= 0 || s.indexOf('GOLD') >= 0) return 'OANDA:XAUUSD';
+    if (s.indexOf('XAG') >= 0 || s.indexOf('SILVER') >= 0) return 'OANDA:XAGUSD';
+    if (s.indexOf('WTI') >= 0 || s.indexOf('OIL') >= 0 || s.indexOf('CRUDE') >= 0) return 'TVC:USOIL';
+
+    // Crypto
+    if (s.indexOf('BTC') === 0 || s.indexOf('BITCOIN') >= 0) return 'BINANCE:BTCUSDT';
+    if (s.indexOf('ETH') === 0 || s.indexOf('ETHEREUM') >= 0) return 'BINANCE:ETHUSDT';
+    if (s.indexOf('SOL') === 0) return 'BINANCE:SOLUSDT';
+    if (s.indexOf('XRP') === 0) return 'BINANCE:XRPUSDT';
+    if (s.indexOf('DOGE') === 0) return 'BINANCE:DOGEUSDT';
+    if (s.indexOf('BNB') === 0) return 'BINANCE:BNBUSDT';
+    if (s.indexOf('ADA') === 0) return 'BINANCE:ADAUSDT';
+
+    // Indices. Order matters: "NAS100" contains no "500", but "US500" does, and
+    // the Dow check must not catch "US30" before the Nasdaq check sees "NAS100".
+    if (s.indexOf('500') >= 0 || s.indexOf('SPX') >= 0) return 'FOREXCOM:SPX500USD';
+    if (s.indexOf('NAS') >= 0 || s.indexOf('NDX') >= 0 || s.indexOf('TEC') >= 0) return 'FOREXCOM:NAS100USD';
+    if (s.indexOf('DJI') >= 0 || s.indexOf('DOW') >= 0 || s.indexOf('WALL') >= 0) return 'FOREXCOM:DJI';
+    if (s.indexOf('GER') >= 0 || s.indexOf('DAX') >= 0) return 'FOREXCOM:GER40';
+    if (s.indexOf('UK100') >= 0 || s.indexOf('FTSE') >= 0) return 'FOREXCOM:UK100';
+    if (s.indexOf('30') >= 0) return 'FOREXCOM:DJI';
+
+    // Indian indices
+    if (s.indexOf('NIFTY') >= 0 || s.indexOf('NIF') >= 0) return 'NSE:NIFTY';
+    if (s.indexOf('BANKNIFTY') >= 0) return 'NSE:BANKNIFTY';
+    if (s.indexOf('SENSEX') >= 0) return 'BSE:SENSEX';
+
+    // FX majors and minors
+    var pairs = ['EURUSD', 'GBPUSD', 'USDJPY', 'AUDUSD', 'NZDUSD', 'USDCAD', 'USDCHF',
+                 'EURJPY', 'GBPJPY', 'EURGBP', 'AUDJPY', 'CADJPY', 'CHFJPY',
+                 'EURAUD', 'EURCAD'];
+    for (var i = 0; i < pairs.length; i++) {
+      if (s.indexOf(pairs[i]) === 0) return 'FX:' + pairs[i];
+    }
+    return 'FX:' + s.slice(0, 6);
+  }
+
+  /* Load tv.js once, with a ceiling. A blocked CDN must not leave the panel
+     spinning, so the promise resolves false on error or timeout and the caller
+     renders a real failure state. */
+  function ensureTvScript() {
+    if (typeof window.TradingView !== 'undefined') return Promise.resolve(true);
+    if (tvScriptPromise) return tvScriptPromise;
+
+    tvScriptPromise = new Promise(function (resolve) {
+      var settled = false;
+      var finish = function (ok) {
+        if (settled) return;
+        settled = true;
+        if (!ok) tvScriptPromise = null;   // allow a retry on the next switch
+        resolve(ok);
+      };
+
+      var s = document.createElement('script');
+      s.src = TV_SCRIPT_SRC;
+      s.async = true;
+      s.onload = function () { finish(typeof window.TradingView !== 'undefined'); };
+      s.onerror = function () { finish(false); };
+      setTimeout(function () { finish(typeof window.TradingView !== 'undefined'); }, 15000);
+      document.head.appendChild(s);
+    });
+    return tvScriptPromise;
+  }
+
+  function buildTvWidget(host, sym, timeframe) {
+    var tvSym = tradingViewSymbol(sym);
+    var interval = TV_INTERVALS[timeframe] || '60';
+
+    host.innerHTML = '';
+
+    var frame = document.createElement('div');
+    frame.id = 'tv-widget-frame';
+    frame.className = 'tt-chart__tv-frame';
+    host.appendChild(frame);
+
+    var note = document.createElement('div');
+    note.className = 'tt-chart__tv-note';
+    note.textContent = 'TradingView · ' + tvSym + ' · ' + timeframe + ' · ' + interval;
+    host.appendChild(note);
+
+    try {
+      /* global TradingView */
+      new window.TradingView.widget({
+        container_id: 'tv-widget-frame',
+        autosize: true,
+        symbol: tvSym,
+        interval: interval,
+        timezone: 'Etc/UTC',
+        theme: 'dark',
+        style: '1',
+        locale: 'en',
+        enable_publishing: false,
+        hide_side_toolbar: false,
+        allow_symbol_change: true,
+        details: true,
+        hotlist: true,
+        calendar: true,
+        disabled_features: ['create_volume_indicator_by_default'],
+        studies: []
+      });
+      state.tvState = 'ready';
+    } catch (e) {
+      state.tvState = 'failed';
+      setState(host, 'error', 'TradingView failed to start',
+        String((e && e.message) || e));
+    }
+  }
+
+  function loadTradingView() {
+    var host = $('chart-tv');
+    if (!host) return;
+
+    var sym = state.symbol;
+    if (!sym) {
+      setState(host, 'empty', 'No instrument selected', null);
+      return;
+    }
+
+    // Rebuilding the widget reloads a whole iframe, which flickers. Only do it
+    // when the instrument or the timeframe actually changed.
+    if (state.tvState === 'ready' &&
+        state.tvSymbol === sym &&
+        state.tvInterval === state.timeframe) {
+      return;
+    }
+
+    state.tvSymbol = sym;
+    state.tvInterval = state.timeframe;
+    state.tvState = 'loading';
+
+    host.innerHTML = '';
+    setState(host, 'loading', 'Loading TradingView…',
+      'Requesting the external chart widget.');
+
+    ensureTvScript().then(function (ok) {
+      if (!ok) {
+        state.tvState = 'failed';
+        setState(host, 'error', 'TradingView unavailable',
+          'The widget script could not be loaded. The native chart is unaffected.');
+        return;
+      }
+      buildTvWidget(host, sym, state.timeframe);
+    });
+  }
+
+  function setChartSource(source) {
+    if (source !== 'native' && source !== 'tradingview') source = 'native';
+    state.chartSource = source;
+
+    var nativeBtn = $('chart-src-native');
+    var tvBtn = $('chart-src-tv');
+    if (nativeBtn) nativeBtn.setAttribute('aria-pressed', String(source === 'native'));
+    if (tvBtn) tvBtn.setAttribute('aria-pressed', String(source === 'tradingview'));
+
+    var overlay = $('chart-overlay');
+    var tvHost = $('chart-tv');
+
+    // Visibility is driven by a body attribute, matching how views and panes
+    // already switch, so the stylesheet owns it rather than inline styles.
+    document.body.setAttribute('data-chart-source', source);
+
+    if (source === 'tradingview') {
+      if (tvHost) tvHost.removeAttribute('hidden');
+      if (overlay) { overlay.innerHTML = ''; overlay.hidden = true; }
+      loadTradingView();
+      return;
+    }
+
+    if (tvHost) tvHost.setAttribute('hidden', '');
+    if (overlay) overlay.hidden = false;
+    // The native canvas kept whatever size it had while hidden, and the series
+    // was never painted if the session started in TradingView mode.
+    state.chartPainted = false;
+    loadChart();
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(resizeChart);
+  }
+
+  /* ── Devil's advocate ────────────────────────────────────────────────────
+     This view exists to argue against the trade. Every element on it is the
+     engine's own adversarial output for the selected symbol: the bull and bear
+     cases, the threat vectors, the levels that would invalidate the idea, the
+     penalty the devil analyst applied, and the quality gate that decides
+     whether the setup may be executed at all.
+
+     Two rules govern how it is rendered:
+
+     1. AN EMPTY LIST IS NOT A CLEAN BILL OF HEALTH. When the engine reports no
+        threat vectors the panel says the engine reported none — it never reads
+        as "no risks". The absence of an objection is not the absence of risk,
+        and a trader must be able to tell "checked and clear" apart from "not
+        checked".
+
+     2. THE PENALTY IS ON THE ENGINE'S OWN SCALE. `adversarial_penalty` runs
+        0-50, bounded by DecisionEngine.max_devil_penalty. The gauge is drawn as
+        penalty/50 so the fill is meaningful, and the colour thresholds match the
+        legacy terminal's: above 25 the objection is severe, above 15 it is
+        material, below that it is minor.
+  */
+
+  var DEVIL_PENALTY_MAX = 50;
+
+  function devilPenaltyBand(p) {
+    if (p > 25) return 'down';
+    if (p > 15) return 'warn';
+    return 'up';
+  }
+
+  function devilVerdict(d) {
+    if (!d) return { label: '—', cls: 'none' };
+    if (d.execution_authorized) return { label: 'AUTHORISED', cls: 'buy' };
+    var gate = String(d.gate_policy_decision || '').toUpperCase();
+    var dec = String(d.decision || '').toUpperCase();
+    if (gate === 'BLOCK' || dec === 'NO_TRADE') return { label: 'BLOCKED', cls: 'sell' };
+    if (dec === 'WAIT') return { label: 'WAIT', cls: 'medium' };
+    return { label: dec || '—', cls: 'none' };
+  }
+
+  function daMetricCard(label, value, extra) {
+    var card = document.createElement('div');
+    card.className = 'tt-metric';
+    var l = document.createElement('span');
+    l.className = 'tt-metric__label';
+    l.textContent = label;
+    var v = document.createElement('span');
+    v.className = 'tt-metric__value';
+    v.textContent = value === null || value === undefined ? '—' : String(value);
+    card.appendChild(l);
+    card.appendChild(v);
+    if (extra) card.appendChild(extra);
+    return card;
+  }
+
+  function renderDaMetrics(d) {
+    var host = $('da-metrics');
+    if (!host) return;
+
+    if (!d) {
+      setState(host, 'empty', 'No setup selected',
+        'Pick an instrument to see the case against it.');
+      return;
+    }
+
+    host.removeAttribute('data-state');
+    host.innerHTML = '';
+
+    // The penalty gets a gauge as well as a number: 12 out of 50 is a very
+    // different objection from 42 out of 50, and a bare figure hides that.
+    var penalty = Number(d.adversarial_penalty);
+    var hasPenalty = isFinite(penalty);
+    var band = hasPenalty ? devilPenaltyBand(penalty) : 'none';
+    var gauge = document.createElement('span');
+    gauge.className = 'tt-gauge tt-gauge--' + band;
+    var fill = document.createElement('span');
+    fill.className = 'tt-gauge__fill';
+    fill.style.width = hasPenalty
+      ? Math.max(0, Math.min(100, (penalty / DEVIL_PENALTY_MAX) * 100)).toFixed(1) + '%'
+      : '0%';
+    gauge.appendChild(fill);
+
+    host.appendChild(daMetricCard('Adversarial penalty',
+      hasPenalty ? num(penalty, 1) + ' / ' + DEVIL_PENALTY_MAX : '—', gauge));
+    host.appendChild(daMetricCard('Model confidence',
+      d.model_confidence !== undefined ? pct(d.model_confidence, 1) : '—'));
+    host.appendChild(daMetricCard('Dissection',
+      String(d.dissection_tier || '—') + ' · ' + num(d.dissection_score, 1)));
+    host.appendChild(daMetricCard('Confluence',
+      String(d.master_confluence_tier || '—') + ' · ' + num(d.master_confluence_score, 1)));
+    host.appendChild(daMetricCard('Risk per trade',
+      d.calculated_risk_percent !== undefined ? num(d.calculated_risk_percent, 2) + '%' : '—'));
+    host.appendChild(daMetricCard('Reward:risk',
+      d.risk_reward_ratio !== undefined ? num(d.risk_reward_ratio, 2) + 'R' : '—'));
+    host.appendChild(daMetricCard('Expected value',
+      d.expected_value !== undefined ? num(d.expected_value, 2) : '—'));
+    host.appendChild(daMetricCard('Sample size',
+      d.pattern_sample_size !== undefined ? String(d.pattern_sample_size) : '—'));
+  }
+
+  /* Renders a list of the engine's own statements. An empty list is reported as
+     "the engine returned none" rather than as an all-clear. */
+  function daList(host, items, emptyTitle, emptyDetail) {
+    if (!host) return;
+    host.innerHTML = '';
+    var list = Array.isArray(items) ? items : [];
+    if (!list.length) {
+      setState(host, 'empty', emptyTitle, emptyDetail);
+      return;
+    }
+    host.removeAttribute('data-state');
+    var ul = document.createElement('ul');
+    ul.className = 'tt-da__list';
+    list.forEach(function (text) {
+      var li = document.createElement('li');
+      li.textContent = String(text);
+      ul.appendChild(li);
+    });
+    host.appendChild(ul);
+  }
+
+  function renderDevilAdvocate() {
+    var d = state.symbol ? state.decisions[state.symbol] : null;
+
+    setText($('da-symbol'), state.symbol || '—');
+    var v = devilVerdict(d);
+    var chip = $('da-verdict');
+    if (chip) {
+      chip.className = 'tt-chip tt-chip--' + v.cls;
+      chip.textContent = v.label;
+    }
+
+    renderDaMetrics(d);
+
+    daList($('da-bull'), d && d.bull_case,
+      'No bull case recorded',
+      'The engine did not publish supporting evidence for this setup.');
+    daList($('da-bear'), d && d.bear_case,
+      'No bear case recorded',
+      'The engine did not publish evidence against this setup.');
+    daList($('da-threats'), d && d.risk_factors,
+      'No threat vectors reported',
+      'The engine returned an empty list. That is not the same as the setup being safe.');
+    daList($('da-invalidation'), d && d.invalidation_levels,
+      'No invalidation levels reported',
+      'The engine did not state what would prove this idea wrong.');
+  }
+
+  function renderQualityGate() {
+    var host = $('gate-body');
+    var d = state.symbol ? state.decisions[state.symbol] : null;
+    var gate = d && d.quality_gate;
+    var chip = $('gate-verdict');
+
+    if (!gate) {
+      setText($('gate-count'), '0');
+      if (chip) { chip.className = 'tt-chip tt-chip--none'; chip.textContent = '—'; }
+      setState(host, 'empty', 'No gate result',
+        'Pick an instrument whose setup the engine has evaluated.');
+      return;
+    }
+
+    var checks = (gate.checks && typeof gate.checks === 'object') ? gate.checks : {};
+    var names = Object.keys(checks);
+    var failed = names.filter(function (n) { return !checks[n]; });
+
+    setText($('gate-count'), (names.length - failed.length) + ' / ' + names.length);
+    if (chip) {
+      chip.className = 'tt-chip ' + (gate.passed ? 'tt-chip--buy' : 'tt-chip--sell');
+      chip.textContent = gate.passed ? 'PASSED' : 'BLOCKED';
+    }
+
+    if (!names.length) {
+      setState(host, 'empty', 'No checks reported',
+        'The engine returned an empty gate for this setup.');
+      return;
+    }
+
+    host.removeAttribute('data-state');
+    host.innerHTML = '';
+
+    var grid = document.createElement('div');
+    grid.className = 'tt-gate';
+
+    // Failures first. The reason a setup is blocked matters more to a trader
+    // than the twenty checks that agreed with it.
+    names.slice().sort(function (a, b) {
+      return (checks[a] ? 1 : 0) - (checks[b] ? 1 : 0) || String(a).localeCompare(String(b));
+    }).forEach(function (name) {
+      var ok = !!checks[name];
+      var cell = document.createElement('div');
+      cell.className = 'tt-gate__cell tt-gate__cell--' + (ok ? 'pass' : 'fail');
+      cell.setAttribute('title', name + ': ' + (ok ? 'passed' : 'failed'));
+
+      var mark = document.createElement('span');
+      mark.className = 'tt-gate__mark';
+      mark.setAttribute('aria-hidden', 'true');
+      mark.textContent = ok ? '\u2713' : '\u2715';
+
+      var label = document.createElement('span');
+      label.className = 'tt-gate__label';
+      label.textContent = name;
+
+      cell.appendChild(mark);
+      cell.appendChild(label);
+      grid.appendChild(cell);
+    });
+
+    host.appendChild(grid);
+  }
+
+  function renderObjections() {
+    var host = $('da-objections');
+    var d = state.symbol ? state.decisions[state.symbol] : null;
+    if (!d) {
+      setState(host, 'empty', 'No setup selected',
+        'Pick an instrument to see the engine\u2019s recorded objections.');
+      return;
+    }
+
+    var rows = [];
+    (Array.isArray(d.waiting_reasons) ? d.waiting_reasons : []).forEach(function (r) {
+      rows.push(['Waiting', r]);
+    });
+    (Array.isArray(d.rejection_reasons) ? d.rejection_reasons : []).forEach(function (r) {
+      rows.push(['Rejected', r]);
+    });
+
+    if (!rows.length) {
+      setState(host, 'empty', 'No objections recorded',
+        'The engine recorded neither a waiting nor a rejection reason for this setup.');
+      return;
+    }
+
+    host.removeAttribute('data-state');
+    host.innerHTML = '';
+    var ul = document.createElement('ul');
+    ul.className = 'tt-reasons';
+    rows.forEach(function (pair) {
+      var li = document.createElement('li');
+      var k = document.createElement('span');
+      k.className = 'tt-reasons__key';
+      k.textContent = pair[0];
+      var v = document.createElement('span');
+      v.className = 'tt-reasons__val';
+      v.textContent = String(pair[1]);
+      li.appendChild(k);
+      li.appendChild(v);
+      ul.appendChild(li);
+    });
+    host.appendChild(ul);
+  }
+
+  /* ── News and the economic calendar ──────────────────────────────────────
+     The calendar is the one panel whose interesting quantity changes every
+     second, which drives three rules:
+
+     1. THE COUNTDOWN IS COMPUTED HERE, NOT READ FROM THE PAYLOAD. The server
+        sends `diff_seconds` against its own clock at generation time, plus a
+        `status_badge` string like "IN 14h 33m" baked at that same instant. Both
+        are stale the moment the response lands, and a badge would sit on
+        "IN 0m" indefinitely. Each row is anchored to its own `timestamp_iso`
+        and corrected for clock skew against the payload's `timestamp`, so the
+        countdown is exact and keeps running between polls.
+
+     2. THE LIVE WINDOW IS THE SERVER'S OWN RULE, not a new one. The backend
+        (jarvis/market/news.py) opens a volatility-shock window five minutes
+        before a release and closes it fifteen minutes after. The client applies
+        the same offsets to its own clock, so a row becomes "live" and then
+        "released" while the page is open rather than holding whatever state the
+        payload happened to describe once.
+
+     3. NO INVENTED PRINTS. Forecast, previous and actual are frequently absent
+        from the feed. An absent print renders as a dash — never as 0.00, which
+        is a real and materially different number to a trader.
+  */
+
+  var NEWS_LIVE_BEFORE = 300;   // seconds a release goes live ahead of time
+  var NEWS_LIVE_AFTER = 900;    // seconds it stays live afterwards
+
+  /* Server's "now", derived from the skew measured when the payload landed.
+     Anchoring to the server's clock rather than this machine's keeps the
+     countdown correct even when the local clock is wrong. */
+  function serverNowMs() {
+    return state.newsSkew === null ? Date.now() : Date.now() - state.newsSkew;
+  }
+
+  /* Seconds until an event. Positive means still ahead of us. */
+  function newsRemaining(ev) {
+    if (!ev) return null;
+    if (ev.timestamp_iso) {
+      var t = Date.parse(ev.timestamp_iso);
+      if (!isNaN(t)) return (t - serverNowMs()) / 1000;
+    }
+    if (typeof ev.diff_seconds === 'number' && isFinite(ev.diff_seconds)) {
+      return ev.diff_seconds - ((Date.now() - state.newsAt) / 1000);
+    }
+    return null;
+  }
+
+  /* Mirrors the backend's window exactly: live from -5min to +15min. */
+  function newsPhase(ev, rem) {
+    if (rem === null) return 'unknown';
+    if (rem < -NEWS_LIVE_AFTER) return 'past';
+    if (rem <= NEWS_LIVE_BEFORE) return 'live';
+    if (rem <= 3600) return 'soon';
+    return 'upcoming';
+  }
+
+  function phaseLabel(phase) {
+    return {
+      live: 'LIVE', soon: 'IMMINENT', upcoming: 'SCHEDULED',
+      past: 'RELEASED', unknown: '—'
+    }[phase] || '—';
+  }
+
+  /* Absolute duration. Sign is expressed by the caller, so "ago" and "in"
+     read correctly rather than relying on a leading minus. */
+  function fmtDuration(sec) {
+    var s = Math.round(Math.abs(Number(sec) || 0));
+    var d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600),
+        m = Math.floor((s % 3600) / 60), ss = s % 60;
+    if (d > 0) return d + 'd ' + h + 'h';
+    if (h > 0) return h + 'h ' + m + 'm';
+    if (m > 0) return m + 'm ' + ss + 's';
+    return ss + 's';
+  }
+
+  function countdownLabel(phase, rem) {
+    if (rem === null) return '—';
+    if (phase === 'live') return rem >= 0 ? 'T\u2212' + fmtDuration(rem) : 'T+' + fmtDuration(rem);
+    if (phase === 'past') return fmtDuration(rem) + ' ago';
+    return 'in ' + fmtDuration(rem);
+  }
+
+  function impactChip(impact) {
+    var k = String(impact || '').toUpperCase();
+    var cls = ['HIGH', 'MEDIUM', 'LOW'].indexOf(k) >= 0 ? k.toLowerCase() : 'none';
+    return '<span class="tt-chip tt-chip--' + cls + '">' + esc(k || '—') + '</span>';
+  }
+
+  /* Stable identity for selection, so a refresh does not drop the open event. */
+  function newsKey(ev) {
+    if (!ev) return null;
+    return String(ev.timestamp_iso || '') + '|' + String(ev.event || '');
+  }
+
+  function newsFiltered() {
+    var impact = state.newsImpact, cur = state.newsCurrency;
+    return (state.news || []).filter(function (e) {
+      if (impact !== 'ALL' && String(e.impact || '').toUpperCase() !== impact) return false;
+      if (cur !== 'ALL' && String(e.currency || '').toUpperCase() !== cur) return false;
+      return true;
+    });
+  }
+
+  /* The event the "Next release" panel should feature: one inside its live
+     window if any, else the soonest still ahead of us. The server orders the
+     upcoming block ascending, so the first match is the soonest. Falls back to
+     the most recent release so the panel is never blank while loaded. */
+  function pickNextEvent() {
+    var list = state.news || [];
+    if (!list.length) return null;
+    var live = null, next = null;
+    list.forEach(function (ev) {
+      var phase = newsPhase(ev, newsRemaining(ev));
+      if (phase === 'live') { if (!live) live = ev; }
+      else if ((phase === 'soon' || phase === 'upcoming') && !next) next = ev;
+    });
+    return live || next || list[0];
+  }
+
+  function renderNewsLiveChip() {
+    var chip = $('news-live-chip');
+    if (!chip) return;
+    var live = null;
+    (state.news || []).some(function (ev) {
+      if (newsPhase(ev, newsRemaining(ev)) === 'live') { live = ev; return true; }
+      return false;
+    });
+    if (live) {
+      chip.className = 'tt-chip tt-chip--live';
+      chip.textContent = 'LIVE · ' + (live.currency || '') + ' ' + (live.event || '');
+    } else {
+      chip.className = 'tt-chip tt-chip--none';
+      chip.textContent = 'no release live';
+    }
+  }
+
+  /* The countdown cell carries its own anchors so the per-second tick can
+     recompute without a lookup into a list that a filter may have changed. */
+  function newsCdCell(ev, rem, phase, cls) {
+    return '<td class="' + cls + '" data-cd="1" data-phase="' + esc(phase) + '"' +
+      ' data-iso="' + esc(ev.timestamp_iso || '') + '"' +
+      ' data-diff="' + esc(typeof ev.diff_seconds === 'number' ? ev.diff_seconds : '') + '">' +
+      '<span class="tt-news__cd-val" data-cd-val="1">' + esc(countdownLabel(phase, rem)) + '</span>' +
+      '<span class="tt-news__cd-badge">' + esc(phaseLabel(phase)) + '</span>' +
+      '</td>';
+  }
+
+  function newsRow(ev) {
+    var rem = newsRemaining(ev);
+    var phase = newsPhase(ev, rem);
+    var key = newsKey(ev);
+    var pairs = Array.isArray(ev.affected_pairs) ? ev.affected_pairs : [];
+
+    var tr = document.createElement('tr');
+    tr.className = 'tt-news__row';
+    tr.setAttribute('data-phase', phase);
+    tr.setAttribute('data-key', key);
+    if (state.newsSelected === key) tr.setAttribute('data-selected', 'true');
+    tr.setAttribute('tabindex', '0');
+    tr.setAttribute('role', 'button');
+    tr.setAttribute('aria-label', 'Event detail: ' + String(ev.event || 'event'));
+
+    tr.innerHTML =
+      '<td class="tt-news__when">' +
+        '<span class="tt-num">' + esc(ev.time_ist || ev.time || '—') + '</span>' +
+        (ev.time_utc ? '<span class="tt-news__utc">' + esc(ev.time_utc) + '</span>' : '') +
+      '</td>' +
+      newsCdCell(ev, rem, phase, 'tt-news__cd') +
+      '<td>' + impactChip(ev.impact) + '</td>' +
+      '<td class="tt-news__cur">' + esc(ev.currency || '—') + '</td>' +
+      '<td class="tt-news__event">' +
+        '<span class="tt-news__name">' + esc(ev.event || '—') + '</span>' +
+        (pairs.length ? '<span class="tt-news__pairs">' + esc(pairs.join(' · ')) + '</span>' : '') +
+      '</td>' +
+      '<td class="tt-num">' + esc(ev.actual || '—') + '</td>' +
+      '<td class="tt-num">' + esc(ev.forecast || '—') + '</td>' +
+      '<td class="tt-num">' + esc(ev.previous || '—') + '</td>';
+
+    tr.addEventListener('click', function () { selectNews(ev); });
+    tr.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectNews(ev); }
+    });
+    return tr;
+  }
+
+  function renderNews() {
+    var host = $('news-body');
+    if (!host) return;
+
+    var all = state.news || [];
+    var rows = newsFiltered();
+
+    setText($('news-count'), all.length === rows.length
+      ? String(rows.length) : rows.length + ' of ' + all.length);
+    renderNewsLiveChip();
+
+    if (!all.length) {
+      setState(host, 'empty', 'No events scheduled',
+        'The calendar feed returned no recent or upcoming releases.');
+      return;
+    }
+    if (!rows.length) {
+      setState(host, 'empty', 'No events match the filter',
+        'Clear the impact or currency filter to see all ' + all.length + ' events.');
+      return;
+    }
+
+    host.removeAttribute('data-state');
+    host.innerHTML = '';
+
+    var table = document.createElement('table');
+    table.className = 'tt-table tt-news';
+    var thead = document.createElement('thead');
+    thead.innerHTML =
+      '<tr>' +
+        '<th scope="col">When</th>' +
+        '<th scope="col">Countdown</th>' +
+        '<th scope="col">Impact</th>' +
+        '<th scope="col">Cur</th>' +
+        '<th scope="col">Event</th>' +
+        '<th scope="col" class="tt-num">Actual</th>' +
+        '<th scope="col" class="tt-num">Forecast</th>' +
+        '<th scope="col" class="tt-num">Previous</th>' +
+      '</tr>';
+    table.appendChild(thead);
+
+    var tbody = document.createElement('tbody');
+    rows.forEach(function (ev) { tbody.appendChild(newsRow(ev)); });
+    table.appendChild(tbody);
+    host.appendChild(table);
+  }
+
+  function renderNewsHero() {
+    var host = $('news-hero');
+    if (!host) return;
+
+    var ev = pickNextEvent();
+    if (!ev) {
+      state.newsHeroKey = null;
+      setState(host, 'empty', 'No upcoming release',
+        'The calendar feed returned no events.');
+      return;
+    }
+
+    var rem = newsRemaining(ev);
+    var phase = newsPhase(ev, rem);
+    state.newsHeroKey = newsKey(ev);
+
+    host.removeAttribute('data-state');
+    host.innerHTML = '';
+
+    var wrap = document.createElement('div');
+    wrap.className = 'tt-news-hero';
+    wrap.setAttribute('data-phase', phase);
+
+    var grid = [
+      ['Forecast', ev.forecast], ['Previous', ev.previous], ['Actual', ev.actual],
+      ['Bias', ev.direction_bias], ['Shock risk', ev.shock_risk]
+    ];
+    var cells = grid.map(function (p) {
+      return '<div class="tt-news-hero__cell">' +
+        '<span class="tt-news-hero__k">' + esc(p[0]) + '</span>' +
+        '<span class="tt-news-hero__v">' + esc(p[1] || '—') + '</span>' +
+      '</div>';
+    }).join('');
+
+    wrap.innerHTML =
+      '<div class="tt-news-hero__top">' +
+        impactChip(ev.impact) +
+        '<span class="tt-news-hero__cur">' + esc(ev.currency || '—') + '</span>' +
+        '<span class="tt-hint">' + esc(ev.time_ist || ev.time || '—') + '</span>' +
+      '</div>' +
+      '<h3 class="tt-news-hero__title">' + esc(ev.event || '—') + '</h3>' +
+      '<div class="tt-news-hero__cd" data-cd="1" data-phase="' + esc(phase) + '"' +
+        ' data-iso="' + esc(ev.timestamp_iso || '') + '"' +
+        ' data-diff="' + esc(typeof ev.diff_seconds === 'number' ? ev.diff_seconds : '') + '">' +
+        '<span class="tt-news-hero__cd-val" data-cd-val="1">' + esc(countdownLabel(phase, rem)) + '</span>' +
+        '<span class="tt-news-hero__cd-badge">' + esc(phaseLabel(phase)) + '</span>' +
+      '</div>' +
+      '<div class="tt-news-hero__grid">' + cells + '</div>';
+
+    host.appendChild(wrap);
+  }
+
+  function renderNewsDetail(explicit) {
+    var host = $('news-detail');
+    if (!host) return;
+
+    var ev = explicit || null;
+    if (!ev && state.newsSelected) {
+      ev = (state.news || []).filter(function (e) {
+        return newsKey(e) === state.newsSelected;
+      })[0] || null;
+    }
+
+    var chip = $('news-detail-impact');
+    if (!ev) {
+      if (chip) { chip.className = 'tt-chip tt-chip--none'; chip.textContent = '—'; }
+      setState(host, 'empty', 'No event selected',
+        'Pick an event from the calendar to read its impact analysis.');
+      return;
+    }
+
+    var k = String(ev.impact || '').toUpperCase();
+    if (chip) {
+      chip.className = 'tt-chip tt-chip--' +
+        (['HIGH', 'MEDIUM', 'LOW'].indexOf(k) >= 0 ? k.toLowerCase() : 'none');
+      chip.textContent = k || '—';
+    }
+
+    var rem = newsRemaining(ev);
+    var phase = newsPhase(ev, rem);
+    var pairs = Array.isArray(ev.affected_pairs) ? ev.affected_pairs : [];
+
+    host.removeAttribute('data-state');
+    host.innerHTML = '';
+
+    var rows = [
+      // The event's own name, first. A detail panel that shows forecast,
+      // previous and actual without saying which release they belong to is
+      // unreadable the moment the user scrolls the calendar.
+      ['Event', ev.event],
+      ['Status', phaseLabel(phase) + ' · ' + countdownLabel(phase, rem)],
+      ['When (IST)', ev.time_ist || ev.time || '—'],
+      ['When (UTC)', ev.time_utc || '—'],
+      ['Forecast', ev.forecast], ['Previous', ev.previous], ['Actual', ev.actual],
+      ['Deviation', ev.deviation_summary],
+      ['Direction bias', ev.direction_bias],
+      ['Shock risk', ev.shock_risk],
+      ['Category', ev.category],
+      ['Affected', pairs.length ? pairs.join(' · ') : null]
+    ];
+
+    var dl = document.createElement('dl');
+    dl.className = 'tt-detail';
+    rows.forEach(function (pair) {
+      var dt = document.createElement('dt');
+      dt.textContent = pair[0];
+      var dd = document.createElement('dd');
+      setText(dd, pair[1]);
+      dl.appendChild(dt);
+      dl.appendChild(dd);
+    });
+    host.appendChild(dl);
+
+    // Prose blocks. Each is written with textContent, so a headline containing
+    // markup cannot inject into the panel.
+    [
+      ['Impact', ev.impact_analysis],
+      ['What it is', ev.description],
+      ['Execution', ev.execution_warning],
+      ['Window', ev.shock_alert]
+    ].forEach(function (pair) {
+      if (!pair[1]) return;
+      var h = document.createElement('h4');
+      h.className = 'tt-da__heading';
+      h.textContent = pair[0];
+      var p = document.createElement('p');
+      p.className = 'tt-news__prose';
+      p.textContent = String(pair[1]);
+      host.appendChild(h);
+      host.appendChild(p);
+    });
+  }
+
+  function selectNews(ev) {
+    state.newsSelected = newsKey(ev);
+    var root = $('news-body');
+    if (root) {
+      Array.prototype.forEach.call(root.querySelectorAll('tr[data-key]'), function (tr) {
+        if (tr.getAttribute('data-key') === state.newsSelected) tr.setAttribute('data-selected', 'true');
+        else tr.removeAttribute('data-selected');
+      });
+    }
+    renderNewsDetail(ev);
+  }
+
+  /* Rebuild the currency filter only when the set actually changed. Rebuilding
+     on every poll would reset the user's selection mid-session. */
+  function populateNewsCurrencies(events) {
+    var sel = $('news-currency');
+    if (!sel) return;
+    var seen = {};
+    events.forEach(function (e) {
+      var c = String(e.currency || '').toUpperCase();
+      if (c) seen[c] = true;
+    });
+    var wanted = ['ALL'].concat(Object.keys(seen).sort());
+    var existing = Array.prototype.map.call(sel.options || [], function (o) { return o.value; });
+    if (existing.join(',') === wanted.join(',')) return;
+
+    sel.innerHTML = '';
+    wanted.forEach(function (c) {
+      var o = document.createElement('option');
+      o.value = c;
+      o.textContent = c === 'ALL' ? 'All currencies' : c;
+      sel.appendChild(o);
+    });
+    sel.value = wanted.indexOf(state.newsCurrency) >= 0 ? state.newsCurrency : 'ALL';
+    state.newsCurrency = sel.value;
+  }
+
+  /* One tick per second. Updates only the countdown cells in place — rebuilding
+     the table here would throw away the user's scroll position and focus every
+     second. */
+  function tickNews() {
+    if (state.view !== 'news') return;
+    var root = $('view-news');
+    if (!root) return;
+
+    Array.prototype.forEach.call(root.querySelectorAll('[data-cd]'), function (cell) {
+      var iso = cell.getAttribute('data-iso') || null;
+      var rawDiff = cell.getAttribute('data-diff');
+      var rem = newsRemaining({
+        timestamp_iso: iso,
+        diff_seconds: rawDiff ? parseFloat(rawDiff) : null
+      });
+      var phase = newsPhase({ timestamp_iso: iso }, rem);
+
+      var val = cell.querySelector('[data-cd-val]');
+      if (val) val.textContent = countdownLabel(phase, rem);
+      cell.setAttribute('data-phase', phase);
+
+      var badge = cell.querySelector('.tt-news__cd-badge');
+      if (badge) badge.textContent = phaseLabel(phase);
+
+      // The row and the hero both carry the phase on the element above the
+      // cell, which is what the stylesheet keys its colour off.
+      if (cell.parentNode && cell.parentNode.getAttribute) {
+        cell.parentNode.setAttribute('data-phase', phase);
+      }
+    });
+
+    renderNewsLiveChip();
+
+    // Promote the next release once the featured one has finished.
+    if (newsKey(pickNextEvent()) !== state.newsHeroKey) renderNewsHero();
+  }
+
+  function loadNews() {
+    var host = $('news-body');
+    if (!host) return;
+    if (!state.news.length) setState(host, 'loading', 'Loading calendar…');
+
+    apiGet('/api/news', TIMEOUT.normal).then(function (res) {
+      if (!res.ok) {
+        // Keep the last good calendar on screen; a refresh failure is not a
+        // reason to blank a panel the trader may be reading.
+        if (state.news.length) {
+          toast('Calendar refresh failed: ' + (res.error || ('HTTP ' + res.status)), 'error');
+          return;
+        }
+        setState(host, 'error', 'Calendar unavailable',
+          res.error || ('HTTP ' + res.status));
+        return;
+      }
+
+      var payload = res.data || {};
+      var events = Array.isArray(payload.news) ? payload.news : [];
+      state.news = events;
+      state.newsAt = Date.now();
+
+      // Skew between this machine's clock and the server's, taken from the
+      // payload's own generation time.
+      var st = payload.timestamp ? Date.parse(payload.timestamp) : NaN;
+      state.newsSkew = isNaN(st) ? null : Date.now() - st;
+
+      populateNewsCurrencies(events);
+      setText($('news-updated'), payload.timestamp ? 'as of ' + payload.timestamp : '—');
+
+      renderNews();
+      renderNewsHero();
+      renderNewsDetail();
+    });
+  }
+
+  /* ── Global and Indian markets ───────────────────────────────────────────
+     Five panels, five independent requests, three rules:
+
+     1. EACH PANEL OWNS ITS OWN REQUEST AND ITS OWN FAILURE STATE. These routes
+        sit behind external providers and several block for many seconds on a
+        cold cache. One slow provider must not blank the other four, so every
+        panel is fetched and rendered separately, and a refresh failure keeps the
+        last good payload on screen rather than emptying a panel the trader is
+        reading.
+
+     2. PROVENANCE IS ON SCREEN, NOT IN A TOOLTIP. Not every figure here comes
+        from a live read: the institutional-flow endpoint returns fixed sample
+        values, the screener emits placeholder rows for symbols it failed to
+        analyse, and the India price series is modelled. Each panel prints the
+        source of its own numbers.
+
+     3. PLACEHOLDERS ARE NEVER RENDERED AS ANALYSIS. On a fallback row the grade,
+        probability, bias, entry, stop and target are all suppressed and the
+        price is marked as a reference. A screener that invents a GRADE B
+        breakout for a symbol it could not analyse is worse than one that says
+        the symbol was not analysed.
+  */
+
+  var SOURCE_META = {
+    live: { label: 'live', cls: 'buy', note: 'Read from a live provider.' },
+    calibrated_feed: { label: 'modelled', cls: 'low', note: 'Candles generated and anchored to a reference price, not read from a feed.' },
+    synthetic: { label: 'modelled', cls: 'low', note: 'Modelled series; no live read was available.' },
+    synthetic_fallback: { label: 'modelled', cls: 'low', note: 'Modelled series; no live read was available.' },
+    profile_reference: { label: 'reference', cls: 'medium', note: 'Static profile reference price, not a market quote.' },
+    sample: { label: 'sample', cls: 'medium', note: 'Fixed sample values. Not live data.' },
+    mixed: { label: 'mixed', cls: 'medium', note: 'Rows in this panel came from more than one source.' },
+    unknown: { label: 'unknown', cls: 'none', note: 'The response did not report where its numbers came from.' }
+  };
+
+  /* Ordered strongest to weakest claim. Used to report the *weakest* source in
+     a panel: if one row is a static reference price, the panel as a whole is not
+     a live read, and labelling it "live" because most rows were would be exactly
+     the mistake the provenance markers exist to prevent. */
+  var SOURCE_STRENGTH = ['live', 'calibrated_feed', 'synthetic',
+                         'synthetic_fallback', 'profile_reference', 'sample',
+                         'mixed', 'unknown'];
+
+  function weakestSource(list) {
+    var worst = null;
+    var worstIdx = -1;
+    (list || []).forEach(function (s) {
+      var key = String(s || 'unknown').toLowerCase();
+      var i = SOURCE_STRENGTH.indexOf(key);
+      if (i < 0) i = SOURCE_STRENGTH.length;   // an unrecognised source is the weakest claim of all
+      if (i > worstIdx) { worstIdx = i; worst = key; }
+    });
+    return worst || 'unknown';
+  }
+
+  function renderProvChip(el, source) {
+    if (!el) return;
+    var key = String(source || 'unknown').toLowerCase();
+    var meta = SOURCE_META[key] || { label: key, cls: 'none', note: '' };
+    el.className = 'tt-chip tt-chip--' + meta.cls;
+    el.textContent = meta.label;
+    el.setAttribute('title', meta.note || key);
+  }
+
+  /* A value already expressed in percent (the screener's change_pct, the India
+     indices' change_pct). Deliberately not pct(), which rescales small values on
+     the assumption they are fractions — 1.2% would render as 120%. */
+  function signedPct(value, digits) {
+    if (value === null || value === undefined || value === '' || isNaN(value)) return '—';
+    var v = Number(value);
+    if (!isFinite(v)) return '—';
+    return (v > 0 ? '+' : '') + num(v, digits === undefined ? 2 : digits) + '%';
+  }
+
+  function heatClass(changePct) {
+    var v = Number(changePct);
+    if (!isFinite(v) || v === 0) return '';
+    var mag = Math.abs(v);
+    var band = mag >= 3 ? 4 : (mag >= 1.5 ? 3 : (mag >= 0.5 ? 2 : 1));
+    return (v > 0 ? 'tt-heat-' : 'tt-heat-neg-') + band;
+  }
+
+  function loadMarkets() {
+    loadEquities();
+    loadHeatmap();
+    loadIndiaIndices();
+    loadIndiaFii();
+    loadIndiaOptionChain();
+  }
+
+  /* ── Global equities ─────────────────────────────────────────────────── */
+
+  function loadEquities() {
+    var host = $('eq-body');
+    if (!host) return;
+    if (!state.equityRows.length) setState(host, 'loading', 'Loading global equities…');
+
+    apiGet('/api/stocks/screener?sort_by=probability&sort_dir=desc&limit=40', TIMEOUT.provider)
+      .then(function (res) {
+        if (!res.ok || !res.data) {
+          if (state.equityRows.length) {
+            toast('Equities refresh failed: ' + (res.error || ('HTTP ' + res.status)), 'error');
+            return;
+          }
+          setState(host, 'error', 'Screener unavailable',
+            res.error || ('HTTP ' + res.status));
+          renderProvChip($('eq-prov'), 'unknown');
+          return;
+        }
+        var payload = res.data;
+        state.equities = payload;
+        state.equityRows = Array.isArray(payload.stocks) ? payload.stocks : [];
+        renderEquities();
+      });
+  }
+
+  function renderEquities() {
+    var host = $('eq-body');
+    if (!host) return;
+    var payload = state.equities || {};
+    var rows = state.equityRows;
+
+    setText($('eq-count'), String(rows.length) +
+      (payload.total_universe ? ' / ' + payload.total_universe : ''));
+
+    var fallbacks = Number(payload.fallback_count || 0);
+    renderProvChip($('eq-prov'), fallbacks > 0 ? 'mixed' : 'calibrated_feed');
+    var prov = $('eq-prov');
+    if (prov && fallbacks > 0) {
+      prov.textContent = fallbacks + ' placeholder';
+      prov.setAttribute('title',
+        fallbacks + ' of ' + payload.total_universe +
+        ' symbols failed analysis. Those rows show no setup fields.');
+    }
+
+    if (!rows.length) {
+      setState(host, 'empty', 'No equities returned',
+        'The screener answered with an empty universe.');
+      return;
+    }
+
+    host.removeAttribute('data-state');
+    host.innerHTML = '';
+
+    var table = document.createElement('table');
+    table.className = 'tt-table tt-eq';
+    var thead = document.createElement('thead');
+    thead.innerHTML =
+      '<tr>' +
+        '<th scope="col">Symbol</th>' +
+        '<th scope="col" class="tt-num">Price</th>' +
+        '<th scope="col" class="tt-num">Chg</th>' +
+        '<th scope="col" class="tt-num">Breakout</th>' +
+        '<th scope="col">Grade</th>' +
+        '<th scope="col">Bias</th>' +
+        '<th scope="col" class="tt-num">Entry</th>' +
+        '<th scope="col" class="tt-num">R:R</th>' +
+      '</tr>';
+    table.appendChild(thead);
+
+    var tbody = document.createElement('tbody');
+    rows.forEach(function (s) { tbody.appendChild(equityRow(s)); });
+    table.appendChild(tbody);
+    host.appendChild(table);
+  }
+
+  function equityRow(s) {
+    var fallback = String(s.analysis_source || '') === 'fallback';
+    var digits = priceDigits(s.symbol, s.price);
+    var chg = Number(s.change_pct);
+    var grade = String(s.grade_badge || '').toUpperCase();
+    var gradeCls = grade.indexOf('A') >= 0 ? 'tt-chip--buy'
+                 : (grade.indexOf('B') >= 0 ? 'tt-chip--medium' : 'tt-chip--none');
+
+    var tr = document.createElement('tr');
+    tr.className = 'tt-eq__row' + (fallback ? ' tt-eq__row--fallback' : '');
+    tr.setAttribute('data-source', fallback ? 'fallback' : 'computed');
+
+    var dash = '<span class="tt-muted">—</span>';
+
+    tr.innerHTML =
+      '<td class="tt-eq__sym">' +
+        '<span class="tt-eq__name">' + esc(s.symbol || '—') + '</span>' +
+        '<span class="tt-eq__sector">' + esc(s.sector || '—') + '</span>' +
+      '</td>' +
+      '<td class="tt-num">' + (fallback
+        ? '<span class="tt-eq__ref" title="Static profile reference, not a quote">' +
+          esc(num(s.price, digits)) + ' ref</span>'
+        : esc(num(s.price, digits))) + '</td>' +
+      '<td class="tt-num ' + (fallback ? '' : signClass(chg)) + '">' +
+        (fallback ? dash : esc(signedPct(chg))) + '</td>' +
+      '<td class="tt-num">' +
+        (fallback ? dash : esc(num(s.breakout_probability, 0) + '%')) + '</td>' +
+      '<td>' + (fallback
+        ? '<span class="tt-chip tt-chip--none">no analysis</span>'
+        : '<span class="tt-chip ' + gradeCls + '">' + esc(grade || '—') + '</span>') + '</td>' +
+      '<td>' + (fallback ? dash : esc(s.trend_bias || '—')) + '</td>' +
+      '<td class="tt-num">' + (fallback ? dash : esc(num(s.entry_zone, digits))) + '</td>' +
+      '<td class="tt-num">' +
+        (fallback ? dash : esc(num(s.risk_reward, 2) + 'R')) + '</td>';
+
+    return tr;
+  }
+
+  /* ── Sector rotation ─────────────────────────────────────────────────── */
+
+  function loadHeatmap() {
+    var host = $('eq-heatmap');
+    if (!host) return;
+    if (!state.heatmap) setState(host, 'loading', 'Loading sector rotation…');
+
+    apiGet('/api/stocks/heatmap', TIMEOUT.provider).then(function (res) {
+      if (!res.ok || !res.data) {
+        if (state.heatmap) { toast('Sector rotation refresh failed', 'error'); return; }
+        setState(host, 'error', 'Sector data unavailable', res.error || ('HTTP ' + res.status));
+        return;
+      }
+      state.heatmap = res.data;
+      renderHeatmap();
+    });
+  }
+
+  function renderHeatmap() {
+    var host = $('eq-heatmap');
+    if (!host) return;
+    var sectors = (state.heatmap && state.heatmap.sectors) || [];
+
+    setText($('eq-heat-note'), sectors.length
+      ? sectors.length + ' sectors · sorted by average change'
+      : '—');
+
+    if (!sectors.length) {
+      setState(host, 'empty', 'No sector data', 'The heatmap endpoint returned no sectors.');
+      return;
+    }
+
+    host.removeAttribute('data-state');
+    host.innerHTML = '';
+    var grid = document.createElement('div');
+    grid.className = 'tt-heatgrid';
+
+    sectors.forEach(function (s) {
+      // The US and India heatmaps disagree on the count field name; accept both
+      // rather than silently rendering a blank.
+      var count = Number(s.count || s.stock_count || 0);
+      var tile = document.createElement('div');
+      tile.className = 'tt-heattile ' + heatClass(s.avg_change_pct);
+      tile.setAttribute('title', String(s.sector || '') + ' · ' +
+        (s.rotation_status || '') + (s.avg_probability !== undefined
+          ? ' · avg breakout ' + s.avg_probability + '%' : ''));
+
+      var name = document.createElement('span');
+      name.className = 'tt-heattile__name';
+      name.textContent = String(s.sector || '—');
+
+      var chg = document.createElement('span');
+      chg.className = 'tt-heattile__chg tt-num';
+      chg.textContent = signedPct(s.avg_change_pct);
+
+      var meta = document.createElement('span');
+      meta.className = 'tt-heattile__meta';
+      meta.textContent = count + ' names' +
+        (s.top_leader_symbol ? ' · ' + s.top_leader_symbol : '');
+
+      tile.appendChild(name);
+      tile.appendChild(chg);
+      tile.appendChild(meta);
+      grid.appendChild(tile);
+    });
+
+    host.appendChild(grid);
+  }
+
+  /* ── India: benchmark indices ────────────────────────────────────────── */
+
+  function loadIndiaIndices() {
+    var host = $('in-indices');
+    if (!host) return;
+    if (!state.indiaIndices) setState(host, 'loading', 'Loading Indian indices…');
+
+    apiGet('/api/india/indices', TIMEOUT.provider).then(function (res) {
+      if (!res.ok || !res.data) {
+        if (state.indiaIndices) { toast('India indices refresh failed', 'error'); return; }
+        setState(host, 'error', 'Indices unavailable', res.error || ('HTTP ' + res.status));
+        renderProvChip($('in-index-prov'), 'unknown');
+        return;
+      }
+      state.indiaIndices = Array.isArray(res.data.indices) ? res.data.indices : [];
+      renderIndiaIndices();
+    });
+  }
+
+  function renderIndiaIndices() {
+    var host = $('in-indices');
+    if (!host) return;
+    var rows = state.indiaIndices || [];
+
+    if (!rows.length) {
+      setState(host, 'empty', 'No indices returned', 'The India endpoint returned an empty list.');
+      renderProvChip($('in-index-prov'), 'unknown');
+      return;
+    }
+
+    // One chip for the panel, reporting the weakest source in it: if any index
+    // is only a reference price, the panel is not wholly live.
+    renderProvChip($('in-index-prov'),
+      weakestSource(rows.map(function (r) { return r.data_source; })));
+
+    host.removeAttribute('data-state');
+    host.innerHTML = '';
+
+    var table = document.createElement('table');
+    table.className = 'tt-table tt-india';
+    var thead = document.createElement('thead');
+    thead.innerHTML =
+      '<tr>' +
+        '<th scope="col">Index</th>' +
+        '<th scope="col" class="tt-num">Level</th>' +
+        '<th scope="col" class="tt-num">Chg</th>' +
+        '<th scope="col">CPR</th>' +
+        '<th scope="col" class="tt-num">VWAP</th>' +
+        '<th scope="col">Bias</th>' +
+      '</tr>';
+    table.appendChild(thead);
+
+    var tbody = document.createElement('tbody');
+    rows.forEach(function (r) {
+      var chg = Number(r.change_pct);
+      var tr = document.createElement('tr');
+      // The API field is `cpr_classification`. The legacy india.js read
+      // `cpr_width` and tested it against 'NARROW_CPR', so that badge never
+      // rendered correctly.
+      var cpr = String(r.cpr_classification || '').toUpperCase();
+      var cprCls = cpr.indexOf('NARROW') >= 0 ? 'tt-chip--low'
+                 : (cpr.indexOf('WIDE') >= 0 ? 'tt-chip--high' : 'tt-chip--none');
+      tr.innerHTML =
+        '<td>' + esc(r.symbol || '—') +
+          '<span class="tt-eq__sector">' + esc(r.name || '') + '</span></td>' +
+        '<td class="tt-num">' + esc(num(r.price, 2)) + '</td>' +
+        '<td class="tt-num ' + signClass(chg) + '">' + esc(signedPct(chg)) + '</td>' +
+        '<td><span class="tt-chip ' + cprCls + '">' + esc(r.cpr_label || cpr || '—') + '</span></td>' +
+        '<td class="tt-num">' + esc(num(r.vwap, 2)) + '</td>' +
+        '<td>' + esc(r.bias || '—') + '</td>';
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    host.appendChild(table);
+  }
+
+  /* ── India: institutional flows ──────────────────────────────────────── */
+
+  function loadIndiaFii() {
+    var host = $('in-fii');
+    if (!host) return;
+    if (!state.indiaFii) setState(host, 'loading', 'Loading institutional flows…');
+
+    apiGet('/api/india/fii_dii', TIMEOUT.normal).then(function (res) {
+      if (!res.ok || !res.data) {
+        if (state.indiaFii) { toast('Institutional flows refresh failed', 'error'); return; }
+        setState(host, 'error', 'Flow data unavailable', res.error || ('HTTP ' + res.status));
+        renderProvChip($('in-fii-prov'), 'unknown');
+        return;
+      }
+      state.indiaFii = res.data;
+      renderIndiaFii();
+    });
+  }
+
+  function renderIndiaFii() {
+    var host = $('in-fii');
+    if (!host) return;
+    var d = state.indiaFii;
+    if (!d) return;
+
+    renderProvChip($('in-fii-prov'), d.data_source);
+
+    host.removeAttribute('data-state');
+    host.innerHTML = '';
+
+    // The note the backend publishes alongside the sample flag. Shown in full
+    // rather than hidden behind a tooltip: these are the numbers a trader would
+    // otherwise read as today's flows.
+    if (d.data_source_note) {
+      var note = document.createElement('p');
+      note.className = 'tt-prov-note';
+      note.textContent = String(d.data_source_note);
+      host.appendChild(note);
+    }
+
+    var metrics = document.createElement('div');
+    metrics.className = 'tt-metrics';
+    [
+      ['Session', d.date],
+      ['FII cash (₹ Cr)', num(d.fii_cash_net_cr, 2)],
+      ['DII cash (₹ Cr)', num(d.dii_cash_net_cr, 2)],
+      ['Net institutional (₹ Cr)', num(d.total_net_institutional_cr, 2)],
+      ['FII index futures long', d.fii_index_futures_long_pct !== undefined
+        ? num(d.fii_index_futures_long_pct, 1) + '%' : '—'],
+      ['FII index options PCR', num(d.fii_index_options_pcr, 2)],
+      ['FII stance', d.fii_sentiment],
+      ['DII stance', d.dii_sentiment],
+      ['Institutional bias', d.institutional_bias]
+    ].forEach(function (pair) {
+      var card = document.createElement('div');
+      card.className = 'tt-metric';
+      var l = document.createElement('span');
+      l.className = 'tt-metric__label';
+      l.textContent = pair[0];
+      var v = document.createElement('span');
+      v.className = 'tt-metric__value';
+      setText(v, pair[1]);
+      card.appendChild(l);
+      card.appendChild(v);
+      metrics.appendChild(card);
+    });
+    host.appendChild(metrics);
+  }
+
+  /* ── India: option chain ─────────────────────────────────────────────── */
+
+  function loadIndiaOptionChain() {
+    var host = $('in-optionchain');
+    if (!host) return;
+    var sym = ($('in-oc-symbol') && $('in-oc-symbol').value) || 'NIFTY';
+    if (!state.indiaOptionChain) setState(host, 'loading', 'Loading ' + sym + ' option chain…');
+
+    apiGet('/api/india/option_chain?symbol=' + encodeURIComponent(sym), TIMEOUT.provider)
+      .then(function (res) {
+        if (!res.ok || !res.data) {
+          if (state.indiaOptionChain) { toast('Option chain refresh failed', 'error'); return; }
+          setState(host, 'error', 'Option chain unavailable', res.error || ('HTTP ' + res.status));
+          renderProvChip($('in-oc-prov'), 'unknown');
+          return;
+        }
+        state.indiaOptionChain = res.data;
+        renderIndiaOptionChain();
+      });
+  }
+
+  function renderIndiaOptionChain() {
+    var host = $('in-optionchain');
+    if (!host) return;
+    var d = state.indiaOptionChain;
+    if (!d) return;
+
+    renderProvChip($('in-oc-prov'), d.data_source);
+
+    var chain = Array.isArray(d.chain) ? d.chain : [];
+    if (!chain.length) {
+      setState(host, 'empty', 'No strikes returned',
+        'The chain endpoint answered without a strike ladder.');
+      return;
+    }
+
+    host.removeAttribute('data-state');
+    host.innerHTML = '';
+
+    if (String(d.data_source || '') !== 'live') {
+      var note = document.createElement('p');
+      note.className = 'tt-prov-note';
+      note.textContent = 'Open interest, implied volatility and the greeks below are modelled, ' +
+        'not read from the NSE chain. Levels are indicative only.';
+      host.appendChild(note);
+    }
+
+    var pcr = d.pcr || {};
+    var straddle = d.atm_straddle || {};
+
+    var metrics = document.createElement('div');
+    metrics.className = 'tt-metrics';
+    [
+      ['Spot', num(d.spot_price, 2)],
+      ['ATM strike', num(d.atm_strike, 0)],
+      ['Expiry', d.expiry],
+      ['Lot size', d.lot_size],
+      ['Max pain', num(d.max_pain_strike, 0)],
+      ['PCR (OI)', num(pcr.pcr_oi, 2)],
+      ['PCR (volume)', num(pcr.pcr_volume, 2)],
+      ['PCR stance', pcr.sentiment || pcr.bias_badge],
+      ['Straddle premium', num(straddle.combined_premium, 2)],
+      ['Expected move', straddle.expected_move_pct !== undefined
+        ? num(straddle.expected_move_pct, 2) + '%' : '—'],
+      ['Breakeven range', straddle.lower_breakeven !== undefined
+        ? num(straddle.lower_breakeven, 0) + ' – ' + num(straddle.upper_breakeven, 0) : '—'],
+      // The engine randomises this value (options_engine.py), so it is labelled
+      // rather than presented as a measured reading.
+      ['IV rank (modelled)', num(d.iv_rank, 1)]
+    ].forEach(function (pair) {
+      var card = document.createElement('div');
+      card.className = 'tt-metric';
+      var l = document.createElement('span');
+      l.className = 'tt-metric__label';
+      l.textContent = pair[0];
+      var v = document.createElement('span');
+      v.className = 'tt-metric__value';
+      setText(v, pair[1]);
+      card.appendChild(l);
+      card.appendChild(v);
+      metrics.appendChild(card);
+    });
+    host.appendChild(metrics);
+
+    // Only the strikes around the money are shown. A 25-strike ladder is 50
+    // contracts of noise; the ATM window is where the decision is.
+    var atmIdx = -1;
+    chain.forEach(function (r, i) { if (r.is_atm) atmIdx = i; });
+    if (atmIdx < 0) atmIdx = Math.floor(chain.length / 2);
+    var lo = Math.max(0, atmIdx - 6);
+    var hi = Math.min(chain.length, atmIdx + 7);
+
+    var table = document.createElement('table');
+    table.className = 'tt-table tt-oc';
+    var thead = document.createElement('thead');
+    thead.innerHTML =
+      '<tr>' +
+        '<th scope="col" class="tt-num">CE OI</th>' +
+        '<th scope="col" class="tt-num">CE LTP</th>' +
+        '<th scope="col" class="tt-num">CE IV</th>' +
+        '<th scope="col">Strike</th>' +
+        '<th scope="col" class="tt-num">PE IV</th>' +
+        '<th scope="col" class="tt-num">PE LTP</th>' +
+        '<th scope="col" class="tt-num">PE OI</th>' +
+      '</tr>';
+    table.appendChild(thead);
+
+    var tbody = document.createElement('tbody');
+    chain.slice(lo, hi).forEach(function (r) {
+      var ce = r.call || {}, pe = r.put || {};
+      var tr = document.createElement('tr');
+      if (r.is_atm) tr.className = 'tt-oc__row--atm';
+      if (String(r.strike) === String(d.max_pain_strike)) tr.className += ' tt-oc__row--pain';
+      tr.innerHTML =
+        '<td class="tt-num">' + esc(num(ce.oi, 0)) + '</td>' +
+        '<td class="tt-num">' + esc(num(ce.ltp, 2)) + '</td>' +
+        '<td class="tt-num">' + esc(num(ce.iv, 1)) + '</td>' +
+        '<td class="tt-oc__strike tt-num">' + esc(num(r.strike, 0)) +
+          (r.is_atm ? '<span class="tt-oc__tag">ATM</span>' : '') +
+          (String(r.strike) === String(d.max_pain_strike) ? '<span class="tt-oc__tag">MAX PAIN</span>' : '') +
+        '</td>' +
+        '<td class="tt-num">' + esc(num(pe.iv, 1)) + '</td>' +
+        '<td class="tt-num">' + esc(num(pe.ltp, 2)) + '</td>' +
+        '<td class="tt-num">' + esc(num(pe.oi, 0)) + '</td>';
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    host.appendChild(table);
   }
 
   /* ── Status bar ───────────────────────────────────────────────────────── */
@@ -1337,6 +2900,14 @@
       renderReasoning();
       renderRadar();
       renderStatus();
+
+      // The analyst view is bound to the same decisions telemetry just
+      // refreshed, so keep it current while it is on screen.
+      if (state.view === 'analyst') {
+        renderDevilAdvocate();
+        renderQualityGate();
+        renderObjections();
+      }
     });
   }
 
@@ -1917,6 +3488,60 @@
     var pendingRefresh = $('pending-refresh');
     if (pendingRefresh) pendingRefresh.addEventListener('click', loadPendingOrders);
 
+    // ── Chart source ──────────────────────────────────────────────────────
+    var srcNative = $('chart-src-native');
+    if (srcNative) srcNative.addEventListener('click', function () { setChartSource('native'); });
+    var srcTv = $('chart-src-tv');
+    if (srcTv) srcTv.addEventListener('click', function () { setChartSource('tradingview'); });
+
+    // ── News calendar ─────────────────────────────────────────────────────
+    var newsRefresh = $('news-refresh');
+    if (newsRefresh) newsRefresh.addEventListener('click', loadNews);
+
+    var newsImpact = $('news-impact');
+    if (newsImpact) {
+      newsImpact.value = state.newsImpact;
+      newsImpact.addEventListener('change', function () {
+        state.newsImpact = newsImpact.value;
+        renderNews();
+      });
+    }
+
+    var newsCurrency = $('news-currency');
+    if (newsCurrency) {
+      newsCurrency.addEventListener('change', function () {
+        state.newsCurrency = newsCurrency.value;
+        renderNews();
+      });
+    }
+
+    // ── Markets ───────────────────────────────────────────────────────────
+    var eqRefresh = $('eq-refresh');
+    if (eqRefresh) eqRefresh.addEventListener('click', function () {
+      loadEquities();
+      loadHeatmap();
+    });
+
+    var inRefresh = $('in-refresh');
+    if (inRefresh) inRefresh.addEventListener('click', function () {
+      // Force a real refetch rather than showing the previous payload: the
+      // button exists precisely because the user thinks the panel is stale.
+      state.indiaIndices = null;
+      state.indiaFii = null;
+      state.indiaOptionChain = null;
+      loadIndiaIndices();
+      loadIndiaFii();
+      loadIndiaOptionChain();
+    });
+
+    var ocSymbol = $('in-oc-symbol');
+    if (ocSymbol) {
+      ocSymbol.addEventListener('change', function () {
+        state.indiaOptionChain = null;
+        loadIndiaOptionChain();
+      });
+    }
+
     var tf = $('chart-timeframe');
     if (tf) {
       tf.value = state.timeframe;
@@ -1955,12 +3580,15 @@
       });
     }
 
-    // Keyboard: 1/2/3 switch views, [ ] cycle panes on phone widths.
+    // Keyboard: 1-6 switch views, [ ] cycle panes on phone widths.
     document.addEventListener('keydown', function (ev) {
       if (ev.target && /INPUT|TEXTAREA|SELECT/.test(ev.target.tagName)) return;
       if (ev.key === '1') setView('trade');
-      if (ev.key === '2') setView('analytics');
-      if (ev.key === '3') setView('backtest');
+      if (ev.key === '2') setView('news');
+      if (ev.key === '3') setView('analyst');
+      if (ev.key === '4') setView('markets');
+      if (ev.key === '5') setView('analytics');
+      if (ev.key === '6') setView('backtest');
     });
 
     document.addEventListener('visibilitychange', function () {
@@ -1976,6 +3604,10 @@
     };
     tickClock();
     setInterval(tickClock, 1000);
+
+    // Countdowns are recomputed locally every second, so this timer never
+    // touches the network.
+    setInterval(tickNews, 1000);
 
     loadTelemetry().then(function () {
       loadSelection();

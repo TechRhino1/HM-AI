@@ -1,15 +1,15 @@
-"""Live end-to-end check of the redesigned console and the new API surface.
+"""Live end-to-end check of the redesigned dashboard and the API surface.
 
 Starts the real HTTP server on a scratch port with no broker attached, then
-exercises every new route the way a browser would.
+exercises every route the browser would call.
 
 Usage (from the repo root):
 
-    python tools/verify_console_live.py
+    python tools/verify_ui_live.py
 
 Exit code is 0 when every check passes, 1 otherwise, so it can gate a release.
 
-Two things this script deliberately proves rather than assumes:
+Three things this script deliberately proves rather than assumes:
 
 * ``/api/action/auto-select`` stays a dry run even when asked to go live. The
   HTTP surface must have no path that can open a trade.
@@ -17,6 +17,9 @@ Two things this script deliberately proves rather than assumes:
   reason instead of returning an empty-but-successful selection. Failing safe
   and saying so is the correct behaviour; a 200 with no decisions would let a
   caller mistake "engine not wired" for "nothing to trade".
+* Every route that returns modelled, fixed or placeholder values says so in its
+  own payload. A UI cannot label what the backend does not describe, so this is
+  checked at the HTTP boundary rather than trusted from the render layer.
 """
 import json
 import os
@@ -26,6 +29,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from datetime import datetime
 
 # Run from anywhere: put the repo root on the path explicitly.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -61,6 +65,13 @@ def record(name, ok, detail=""):
     print(f"{'PASS' if ok else 'FAIL'}  {name}  {detail}")
 
 
+# Statuses a provider-backed route may legitimately answer. Anything else is a
+# failure, including the synthetic status 0 that request() returns when the
+# client gives up: a route that never answers pins a server thread, which is
+# worse than one that errors.
+PROVIDER_OK = (200, 503, 504)
+
+
 def request(path, payload=None, timeout=60):
     url = BASE + path
     data = json.dumps(payload).encode() if payload is not None else None
@@ -72,6 +83,32 @@ def request(path, payload=None, timeout=60):
             return resp.status, resp.read().decode("utf-8", "replace")
     except urllib.error.HTTPError as exc:
         return exc.code, exc.read().decode("utf-8", "replace")
+    except (TimeoutError, urllib.error.URLError) as exc:
+        # A route that never answers is a result, not a crash. Status 0 is
+        # deliberately not a real HTTP code so a caller can tell "hung" apart
+        # from "answered 500" — the two need different fixes.
+        return 0, json.dumps({"error": f"no response within {timeout}s: {exc}"})
+
+
+def provider_verdict(status, ok_when_200, detail_when_200, timeout):
+    """One shared verdict for every provider-backed route.
+
+    200 is judged by the caller, because only the caller knows which fields
+    that particular payload must carry. 503/504 is an honest "the upstream is
+    unavailable" and passes. 0 means the route never answered inside the
+    client budget — a failure, and the message says which failure it is.
+    404 and 500 are failures for the obvious reasons.
+    """
+    if status == 200:
+        return ok_when_200, detail_when_200
+    if status in (503, 504):
+        return True, f"status={status} (provider unavailable, route dispatched)"
+    if status == 0:
+        return False, (
+            f"no response within {timeout}s — the route has no effective "
+            f"timeout of its own and pins a server thread"
+        )
+    return False, f"status={status} (unwired or the handler raised)"
 
 
 def main():
@@ -424,7 +461,259 @@ def main():
                 f"status={status} bytes={len(body)}",
             )
 
-        # ── 7. Attach a real orchestrator and re-check the live path ───────
+        # ── 7. The redesigned dashboard's data panels ──────────────────────
+        # Every panel below is fed by a route that either sits behind an
+        # external provider (and can block for many seconds on a cold cache) or
+        # returns modelled values. Two invariants matter more than the numbers:
+        #
+        #   * the route must DISPATCH. A 404 means the tab is inert: its shell
+        #     renders, the click does nothing, and nothing raises.
+        #   * every response must describe its own PROVENANCE. A UI cannot label
+        #     what the backend does not describe, and a plausible number shown
+        #     as a live quote is worse than no number at all.
+        #
+        # Provider routes are allowed to answer 503/504 — that is an honest
+        # "provider unavailable". They are not allowed to answer 404 (unwired)
+        # or 500 (handler raised).
+
+        # 7a. The served markup must ship the panels themselves. A missing
+        # section id is invisible to every check above: the rail tab exists, so
+        # the UI looks complete, but selecting it renders an empty box.
+        status, body = request("/dashboard")
+        panel_ids = [
+            # news calendar
+            "view-news", "news-count", "news-live-chip", "news-impact",
+            "news-currency", "news-refresh", "news-body", "news-updated",
+            "news-hero", "news-detail-impact", "news-detail",
+            # devil's advocate + quality gate
+            "view-analyst", "da-symbol", "da-verdict", "da-metrics", "da-bull",
+            "da-bear", "da-threats", "da-invalidation", "da-objections",
+            "gate-count", "gate-verdict", "gate-body",
+            # global + Indian markets
+            "view-markets", "eq-count", "eq-body", "eq-heatmap", "in-indices",
+            "in-fii", "in-oc-symbol", "in-optionchain",
+            # provenance chips
+            "eq-prov", "in-index-prov", "in-fii-prov", "in-oc-prov",
+            # the chart-source switch and the external chart's container
+            "chart-src-native", "chart-src-tv", "chart-tv",
+        ]
+        missing = [i for i in panel_ids if f'id="{i}"' not in body]
+        record(
+            "the dashboard ships every new panel, chip and the chart switch",
+            status == 200 and not missing,
+            f"missing={missing}" if missing else f"{len(panel_ids)} ids present",
+        )
+
+        # 7b. The rail tab must exist for each view, or the panel above is
+        # unreachable. Both halves are asserted because either one alone leaves
+        # a dead tab.
+        rail_missing = [
+            v for v in ("news", "analyst", "markets")
+            if f'data-view-btn="{v}"' not in body or f'data-view-panel="{v}"' not in body
+        ]
+        record(
+            "each new view has both a rail tab and a panel",
+            status == 200 and not rail_missing,
+            f"missing={rail_missing}" if rail_missing else "3 views wired",
+        )
+
+        # 7c. The served stylesheet must carry the new class families. Perfect
+        # markup is still invisible if the CSS that is served does not define it.
+        status, body = request("/static/css/theme_terminal.css")
+        css_classes = [
+            "tt-news", "tt-heatgrid", "tt-gauge", "tt-gate", "tt-chart__tv",
+            "tt-prov-note", "tt-eq", "tt-oc",
+        ]
+        css_missing = [c for c in css_classes if c not in body]
+        record(
+            "the served stylesheet defines the new panel classes",
+            status == 200 and not css_missing,
+            f"missing={css_missing}" if css_missing else f"{len(css_classes)} families present",
+        )
+
+        # 7d. /api/news — the countdown's anchor. The client corrects for clock
+        # skew against the envelope's own generation time, so that value must be
+        # a real ISO instant rather than a display string.
+        status, body = request("/api/news", timeout=90)
+        try:
+            payload = json.loads(body)
+        except ValueError:
+            payload = {}
+        items = payload.get("news") or []
+        generated = payload.get("timestamp")
+        envelope_dt = None
+        try:
+            envelope_dt = datetime.fromisoformat(str(generated).replace("Z", "+00:00"))
+            envelope_ok = envelope_dt.tzinfo is not None
+        except (TypeError, ValueError):
+            envelope_ok = False
+        news_fields = {"timestamp_iso", "diff_seconds", "status_badge", "event",
+                       "currency", "impact"}
+        thin = [i for i, ev in enumerate(items) if not news_fields <= set(ev)]
+        record(
+            "GET /api/news carries the fields the countdown is built from",
+            status == 200 and bool(items) and not thin and envelope_ok,
+            f"status={status} events={len(items)} envelope={generated!r} thin={thin[:3]}",
+        )
+
+        # 7e. The sign of diff_seconds must agree with timestamp_iso measured
+        # against the envelope's own generation time. If the two disagree, the
+        # client's locally-derived countdown contradicts the server's and a row
+        # flips phase at the wrong moment — which is exactly why deriving the
+        # countdown client-side is only safe when this holds.
+        disagree = []
+        if envelope_dt is not None:
+            for ev in items[:12]:
+                iso, diff = ev.get("timestamp_iso"), ev.get("diff_seconds")
+                if iso is None or diff is None:
+                    continue
+                try:
+                    event_dt = datetime.fromisoformat(str(iso).replace("Z", "+00:00"))
+                except ValueError:
+                    disagree.append((iso, "unparseable"))
+                    continue
+                expected = (event_dt - envelope_dt).total_seconds()
+                # Same side of zero, and within the couple of seconds the
+                # payload takes to travel.
+                if (expected > 0) != (float(diff) > 0) or abs(expected - float(diff)) > 120:
+                    disagree.append((ev.get("event"), diff, round(expected, 1)))
+        record(
+            "the server's diff_seconds agrees with its own timestamp_iso",
+            envelope_ok and not disagree,
+            f"disagreements={disagree[:3]}" if disagree
+            else f"{min(len(items), 12)} events consistent",
+        )
+
+        # 7f. /api/india/fii_dii must declare itself a sample. It previously
+        # returned fixed constants under a docstring claiming a real-time proxy,
+        # which is indistinguishable from live institutional flow.
+        status, body = request("/api/india/fii_dii", timeout=90)
+        try:
+            payload = json.loads(body)
+        except ValueError:
+            payload = {}
+        record(
+            "GET /api/india/fii_dii declares its provenance",
+            status in (200, 503)
+            and payload.get("data_source") == "sample"
+            and bool(payload.get("data_source_note")),
+            f"status={status} data_source={payload.get('data_source')!r}",
+        )
+
+        # The provider-backed routes below are given 60s. The dashboard's own
+        # per-request budget for these is 30s (TIMEOUT.provider in dashboard.js),
+        # so a route that cannot answer in twice that is already unusable to the
+        # UI. A tighter client bound also keeps a hung route from turning this
+        # script into a 20-minute wait.
+        PROVIDER_BUDGET = 60
+
+        # 7g. /api/stocks/screener must flag placeholder rows at both levels:
+        # per row so the renderer can suppress a fabricated setup, and at the
+        # envelope so a caller can tell a fully analysed scan from a partly
+        # failed one without walking the universe.
+        status, body = request(
+            "/api/stocks/screener?sort_by=probability&sort_dir=desc&limit=40",
+            timeout=PROVIDER_BUDGET,
+        )
+        try:
+            payload = json.loads(body)
+        except ValueError:
+            payload = {}
+        rows = payload.get("stocks") or []
+        unlabelled = [r.get("symbol") for r in rows if not r.get("analysis_source")]
+        bad_fallback = [
+            r.get("symbol") for r in rows
+            if r.get("analysis_source") == "fallback"
+            and r.get("data_source") != "profile_reference"
+        ]
+        ok, detail = provider_verdict(
+            status,
+            isinstance(payload.get("fallback_count"), int)
+            and isinstance(payload.get("provenance"), dict)
+            and not unlabelled
+            and not bad_fallback,
+            f"status=200 rows={len(rows)} "
+            f"fallback_count={payload.get('fallback_count')} "
+            f"unlabelled={unlabelled[:3]} bad_fallback={bad_fallback[:3]}",
+            PROVIDER_BUDGET,
+        )
+        record("GET /api/stocks/screener labels every row's provenance", ok, detail)
+
+        # 7h. The two heatmaps. The India one is additionally asserted NOT to
+        # carry avg_cmf: the India engine computes no money-flow index, so a
+        # tile showing one would be invented. It does carry avg_probability, and
+        # the US tiles carry avg_cmf, so the two are deliberately not symmetric.
+        status, body = request("/api/stocks/heatmap", timeout=PROVIDER_BUDGET)
+        try:
+            payload = json.loads(body)
+        except ValueError:
+            payload = {}
+        us_sectors = payload.get("sectors") or []
+        ok, detail = provider_verdict(
+            status,
+            isinstance(us_sectors, list),
+            f"status=200 sectors={len(us_sectors)}",
+            PROVIDER_BUDGET,
+        )
+        record("GET /api/stocks/heatmap dispatches", ok, detail)
+
+        status, body = request("/api/india/heatmap", timeout=PROVIDER_BUDGET)
+        try:
+            payload = json.loads(body)
+        except ValueError:
+            payload = {}
+        in_sectors = payload.get("sectors") or []
+        invented = [s.get("sector") for s in in_sectors if "avg_cmf" in s]
+        in_unflagged = [s.get("sector") for s in in_sectors if not s.get("data_source")]
+        ok, detail = provider_verdict(
+            status,
+            bool(in_sectors) and not invented and not in_unflagged,
+            f"status=200 sectors={len(in_sectors)} "
+            f"invented_cmf={invented[:3]} unflagged={in_unflagged[:3]}",
+            PROVIDER_BUDGET,
+        )
+        record("GET /api/india/heatmap reports only what it computes", ok, detail)
+
+        # 7i. /api/india/indices — every row must name its own source, because a
+        # static profile reference price sits alongside live quotes and the panel
+        # reports the weakest one.
+        status, body = request("/api/india/indices", timeout=PROVIDER_BUDGET)
+        try:
+            payload = json.loads(body)
+        except ValueError:
+            payload = {}
+        idx_rows = payload.get("indices") or []
+        idx_unflagged = [r.get("symbol") for r in idx_rows if not r.get("data_source")]
+        ok, detail = provider_verdict(
+            status,
+            bool(idx_rows) and not idx_unflagged,
+            f"status=200 rows={len(idx_rows)} unflagged={idx_unflagged[:3]}",
+            PROVIDER_BUDGET,
+        )
+        record("GET /api/india/indices labels every row's source", ok, detail)
+
+        # 7j. /api/india/option_chain — the chain is modelled, so it must say so,
+        # and it must expose the ATM strike the panel centres its window on.
+        status, body = request(
+            "/api/india/option_chain?symbol=NIFTY", timeout=PROVIDER_BUDGET
+        )
+        try:
+            payload = json.loads(body)
+        except ValueError:
+            payload = {}
+        chain = payload.get("chain") or []
+        ok, detail = provider_verdict(
+            status,
+            bool(payload.get("data_source"))
+            and payload.get("atm_strike") is not None
+            and bool(chain),
+            f"status=200 source={payload.get('data_source')!r} "
+            f"atm={payload.get('atm_strike')} strikes={len(chain)}",
+            PROVIDER_BUDGET,
+        )
+        record("GET /api/india/option_chain declares itself modelled", ok, detail)
+
+        # ── 8. Attach a real orchestrator and re-check the live path ───────
         try:
             from jarvis.api.server import JarvisRequestHandler
             from jarvis.application.orchestrator import JarvisOrchestrator
@@ -490,7 +779,7 @@ def main():
                 f"{type(exc).__name__}: {exc}",
             )
 
-        # ── 8. Unknown route still 404s ────────────────────────────────────
+        # ── 9. Unknown route still 404s ────────────────────────────────────
         status, _ = request("/api/backtest/nonsense")
         record("unknown backtest route 404s", status == 404, f"status={status}")
 

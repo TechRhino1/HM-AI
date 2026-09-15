@@ -127,5 +127,169 @@ class TestDashboardElementIds(unittest.TestCase):
             self.assertIn(f'id="{element_id}"', html, f"missing restored panel: {element_id}")
 
 
+class TestNewViewsAreWired(unittest.TestCase):
+    """A view is reachable only if three things agree: the rail has a button, the
+    template has a panel, and the controller's VIEWS array accepts the name.
+    Any one of them missing leaves the tab either absent or inert, and inert is
+    the dangerous case — the tab renders, the click does nothing, and nothing
+    raises."""
+
+    NEW_VIEWS = ("news", "analyst", "markets")
+
+    def test_rail_has_a_button_and_a_panel_for_each_view(self):
+        html = _read(os.path.join(TEMPLATE_DIR, "dashboard.html"))
+        for view in self.NEW_VIEWS:
+            self.assertIn(f'data-view-btn="{view}"', html, f"no rail tab for {view}")
+            self.assertIn(f'data-view-panel="{view}"', html, f"no panel for {view}")
+            self.assertIn(f'id="view-{view}"', html, f"no section for {view}")
+
+    def test_controller_accepts_each_view(self):
+        js = _read(os.path.join(JS_DIR, "dashboard.js"))
+        match = re.search(r"var VIEWS = \[([^\]]*)\]", js)
+        self.assertIsNotNone(match, "VIEWS array not found in dashboard.js")
+        declared = {v.strip().strip("'\"") for v in match.group(1).split(",") if v.strip()}
+        for view in self.NEW_VIEWS:
+            self.assertIn(view, declared, f"setView() would reject '{view}'")
+
+    def test_each_view_has_a_loader(self):
+        js = _read(os.path.join(JS_DIR, "dashboard.js"))
+        for fn in ("loadNews", "renderDevilAdvocate", "renderQualityGate", "loadMarkets"):
+            self.assertIn(f"function {fn}(", js, f"missing {fn}()")
+
+    def test_views_open_without_a_page_reload(self):
+        """Switching to a view must fetch that view's data, not assume it is
+        already loaded."""
+        js = _read(os.path.join(JS_DIR, "dashboard.js"))
+        for call in ("if (view === 'news')", "if (view === 'analyst')",
+                     "if (view === 'markets')"):
+            self.assertIn(call, js, f"setView does not load on: {call}")
+
+
+class TestCalendarCountdownIsDerivedLocally(unittest.TestCase):
+    """The server sends both ``diff_seconds`` and a ``status_badge`` string like
+    "IN 14h 33m", computed at generation time. Rendering the badge would freeze
+    the countdown between polls and leave it reading "IN 0m" indefinitely, so
+    the controller must anchor to each event's own timestamp instead."""
+
+    def test_countdown_is_not_the_server_badge(self):
+        """Pin the *read*, not the identifier: the string legitimately appears
+        in a comment explaining why the badge is not used. What must never
+        appear is a property access that pulls the badge out of a payload."""
+        js = _read(os.path.join(JS_DIR, "dashboard.js"))
+        for read in (".status_badge", "['status_badge']", '["status_badge"]'):
+            self.assertNotIn(
+                read, js,
+                f"the countdown must be recomputed locally, not read from the "
+                f"server-computed badge via {read}, which goes stale the moment "
+                f"it arrives",
+            )
+
+    def test_countdown_anchors_to_the_event_timestamp(self):
+        js = _read(os.path.join(JS_DIR, "dashboard.js"))
+        self.assertIn("timestamp_iso", js)
+        self.assertIn("diff_seconds", js)
+        self.assertIn("Date.parse", js)
+
+    def test_client_live_window_matches_the_backend(self):
+        """The client applies the backend's own window, so a row flips to live
+        and then to released while the page is open rather than holding the
+        payload's snapshot. If either side moves, the two disagree."""
+        js = _read(os.path.join(JS_DIR, "dashboard.js"))
+        self.assertIn("NEWS_LIVE_BEFORE = 300", js)
+        self.assertIn("NEWS_LIVE_AFTER = 900", js)
+
+        news = _read(os.path.join(REPO_ROOT, "jarvis", "market", "news.py"))
+        self.assertIn("timedelta(minutes=5)", news)
+        self.assertIn("timedelta(minutes=15)", news)
+
+
+class TestFabricatedValuesAreFlagged(unittest.TestCase):
+    """Every response that returns modelled, fixed or placeholder values must
+    say so. A UI cannot label what the backend does not describe, and a
+    plausible number presented as a live quote is worse than no number at all."""
+
+    def test_fii_dii_is_flagged_as_sample(self):
+        from jarvis.india.news_analyzer import IndiaNewsAnalyzer
+
+        payload = IndiaNewsAnalyzer().get_fii_dii_flows()
+        self.assertEqual(payload["data_source"], "sample")
+        self.assertTrue(payload.get("data_source_note"),
+                        "the sample flag must carry an explanation the UI can show")
+
+    def test_india_stock_news_is_flagged_as_sample(self):
+        from jarvis.india.news_analyzer import IndiaNewsAnalyzer
+
+        items = IndiaNewsAnalyzer().get_stock_news("RELIANCE")
+        self.assertTrue(items, "expected generated items")
+        self.assertTrue(all(i["data_source"] == "sample" for i in items))
+
+    def test_us_stock_news_is_flagged_as_sample(self):
+        from jarvis.stocks.news_analyzer import StockNewsAnalyzer
+
+        items = StockNewsAnalyzer().get_stock_news("NVDA")
+        self.assertTrue(items, "expected generated items")
+        self.assertTrue(all(i["data_source"] == "sample" for i in items))
+
+    def test_screener_flags_fallback_rows(self):
+        src = _read(os.path.join(REPO_ROOT, "jarvis", "stocks", "stock_service.py"))
+        self.assertIn('"analysis_source": "fallback"', src)
+        self.assertIn('"analysis_source": "computed"', src)
+        self.assertIn('"fallback_count"', src)
+
+    def test_india_indices_propagate_data_source(self):
+        src = _read(os.path.join(REPO_ROOT, "jarvis", "india", "india_service.py"))
+        self.assertIn('"data_source": row_source', src)
+        self.assertIn('row_source = "profile_reference"', src)
+
+    def test_renderer_suppresses_placeholder_setup_fields(self):
+        """The renderer must gate the setup columns on the row's provenance, so
+        a failed analysis cannot be read as a computed setup. Assert the
+        rendered strings, not the JS quoting around them."""
+        js = _read(os.path.join(JS_DIR, "dashboard.js"))
+        self.assertIn("analysis_source", js)
+        self.assertIn("'fallback'", js)
+        # The setup cell says the symbol was not analysed rather than showing a
+        # grade, and the price is marked as a reference rather than a quote.
+        self.assertIn(">no analysis</span>", js)
+        self.assertIn(" ref</span>", js)
+
+
+class TestNewsGeneratorDoesNotDisturbGlobalRandom(unittest.TestCase):
+    """The generator used to call ``random.seed()``, which reseeds the
+    module-level RNG for the whole process — including the options engine's IV
+    rank, so that value depended on which symbol happened to be queried last. It
+    seeded from ``hash()`` too, which is randomised per process, so the "stable"
+    seed was not stable."""
+
+    def test_module_level_random_state_is_untouched(self):
+        import random
+
+        from jarvis.india.news_analyzer import IndiaNewsAnalyzer
+
+        random.seed(12345)
+        before = random.random()
+        random.seed(12345)
+        IndiaNewsAnalyzer().get_stock_news("RELIANCE")
+        after = random.random()
+        self.assertEqual(
+            before, after,
+            "get_stock_news() consumed from the module-level RNG, which leaks "
+            "into every other caller of random in the process",
+        )
+
+    def test_output_is_stable_for_the_same_symbol(self):
+        from jarvis.india.news_analyzer import IndiaNewsAnalyzer
+
+        analyzer = IndiaNewsAnalyzer()
+        first = analyzer.get_stock_news("TCS")
+        second = analyzer.get_stock_news("TCS")
+        self.assertEqual([i["headline"] for i in first], [i["headline"] for i in second])
+
+    def test_source_no_longer_seeds_the_global_generator(self):
+        src = _read(os.path.join(REPO_ROOT, "jarvis", "india", "news_analyzer.py"))
+        self.assertNotIn("random.seed(", src)
+        self.assertIn("random.Random(seed)", src)
+
+
 if __name__ == "__main__":
     unittest.main()

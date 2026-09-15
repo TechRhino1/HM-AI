@@ -22,7 +22,7 @@
   one that shows nothing.
 -->
 </head>
-<body class="tt-app" data-view="trade" data-pane="watchlist">
+<body class="tt-app" data-view="trade" data-pane="watchlist" data-chart-source="native">
 
 <a class="tt-sr-only" href="#main">Skip to main content</a>
 
@@ -42,6 +42,12 @@
   <nav class="tt-tabs" role="tablist" aria-label="Primary views">
     <button class="tt-tab" role="tab" data-view-btn="trade"
             aria-selected="true" aria-controls="view-trade">Trade</button>
+    <button class="tt-tab" role="tab" data-view-btn="news"
+            aria-selected="false" aria-controls="view-news">News</button>
+    <button class="tt-tab" role="tab" data-view-btn="analyst"
+            aria-selected="false" aria-controls="view-analyst">Analyst</button>
+    <button class="tt-tab" role="tab" data-view-btn="markets"
+            aria-selected="false" aria-controls="view-markets">Markets</button>
     <button class="tt-tab" role="tab" data-view-btn="analytics"
             aria-selected="false" aria-controls="view-analytics">Analytics</button>
     <button class="tt-tab" role="tab" data-view-btn="backtest"
@@ -157,6 +163,15 @@
               data-state="loading">—</span>
         <span class="tt-chart__levels" id="chart-legend"></span>
         <span class="tt-panel__spacer"></span>
+        <!-- Chart source. The TradingView widget is an external script, so it
+             is fetched only when this is switched on rather than on every page
+             load; see loadTradingView() in dashboard.js. -->
+        <div class="tt-seg" role="group" aria-label="Chart source">
+          <button class="tt-seg__btn" id="chart-src-native" type="button"
+                  aria-pressed="true">Native</button>
+          <button class="tt-seg__btn" id="chart-src-tv" type="button"
+                  aria-pressed="false">TradingView</button>
+        </div>
         <button class="tt-btn tt-btn--sm tt-toggle" id="chart-levels"
                 type="button" aria-pressed="true"
                 title="Show support, resistance and trade levels">Levels on</button>
@@ -171,6 +186,7 @@
       </div>
       <div class="tt-panel__body tt-chart__body">
         <div class="tt-chart" id="chart"></div>
+        <div class="tt-chart__tv" id="chart-tv" hidden></div>
         <div class="tt-chart__hud" id="chart-hud" hidden></div>
         <div class="tt-chart__tooltip" id="chart-tooltip" hidden aria-hidden="true"></div>
         <div class="tt-chart__overlay" id="chart-overlay">
@@ -286,6 +302,186 @@
         <span class="tt-chip tt-chip--none" id="reason-tier">—</span>
       </div>
       <div class="tt-panel__body" id="reason-body" data-state="loading" style="flex:1 1 auto"></div>
+    </div>
+  </section>
+
+  <!-- ── News ───────────────────────────────────────────────────────── -->
+  <!-- Macro calendar. Every row is an event from /api/news with its own
+       timestamp; the countdown is recomputed client-side each second from
+       that timestamp, so it keeps ticking between polls. -->
+  <section class="tt-view" id="view-news" data-view-panel="news"
+           data-active="false" role="tabpanel" aria-label="News" hidden>
+
+    <div class="tt-panel">
+      <div class="tt-panel__head">
+        <h2 class="tt-panel__title">Economic calendar</h2>
+        <span class="tt-panel__count" id="news-count">0</span>
+        <span class="tt-panel__spacer"></span>
+        <span class="tt-chip tt-chip--none" id="news-live-chip">—</span>
+        <label class="tt-sr-only" for="news-impact">Filter by impact</label>
+        <select class="tt-select tt-select--compact" id="news-impact">
+          <option value="ALL">All impact</option>
+          <option value="HIGH">High</option>
+          <option value="MEDIUM">Medium</option>
+          <option value="LOW">Low</option>
+        </select>
+        <label class="tt-sr-only" for="news-currency">Filter by currency</label>
+        <select class="tt-select tt-select--compact" id="news-currency">
+          <option value="ALL">All currencies</option>
+        </select>
+        <button class="tt-btn tt-btn--sm" id="news-refresh" type="button">Refresh</button>
+      </div>
+      <div class="tt-panel__body" id="news-body" data-state="loading"></div>
+    </div>
+
+    <div class="tt-panel">
+      <div class="tt-panel__head">
+        <h2 class="tt-panel__title">Next release</h2>
+        <span class="tt-panel__spacer"></span>
+        <span class="tt-hint" id="news-updated">—</span>
+      </div>
+      <div class="tt-panel__body">
+        <div id="news-hero" data-state="loading"></div>
+
+        <div class="tt-panel__head">
+          <h2 class="tt-panel__title">Event detail</h2>
+          <span class="tt-panel__spacer"></span>
+          <span class="tt-chip tt-chip--none" id="news-detail-impact">—</span>
+        </div>
+        <div id="news-detail" data-state="empty">
+          <div class="tt-state">
+            <span class="tt-state__title">No event selected</span>
+            <span>Pick an event from the calendar to read its impact analysis.</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Analyst ────────────────────────────────────────────────────── -->
+  <!-- The adversarial view. Everything here is the engine's own reasoning for
+       the selected symbol: the case against the trade, the gate that would
+       block it, and the conditions that would invalidate it. -->
+  <section class="tt-view" id="view-analyst" data-view-panel="analyst"
+           data-active="false" role="tabpanel" aria-label="Analyst" hidden>
+
+    <div class="tt-panel">
+      <div class="tt-panel__head">
+        <h2 class="tt-panel__title">Devil's advocate</h2>
+        <span class="tt-panel__spacer"></span>
+        <span class="tt-symbol" id="da-symbol">—</span>
+        <span class="tt-chip tt-chip--none" id="da-verdict">—</span>
+      </div>
+      <div class="tt-panel__body">
+        <div class="tt-metrics" id="da-metrics" data-state="loading"></div>
+
+        <div class="tt-da__cols">
+          <div class="tt-da__col">
+            <h3 class="tt-da__heading tt-up">Bull case</h3>
+            <div id="da-bull" data-state="loading"></div>
+          </div>
+          <div class="tt-da__col">
+            <h3 class="tt-da__heading tt-down">Bear case</h3>
+            <div id="da-bear" data-state="loading"></div>
+          </div>
+        </div>
+
+        <div class="tt-da__block">
+          <h3 class="tt-da__heading">Threat vectors</h3>
+          <div id="da-threats" data-state="loading"></div>
+        </div>
+
+        <div class="tt-da__block">
+          <h3 class="tt-da__heading">What would change my mind</h3>
+          <div id="da-invalidation" data-state="loading"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="tt-panel">
+      <div class="tt-panel__head">
+        <h2 class="tt-panel__title">Quality gate</h2>
+        <span class="tt-panel__count" id="gate-count">0</span>
+        <span class="tt-panel__spacer"></span>
+        <span class="tt-chip tt-chip--none" id="gate-verdict">—</span>
+      </div>
+      <div class="tt-panel__body" id="gate-body" data-state="loading"></div>
+
+      <div class="tt-panel__head">
+        <h2 class="tt-panel__title">Objections</h2>
+      </div>
+      <div class="tt-panel__body" id="da-objections" data-state="loading"></div>
+    </div>
+  </section>
+
+  <!-- ── Markets ────────────────────────────────────────────────────── -->
+  <!-- Global equities and the Indian market. These routes are backed by
+       external providers and several can block for many seconds, so each
+       panel owns its own request and its own failure state. The provenance
+       chip on every panel reports where its numbers came from: the stocks
+       service emits fallback rows and the FII/DII endpoint returns fixed
+       sample values, and neither may be read as a live quote. -->
+  <section class="tt-view" id="view-markets" data-view-panel="markets"
+           data-active="false" role="tabpanel" aria-label="Markets" hidden>
+
+    <div class="tt-panel">
+      <div class="tt-panel__head">
+        <h2 class="tt-panel__title">Global equities</h2>
+        <span class="tt-panel__count" id="eq-count">0</span>
+        <span class="tt-panel__spacer"></span>
+        <span class="tt-chip tt-chip--none" id="eq-prov">—</span>
+        <button class="tt-btn tt-btn--sm" id="eq-refresh" type="button">Refresh</button>
+      </div>
+      <div class="tt-panel__body tt-panel__body--flush" id="eq-body" data-state="loading"></div>
+
+      <div class="tt-panel__head">
+        <h2 class="tt-panel__title">Sector rotation</h2>
+        <span class="tt-panel__spacer"></span>
+        <span class="tt-hint" id="eq-heat-note">—</span>
+      </div>
+      <div class="tt-panel__body" id="eq-heatmap" data-state="loading"></div>
+    </div>
+
+    <div class="tt-panel">
+      <div class="tt-panel__head">
+        <h2 class="tt-panel__title">India</h2>
+        <span class="tt-panel__spacer"></span>
+        <button class="tt-btn tt-btn--sm" id="in-refresh" type="button">Refresh</button>
+      </div>
+      <div class="tt-panel__body">
+        <div class="tt-subhead">
+          <h3 class="tt-panel__title">Benchmark indices</h3>
+          <span class="tt-panel__spacer"></span>
+          <span class="tt-chip tt-chip--none" id="in-index-prov">—</span>
+        </div>
+        <div id="in-indices" data-state="loading"></div>
+
+        <div class="tt-subhead">
+          <h3 class="tt-panel__title">Institutional flows</h3>
+          <span class="tt-panel__spacer"></span>
+          <span class="tt-chip tt-chip--none" id="in-fii-prov">—</span>
+        </div>
+        <div id="in-fii" data-state="loading"></div>
+
+        <div class="tt-subhead">
+          <h3 class="tt-panel__title">Option chain</h3>
+          <span class="tt-panel__spacer"></span>
+          <span class="tt-chip tt-chip--none" id="in-oc-prov">—</span>
+          <label class="tt-sr-only" for="in-oc-symbol">Option chain symbol</label>
+          <select class="tt-select tt-select--compact" id="in-oc-symbol">
+            <option value="NIFTY" selected>NIFTY</option>
+            <option value="BANKNIFTY">BANKNIFTY</option>
+            <option value="FINNIFTY">FINNIFTY</option>
+            <option value="MIDCPNIFTY">MIDCPNIFTY</option>
+            <option value="SENSEX">SENSEX</option>
+            <option value="RELIANCE">RELIANCE</option>
+            <option value="TCS">TCS</option>
+            <option value="HDFCBANK">HDFCBANK</option>
+            <option value="INFY">INFY</option>
+          </select>
+        </div>
+        <div id="in-optionchain" data-state="loading"></div>
+      </div>
     </div>
   </section>
 

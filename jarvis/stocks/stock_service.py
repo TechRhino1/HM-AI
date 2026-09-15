@@ -69,7 +69,16 @@ class StockService:
             for sym in symbols:
                 analysis = results_map.get(sym)
                 if not analysis:
-                    # Graceful fallback row for failed symbol analysis
+                    # Graceful fallback row for failed symbol analysis.
+                    #
+                    # PROVENANCE: nothing in this row is an analysis. The price
+                    # is the profile's static reference, not a quote, and the
+                    # grade, probability, bias, entry, stop and target below are
+                    # placeholders. `analysis_source: "fallback"` marks the row so
+                    # no consumer can render these as a computed setup — a
+                    # screener that invents a GRADE B breakout with a 2.0 R:R for
+                    # a symbol it failed to analyse is worse than one that shows
+                    # the symbol as unanalysed.
                     prof = get_stock_profile(sym)
                     base_px = float(prof.get("base_price", 100.0))
                     row = {
@@ -111,6 +120,9 @@ class StockService:
                         "earnings_badge": "SAFE",
                         "earnings_warning": "LOW",
                         "implied_volatility": 25.0,
+                        "analysis_source": "fallback",
+                        "data_source": "profile_reference",
+                        "analysis_note": "Analysis did not complete for this symbol; the setup fields are placeholders.",
                         "tags": prof.get("tags", [])
                     }
                 else:
@@ -154,6 +166,11 @@ class StockService:
                         "earnings_badge": analysis["earnings"]["warning_badge"],
                         "earnings_warning": analysis["earnings"]["warning_level"],
                         "implied_volatility": analysis["earnings"]["implied_volatility"],
+                        # Where the numbers came from. The engine records whether
+                        # it read real MT5 bars or generated candles anchored to
+                        # the profile's reference price, and the UI reports it.
+                        "analysis_source": "computed",
+                        "data_source": analysis.get("data_source", "unknown"),
                         "tags": analysis["tags"]
                     }
                 results.append(row)
@@ -225,9 +242,26 @@ class StockService:
         # Extract top AI recommended 'Buy Now' setups
         recommended_buys = self._extract_recommended_buys()
 
+        # How many rows in the universe carry a placeholder rather than a real
+        # analysis. Surfaced at the envelope level so the UI can warn without
+        # having to walk every row, and so a caller can tell a fully analysed
+        # scan apart from a partly failed one.
+        fallback_count = sum(
+            1 for s in self._cached_screener_results
+            if s.get("analysis_source") == "fallback"
+        )
+
         return {
             "count": len(filtered),
             "total_universe": len(self._cached_screener_results),
+            "fallback_count": fallback_count,
+            "provenance": {
+                "analysis": "computed" if fallback_count == 0 else "partial",
+                "note": (
+                    "Every row carries analysis_source. Rows marked 'fallback' "
+                    "failed analysis and hold placeholder setup fields."
+                )
+            },
             "timeframe": timeframe,
             "filters": {
                 "market": market,

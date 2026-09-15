@@ -11,22 +11,50 @@ Curated facts that outlive a single session. Daily detail lives in `YYYY-MM-DD.m
 * **Python is the managed 3.13.12** (`python` on PATH). There is no project venv; `pytest`,
   `pandas`, `numpy` are importable directly.
 
-## Data-loss hazard (unresolved, twice observed)
+## Data-loss hazard (unresolved, three times observed)
 
-The entire `jarvis/` package has twice vanished from the working tree — 2026-09-13 (~03:28) and
-2026-09-14 (03:50:52) — both times right after a `git rm`. Ruled out: git hooks, `hooksPath`,
-`fsmonitor`, WorkBuddy automations, disk pressure, a destructive script in the repo. Cause unknown;
-AV/EDR quarantine and cloud-sync clients remain the leading hypotheses.
+Three incidents, all clustered in the small hours, all following a git operation that rewrites
+refs or the index:
+
+| When | What vanished | Preceded by |
+|---|---|---|
+| 2026-09-13 ~03:28 | the whole `jarvis/` package | a `git rm` |
+| 2026-09-14 03:50:52 | the whole `jarvis/` package | a `git rm` |
+| 2026-09-15 ~05:31 | **the git object store** — all three `.pack` files, `refs/heads/main`, `refs/remotes/origin/main` | a `git stash push` |
+
+Ruled out: git hooks, `hooksPath`, `fsmonitor`, WorkBuddy automations, disk pressure, a destructive
+script in the repo. Cause unknown; AV/EDR quarantine and cloud-sync clients remain the leading
+hypotheses. **Note the third incident: `.git/` is NOT safe.** The earlier claim that it was is
+wrong — the packfiles inside it were deleted while the working tree survived untouched.
 
 Consequences to work by:
 
-* **Commit every new file as soon as it is written.** Both incidents only cost rework for
-  *untracked* files. Everything committed was recoverable.
-* **Recovery recipe:** `git checkout -- jarvis/` restores the working tree **from the index**,
+* **Commit and push early.** The remote is the only durable store. Everything committed has always
+  been recoverable; only uncommitted work has been at risk.
+* **Recovery recipe, working tree lost:** `git checkout -- jarvis/` restores **from the index**,
   which preserves any staged deletions. Prefer it over `git checkout HEAD -- jarvis/`, which would
   resurrect files you deliberately `git rm`-ed.
-* A full history bundle lives at `.git/backup/repo-<timestamp>.bundle`. `.git/` survives these
-  incidents. Refresh it periodically.
+* **Recovery recipe, object store lost** (what the third incident needed — this is the one to
+  remember, because the usual advice is useless when `HEAD` itself is unreadable):
+
+  ```bash
+  # 1. Read the reflog. It survives, and its last entry names the commit you were on.
+  cat .git/logs/HEAD | tail -5
+  # 2. Prove the object is really gone before assuming so.
+  git cat-file -t <sha>          # "could not get object info" == gone
+  # 3. Re-download the objects. The remote is the source of truth.
+  git fetch origin
+  # 4. Recreate the refs by hand — fetch alone does not restore a deleted local branch.
+  git update-ref refs/heads/main <sha>
+  git update-ref refs/remotes/origin/main <sha>
+  ```
+
+  A `git fetch` recreates `origin/main` but leaves the local branch missing, so step 4 is required.
+* **Never `git stash` in this repo.** It is the operation that triggered the third incident and it
+  buys nothing: to compare old and new behaviour, edit the file back with the editor, run the test,
+  and edit it forward again. That is what the provider-recursion work did, and it is safe.
+* Refresh the history bundle at `.git/backup/repo-<timestamp>.bundle` (`git bundle create <path>
+  --all`). The bundle is a single file and has survived all three incidents; the packs have not.
 
 ## Conventions worth knowing
 
@@ -59,10 +87,24 @@ Consequences to work by:
   conditioning is therefore free, because simulations cache on the geometry alone. Its disable
   thresholds deliberately duplicate `winrate_targeting.regime_edge_table`; a test enforces they
   agree.
-* **Verification entry points:** `python tools/verify_ui_live.py` (27 live HTTP checks, exits
-  non-zero on failure), `python tools/audit_wiring.py`, `python tools/audit_endpoints.py`,
+* **The quote fallback must never call the profile hydrators.** `TradingViewDataProvider.
+  fetch_quotes()` used to read its fallback price from `get_india_profile()` / `get_stock_profile()`,
+  and those hydrate — hydration resolves quotes by calling back into `fetch_quotes()` for the same
+  symbol. The cycle was unbounded (measured: 233 re-entries for one NIFTY lookup) and nothing raised,
+  because `hydrate_batch` wraps its `fetch_quotes` call in `except Exception` and `RecursionError` is
+  an `Exception`. So `/api/india/*` never answered for any symbol reaching that branch — every index,
+  since NIFTY and BANKNIFTY match no earlier pattern — and the price that eventually came back was
+  the last-resort 150.0 instead of NIFTY's own 24175.65. Read `INDIA_UNIVERSE` / `STOCK_UNIVERSE`
+  directly. Guarded by `tests/test_provider_recursion.py`.
+* **A test that only looks for a raised exception can miss an unbounded recursion** when an
+  intermediate frame swallows it. Pin the *call* (patch the callee with a recorder) instead.
+* **Clear both caches in `setUp` when testing anything that caches.** `_quote_cache` has a 15s TTL,
+  and a sibling test warming it silently made a re-entry test pass against the broken code.
+* **Verification entry points:** `python tools/verify_ui_live.py` (44 live HTTP checks, exits
+  non-zero on failure), `python tools/verify_dashboard_render.js` (88 headless render checks, needs
+  `node`), `python tools/audit_wiring.py`, `python tools/audit_endpoints.py`,
   `tests/test_mode_aggregator.py`, `tests/test_backtest_optimizer.py`,
-  `tests/test_regime_optimizer.py`.
+  `tests/test_regime_optimizer.py`, `tests/test_ui_wiring.py`, `tests/test_provider_recursion.py`.
 
 ## Pushing to GitHub — a plain `git push` will hang
 

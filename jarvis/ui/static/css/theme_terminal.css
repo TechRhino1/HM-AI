@@ -230,6 +230,18 @@
 #view-backtest.tt-view[data-active="true"] {
   grid-template-columns: minmax(300px, 380px) minmax(0, 1fr);
 }
+/* News: the calendar is the reading surface, the detail panel is a sidebar. */
+#view-news.tt-view[data-active="true"] {
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 420px);
+}
+/* Analyst: the adversarial case, with the gate alongside it. */
+#view-analyst.tt-view[data-active="true"] {
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 440px);
+}
+/* Markets: global equities, with India alongside. */
+#view-markets.tt-view[data-active="true"] {
+  grid-template-columns: minmax(0, 1fr) minmax(340px, 460px);
+}
 
 /* ── Panel ──────────────────────────────────────────────────────────────── */
 .tt-panel {
@@ -843,6 +855,13 @@
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: auto minmax(0, 1fr);
   }
+  #view-news.tt-view[data-active="true"],
+  #view-analyst.tt-view[data-active="true"],
+  #view-markets.tt-view[data-active="true"] {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) auto;
+  }
+  .tt-da__cols { grid-template-columns: minmax(0, 1fr); }
 }
 
 /* Phone: one pane at a time, chosen by the pane bar. */
@@ -850,7 +869,10 @@
   .tt-app { grid-template-rows: auto auto 1fr auto; grid-template-areas: "rail" "panebar" "main" "status"; }
   #view-trade.tt-view[data-active="true"],
   #view-analytics.tt-view[data-active="true"],
-  #view-backtest.tt-view[data-active="true"] {
+  #view-backtest.tt-view[data-active="true"],
+  #view-news.tt-view[data-active="true"],
+  #view-analyst.tt-view[data-active="true"],
+  #view-markets.tt-view[data-active="true"] {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: minmax(0, 1fr);
   }
@@ -952,6 +974,422 @@
 
 .tt-btn--primary {
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), var(--hm-accent-glow);
+}
+
+/* ── Segmented control ──────────────────────────────────────────────────── */
+/* Two or three mutually exclusive options in a single control. Used for the
+   chart source. `aria-pressed` is the state, so the visual follows the
+   accessibility tree rather than running beside it. */
+.tt-seg {
+  display: inline-flex;
+  align-items: stretch;
+  border: 1px solid var(--hm-border);
+  border-radius: var(--hm-radius-sm);
+  overflow: hidden;
+  background: var(--hm-bg-sunken);
+}
+.tt-seg__btn {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--hm-text-secondary);
+  font: inherit;
+  font-size: var(--hm-text-2xs);
+  font-weight: var(--hm-weight-semibold);
+  letter-spacing: var(--hm-tracking-caps);
+  text-transform: uppercase;
+  padding: 0 var(--hm-space-3);
+  height: calc(var(--tt-head-h) - 12px);
+  cursor: pointer;
+  transition: background var(--hm-dur-fast) var(--hm-ease), color var(--hm-dur-fast) var(--hm-ease);
+}
+.tt-seg__btn + .tt-seg__btn { border-left: 1px solid var(--hm-border); }
+.tt-seg__btn:hover { background: var(--hm-bg-hover); color: var(--hm-text-primary); }
+.tt-seg__btn[aria-pressed="true"] {
+  background: var(--hm-accent-subtle);
+  color: var(--hm-accent);
+}
+.tt-seg__btn:focus-visible { outline: 2px solid var(--hm-accent); outline-offset: -2px; }
+
+/* ── TradingView container ──────────────────────────────────────────────── */
+/* Visibility is driven by the body attribute so the stylesheet owns it, the
+   same way views and panes already switch. */
+.tt-chart__tv {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--hm-bg-base);
+}
+.tt-app[data-chart-source="native"] .tt-chart__tv { display: none; }
+.tt-app[data-chart-source="tradingview"] .tt-chart { display: none; }
+.tt-chart__tv-frame { flex: 1 1 auto; min-height: 0; }
+.tt-chart__tv-note {
+  flex: 0 0 auto;
+  padding: var(--hm-space-1) var(--hm-space-3);
+  font-family: var(--tt-num-font);
+  font-size: var(--hm-text-2xs);
+  color: var(--hm-text-dim);
+  border-top: 1px solid var(--hm-border-subtle);
+  background: var(--hm-bg-raised);
+}
+
+/* ── Sub-heading inside a panel body ────────────────────────────────────── */
+.tt-subhead {
+  display: flex;
+  align-items: center;
+  gap: var(--hm-space-2);
+  padding: var(--hm-space-2) 0 var(--hm-space-1);
+  border-bottom: 1px solid var(--hm-border-subtle);
+  margin-bottom: var(--hm-space-2);
+}
+.tt-subhead .tt-panel__title {
+  font-size: var(--hm-text-xs);
+  letter-spacing: var(--hm-tracking-caps);
+  text-transform: uppercase;
+  color: var(--hm-text-dim);
+}
+
+/* ── Provenance note ────────────────────────────────────────────────────── */
+/* Sits directly above the numbers it qualifies. Deliberately not a tooltip:
+   the whole point is that it cannot be missed. */
+.tt-prov-note {
+  margin: 0 0 var(--hm-space-2);
+  padding: var(--hm-space-2) var(--hm-space-3);
+  border-left: 2px solid var(--hm-warn);
+  background: var(--hm-warn-subtle);
+  border-radius: 0 var(--hm-radius-sm) var(--hm-radius-sm) 0;
+  font-size: var(--hm-text-2xs);
+  line-height: var(--hm-leading-normal);
+  color: var(--hm-text-secondary);
+}
+
+/* ── Devil's advocate ───────────────────────────────────────────────────── */
+.tt-da__cols {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--hm-space-3);
+  margin-bottom: var(--hm-space-3);
+}
+.tt-da__col { min-width: 0; }
+.tt-da__heading {
+  margin: 0 0 var(--hm-space-1);
+  font-size: var(--hm-text-2xs);
+  font-weight: var(--hm-weight-semibold);
+  letter-spacing: var(--hm-tracking-caps);
+  text-transform: uppercase;
+  color: var(--hm-text-dim);
+}
+.tt-da__block { margin-bottom: var(--hm-space-3); }
+.tt-da__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--hm-space-1);
+}
+.tt-da__list > li {
+  position: relative;
+  padding-left: var(--hm-space-3);
+  font-size: var(--hm-text-xs);
+  line-height: var(--hm-leading-normal);
+  color: var(--hm-text-secondary);
+}
+.tt-da__list > li::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0.5em;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--hm-border-strong);
+}
+
+/* Penalty gauge. The fill is penalty/50 against the engine's own scale, so a
+   half-full bar means a genuine objection rather than an arbitrary fraction. */
+.tt-gauge {
+  display: block;
+  width: 100%;
+  height: 4px;
+  margin-top: var(--hm-space-1);
+  border-radius: var(--hm-radius-pill);
+  background: var(--hm-bg-sunken);
+  overflow: hidden;
+}
+.tt-gauge__fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  transition: width var(--hm-dur-normal) var(--hm-ease);
+}
+.tt-gauge--up .tt-gauge__fill { background: var(--hm-bull); }
+.tt-gauge--warn .tt-gauge__fill { background: var(--hm-warn); }
+.tt-gauge--down .tt-gauge__fill { background: var(--hm-bear); }
+.tt-gauge--none .tt-gauge__fill { background: var(--hm-neutral); }
+
+/* ── Quality gate grid ──────────────────────────────────────────────────── */
+.tt-gate {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: var(--hm-space-1);
+}
+.tt-gate__cell {
+  display: flex;
+  align-items: center;
+  gap: var(--hm-space-2);
+  padding: var(--hm-space-1) var(--hm-space-2);
+  border-radius: var(--hm-radius-sm);
+  border: 1px solid transparent;
+  font-size: var(--hm-text-2xs);
+  min-width: 0;
+}
+.tt-gate__cell--pass { background: var(--hm-bg-raised); color: var(--hm-text-secondary); }
+.tt-gate__cell--fail {
+  background: var(--hm-bear-subtle);
+  border-color: color-mix(in srgb, var(--hm-bear) 40%, transparent);
+  color: var(--hm-text-primary);
+}
+.tt-gate__mark {
+  flex: 0 0 auto;
+  width: 1.1em;
+  text-align: center;
+  font-weight: var(--hm-weight-bold);
+}
+.tt-gate__cell--pass .tt-gate__mark { color: var(--hm-bull); }
+.tt-gate__cell--fail .tt-gate__mark { color: var(--hm-bear); }
+.tt-gate__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Detail list ────────────────────────────────────────────────────────── */
+.tt-detail {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--hm-space-1) var(--hm-space-3);
+  margin: 0 0 var(--hm-space-3);
+  font-size: var(--hm-text-xs);
+}
+.tt-detail > dt { color: var(--hm-text-dim); }
+.tt-detail > dd {
+  margin: 0;
+  color: var(--hm-text-primary);
+  font-family: var(--tt-num-font);
+  overflow-wrap: anywhere;
+}
+
+/* ── Economic calendar ──────────────────────────────────────────────────── */
+.tt-news__row { cursor: pointer; }
+.tt-news__row:hover { background: var(--hm-bg-hover); }
+.tt-news__row[data-selected="true"] {
+  background: var(--hm-accent-subtle);
+  box-shadow: inset 2px 0 0 var(--hm-accent);
+}
+.tt-news__row:focus-visible { outline: 2px solid var(--hm-accent); outline-offset: -2px; }
+
+/* The left edge carries the phase, so the calendar can be scanned by state
+   without reading a single countdown. */
+.tt-news__row[data-phase="live"] { box-shadow: inset 3px 0 0 var(--hm-warn); }
+.tt-news__row[data-phase="soon"] { box-shadow: inset 3px 0 0 var(--hm-accent); }
+.tt-news__row[data-phase="past"] { opacity: 0.62; }
+
+.tt-news__when { white-space: nowrap; }
+.tt-news__when > span { display: block; }
+.tt-news__utc { font-size: var(--hm-text-2xs); color: var(--hm-text-dim); }
+
+.tt-news__cd { white-space: nowrap; }
+.tt-news__cd-val { display: block; font-family: var(--tt-num-font); }
+.tt-news__cd-badge {
+  display: block;
+  font-size: var(--hm-text-2xs);
+  letter-spacing: var(--hm-tracking-caps);
+  text-transform: uppercase;
+  color: var(--hm-text-dim);
+}
+.tt-news__cd[data-phase="live"] .tt-news__cd-val { color: var(--hm-warn); font-weight: var(--hm-weight-semibold); }
+.tt-news__cd[data-phase="soon"] .tt-news__cd-val { color: var(--hm-accent); }
+.tt-news__cd[data-phase="past"] .tt-news__cd-val { color: var(--hm-text-dim); }
+
+.tt-news__cur {
+  font-family: var(--tt-num-font);
+  font-size: var(--hm-text-2xs);
+  color: var(--hm-text-dim);
+}
+.tt-news__event { min-width: 220px; }
+.tt-news__name { display: block; color: var(--hm-text-primary); }
+.tt-news__pairs {
+  display: block;
+  font-size: var(--hm-text-2xs);
+  color: var(--hm-text-dim);
+}
+.tt-news__prose {
+  margin: 0 0 var(--hm-space-2);
+  font-size: var(--hm-text-xs);
+  line-height: var(--hm-leading-normal);
+  color: var(--hm-text-secondary);
+}
+
+/* Live chip: the only place the warn colour is used for a state rather than a
+   warning, because a release inside its volatility window is an event. */
+.tt-chip--live {
+  color: var(--hm-warn);
+  border-color: color-mix(in srgb, var(--hm-warn) 55%, transparent);
+  background: var(--hm-warn-subtle);
+  animation: tt-live-pulse 2s var(--hm-ease) infinite;
+}
+@keyframes tt-live-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tt-chip--live { animation: none; }
+}
+
+/* ── Next-release hero ──────────────────────────────────────────────────── */
+.tt-news-hero {
+  border: 1px solid var(--hm-border-subtle);
+  border-radius: var(--hm-radius);
+  background: var(--hm-bg-raised);
+  padding: var(--hm-space-3);
+  margin-bottom: var(--hm-space-3);
+}
+.tt-news-hero[data-phase="live"] { border-color: color-mix(in srgb, var(--hm-warn) 55%, transparent); }
+.tt-news-hero__top {
+  display: flex;
+  align-items: center;
+  gap: var(--hm-space-2);
+  margin-bottom: var(--hm-space-2);
+}
+.tt-news-hero__cur {
+  font-family: var(--tt-num-font);
+  font-size: var(--hm-text-2xs);
+  font-weight: var(--hm-weight-semibold);
+  color: var(--hm-text-secondary);
+}
+.tt-news-hero__title {
+  margin: 0 0 var(--hm-space-2);
+  font-size: var(--hm-text-base);
+  font-weight: var(--hm-weight-semibold);
+  line-height: var(--hm-leading-tight);
+  color: var(--hm-text-primary);
+}
+.tt-news-hero__cd { display: flex; align-items: baseline; gap: var(--hm-space-2); margin-bottom: var(--hm-space-3); }
+.tt-news-hero__cd-val {
+  font-family: var(--tt-num-font);
+  font-size: var(--hm-text-2xl);
+  font-weight: var(--hm-weight-bold);
+  color: var(--hm-accent);
+  font-variant-numeric: tabular-nums;
+}
+.tt-news-hero__cd[data-phase="live"] .tt-news-hero__cd-val { color: var(--hm-warn); }
+.tt-news-hero__cd[data-phase="past"] .tt-news-hero__cd-val { color: var(--hm-text-dim); }
+.tt-news-hero__cd-badge {
+  font-size: var(--hm-text-2xs);
+  letter-spacing: var(--hm-tracking-caps);
+  text-transform: uppercase;
+  color: var(--hm-text-dim);
+}
+.tt-news-hero__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+  gap: var(--hm-space-2);
+}
+.tt-news-hero__cell { min-width: 0; }
+.tt-news-hero__k {
+  display: block;
+  font-size: var(--hm-text-2xs);
+  letter-spacing: var(--hm-tracking-caps);
+  text-transform: uppercase;
+  color: var(--hm-text-dim);
+}
+.tt-news-hero__v {
+  display: block;
+  font-family: var(--tt-num-font);
+  font-size: var(--hm-text-sm);
+  color: var(--hm-text-primary);
+  overflow-wrap: anywhere;
+}
+
+/* ── Sector heat tiles ──────────────────────────────────────────────────── */
+.tt-heatgrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: var(--hm-space-2);
+}
+.tt-heattile {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--hm-space-2);
+  border: 1px solid var(--hm-border-subtle);
+  border-radius: var(--hm-radius-sm);
+  background: var(--hm-bg-raised);
+  min-width: 0;
+}
+.tt-heattile__name {
+  font-size: var(--hm-text-xs);
+  font-weight: var(--hm-weight-semibold);
+  color: var(--hm-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tt-heattile__chg {
+  font-family: var(--tt-num-font);
+  font-size: var(--hm-text-sm);
+  font-weight: var(--hm-weight-semibold);
+}
+.tt-heattile__meta {
+  font-size: var(--hm-text-2xs);
+  color: var(--hm-text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Equities screener table ────────────────────────────────────────────── */
+.tt-eq__sym { min-width: 120px; }
+.tt-eq__name {
+  display: block;
+  font-family: var(--tt-num-font);
+  font-weight: var(--hm-weight-semibold);
+  color: var(--hm-text-primary);
+}
+.tt-eq__sector {
+  display: block;
+  font-size: var(--hm-text-2xs);
+  color: var(--hm-text-dim);
+}
+/* A row whose analysis never completed. Muted so it does not read as a
+   candidate, but still present so the universe count stays honest. */
+.tt-eq__row--fallback { opacity: 0.6; }
+.tt-eq__ref { color: var(--hm-text-dim); font-size: var(--hm-text-2xs); }
+
+/* ── India panels ───────────────────────────────────────────────────────── */
+.tt-india td { vertical-align: top; }
+
+/* ── Option chain ───────────────────────────────────────────────────────── */
+.tt-oc { font-size: var(--hm-text-2xs); }
+.tt-oc__row--atm { background: var(--hm-accent-subtle); }
+.tt-oc__row--pain { box-shadow: inset 2px 0 0 var(--hm-warn); }
+.tt-oc__strike {
+  font-weight: var(--hm-weight-semibold);
+  color: var(--hm-text-primary);
+  white-space: nowrap;
+}
+.tt-oc__tag {
+  display: inline-block;
+  margin-left: var(--hm-space-1);
+  padding: 0 4px;
+  border-radius: var(--hm-radius-pill);
+  border: 1px solid var(--hm-border);
+  font-size: 9px;
+  letter-spacing: var(--hm-tracking-caps);
+  color: var(--hm-text-dim);
 }
 
 /* ── Print ──────────────────────────────────────────────────────────────── */

@@ -197,9 +197,20 @@ class StockNewsAnalyzer:
     ]
 
     def get_stock_news(self, symbol: str) -> List[Dict[str, Any]]:
+        """
+        Returns stock-specific headlines.
+
+        PROVENANCE: these are generated from the templates in this module. No
+        news wire is connected, and the `published_at` timestamp is synthesised
+        relative to the current time rather than read from a feed. Every item
+        carries `data_source: "sample"` and the UI must label it as illustrative
+        copy — a fabricated headline attributed to a real publisher is the most
+        damaging form this defect takes, because a reader has no way to tell it
+        from a real one.
+        """
         sym = (symbol or "NVDA").upper().strip()
         now = datetime.now(timezone.utc)
-        
+
         # Check specific curated news first
         if sym in self.NEWS_TEMPLATES:
             raw_items = self.NEWS_TEMPLATES[sym]
@@ -215,7 +226,8 @@ class StockNewsAnalyzer:
                     "impact": it["impact"],
                     "summary": it["summary"],
                     "published_at": pub_time,
-                    "time_ago": f"{(i * 45 + 15)}m ago"
+                    "time_ago": f"{(i * 45 + 15)}m ago",
+                    "data_source": "sample"
                 })
             return results
 
@@ -223,7 +235,7 @@ class StockNewsAnalyzer:
         from jarvis.stocks.universe import get_stock_profile
         profile = get_stock_profile(sym)
         c_name = profile.get("name", f"{sym} Corp")
-        
+
         results = []
         for i, tmpl in enumerate(self.GENERIC_CATALYSTS[:4]):
             pub_time = (now - timedelta(hours=i * 2 + 1, minutes=random.randint(5, 45))).isoformat()
@@ -236,9 +248,10 @@ class StockNewsAnalyzer:
                 "impact": tmpl["impact"],
                 "summary": tmpl["summary_fmt"].format(name=c_name, symbol=sym),
                 "published_at": pub_time,
-                "time_ago": f"{(i * 2 + 1)}h ago"
+                "time_ago": f"{(i * 2 + 1)}h ago",
+                "data_source": "sample"
             })
-            
+
         return results
 
 

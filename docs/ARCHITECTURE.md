@@ -678,9 +678,17 @@ the guard working.
 ## 13. The dashboard UI contract
 
 The dashboard (`jarvis/ui/templates/dashboard.html` + `static/js/dashboard.js`,
-served at `/`, `/dashboard`) is a three-view terminal — Trade, Analytics,
-Backtest — sitting on the `hm_ui.css` token set with `theme_terminal.css` as its
-component layer. `/console` and `/classic` still serve the older surfaces.
+served at `/`, `/dashboard`) is a six-view terminal — Trade, News, Analyst,
+Markets, Analytics, Backtest — sitting on the `hm_ui.css` token set with
+`theme_terminal.css` as its component layer. `/console` and `/classic` still
+serve the older surfaces.
+
+A view is reachable only if three things agree: the rail has a
+`data-view-btn="x"`, the template has a `data-view-panel="x"` and an
+`id="view-x"`, and the controller's `VIEWS` array accepts the name. Any one of
+them missing leaves the tab either absent or **inert** — and inert is the
+dangerous case, because the tab renders, the click does nothing, and nothing
+raises. `tests/test_ui_wiring.py` asserts all three for every view.
 
 ### The one rule
 
@@ -691,6 +699,43 @@ plausible-looking price when its feed is down is worse than one that renders
 nothing, because the fabricated value is indistinguishable from a real one.
 `tools/verify_ui_live.py` scans every template on disk for bare numeric literals
 and fails if one appears.
+
+### The provenance rule
+
+The rule above catches fabricated values **in the markup**. It cannot catch a
+fabricated value **arriving from the API**, because such a value is a perfectly
+ordinary JSON number by the time the UI sees it. That gap is closed at the
+boundary instead:
+
+> A response that returns modelled, fixed or placeholder values must say so in
+> its own payload. A UI cannot label what the backend does not describe.
+
+The vocabulary is the one already in use — `live`, `calibrated_feed`,
+`synthetic`, `synthetic_fallback`, `profile_reference`, `sample`, `mixed`,
+`unknown` (see `gamma_exposure.py` and `india_engine.py` for the precedent).
+Each panel renders its source as a chip via `renderProvChip()`, and a panel
+reports the **weakest** source among its rows rather than the majority one: if a
+single row is a static reference price, the panel is not wholly live, and
+labelling it "live" because most rows were would be exactly the mistake the
+markers exist to prevent (`weakestSource()`).
+
+Three consequences worth keeping:
+
+* **A failed analysis is not a setup.** `stock_service.py` marks a row whose
+  analysis failed with `analysis_source: "fallback"` and `data_source:
+  "profile_reference"`; the renderer then suppresses the grade, probability,
+  bias, entry, stop and target entirely and marks the price as a reference. A
+  screener that invents a "GRADE B" breakout for a symbol it could not analyse
+  is worse than one that says the symbol was not analysed.
+* **A number that picks a direction is labelled.** The India options chain's
+  `iv_rank` is drawn from a local RNG and gates the `iv_rank < 50` branch in
+  `options_signal_engine`, so the UI labels it "IV rank (modelled)" rather than
+  presenting it as measured. The value is not removed — removing it would change
+  which branch runs — it is *described*.
+* **Only what is computed is shown.** The India heatmap deliberately has no
+  `avg_cmf` tile even though the US heatmap does: the India engine computes no
+  money-flow index, so a tile would be invented. The asymmetry is intentional and
+  `tools/verify_ui_live.py` asserts it.
 
 ### The chart
 
@@ -718,6 +763,38 @@ Four properties are load-bearing:
    read off the axis and the same price read off a table row agree digit for
    digit.
 
+### Switching the chart to TradingView
+
+A segmented control (`#chart-src-native`, `#chart-src-tv`) swaps the vendored
+chart for an embedded TradingView widget. Three properties:
+
+1. **The external script is not fetched until it is asked for.** `tv.js` is
+   loaded lazily by `ensureTvScript()`; the render harness asserts it is not
+   requested on page load, because a third-party script is a network dependency
+   and a privacy consideration the user did not opt into by opening the page.
+2. **A blocked CDN fails loudly.** `ensureTvScript()` resolves `false` on error
+   or timeout, the panel renders an explicit failure state naming the native
+   chart as the fallback, and a later click retries. An empty box where a chart
+   should be is indistinguishable from a chart that has not loaded yet.
+3. **The symbol mapping is visible.** `tradingViewSymbol()` maps the internal
+   symbol to an exchange-qualified ticker (`XAUUSD` → `OANDA:XAUUSD`, `NIFTY` →
+   `NSE:NIFTY`, and so on). The resolved ticker is printed next to the switch, so
+   a wrong mapping is a visible fact rather than a chart showing the wrong
+   instrument.
+
+### The news calendar
+
+`/api/news` returns each event with both a `diff_seconds` and a pre-rendered
+`status_badge` string ("IN 14h 33m"), computed at generation time. **The badge is
+not rendered.** It is stale the moment it arrives, so the countdown is derived
+locally instead: each row is anchored to its own `timestamp_iso`, corrected for
+clock skew against the payload's `timestamp`, and the backend's own live window
+(−5 min / +15 min, `NEWS_LIVE_BEFORE` / `NEWS_LIVE_AFTER`) is applied client-side.
+A row therefore flips live → released while the page is open rather than holding
+the payload's snapshot. `tools/verify_ui_live.py` asserts the server's
+`diff_seconds` agrees in sign with its own `timestamp_iso`, which is what makes
+deriving it locally safe.
+
 ### Restored surfaces
 
 The redesign had dropped three surfaces the previous terminal had. All three are
@@ -734,4 +811,18 @@ engine would not trade renders without it and the list never implies that
 everything in it is tradeable. MT5 reports a pending order's type as a numeric
 enum; `pendingTypeName()` maps it to a name, because "2" under a column headed
 Type tells the user nothing.
+
+### The devil's advocate panel
+
+The Analyst view renders `DecisionObject`'s adversarial half — the penalty, the
+bull and bear cases, the risk factors, the invalidation levels, the quality-gate
+checks and the objections. Two properties:
+
+1. **An empty list is rendered as empty.** `daList()` writes "the engine returned
+   none" rather than an all-clear. A panel that renders nothing when it has no
+   evidence looks identical to a panel that has considered the evidence and found
+   it clean.
+2. **Failures sort first.** `renderQualityGate()` orders the failing checks above
+   the passing ones, so the reason a decision was refused is at the top of the
+   list rather than below thirty green rows.
 

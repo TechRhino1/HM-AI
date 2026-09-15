@@ -76,10 +76,15 @@ class IndiaMarketsService:
         res = []
         for sym in indices_syms:
             data = results_map.get(sym)
+            row_source = "unknown"
             if not data:
                 try:
                     data = INDIA_ENGINE.analyze_india_instrument(sym, timeframe="1D")
                 except Exception:
+                    # Last-resort row. PROVENANCE: nothing here is measured — the
+                    # price is the profile's static reference and the Camarilla
+                    # bands are arithmetic on it. Flagged so the UI cannot present
+                    # it as a market read.
                     prof = get_india_profile(sym)
                     base_px = float(prof.get("base_price", 1000.0))
                     data = {
@@ -93,6 +98,12 @@ class IndiaMarketsService:
                         "vwap_structure": {"vwap": base_px},
                         "multi_timeframe": {"1D": {"bias": "BULLISH"}}
                     }
+                    row_source = "profile_reference"
+            if row_source == "unknown":
+                # india_engine reports whether the price came from a live read or
+                # from its own modelled series; pass it through rather than
+                # dropping it at the service boundary.
+                row_source = data.get("data_source", "unknown")
             res.append({
                 "symbol": data["symbol"],
                 "name": data["name"],
@@ -104,7 +115,8 @@ class IndiaMarketsService:
                 "camarilla_h4": data["camarilla"]["h4_breakout"],
                 "camarilla_l4": data["camarilla"]["l4_breakdown"],
                 "vwap": data["vwap_structure"]["vwap"],
-                "bias": data["multi_timeframe"]["1D"]["bias"]
+                "bias": data["multi_timeframe"]["1D"]["bias"],
+                "data_source": row_source
             })
 
         self._cached_indices_snapshot = res
@@ -316,8 +328,10 @@ class IndiaMarketsService:
             if not items:
                 continue
             avg_chg = sum(x["change_pct"] for x in items) / len(items)
+            avg_prob = sum(x.get("breakout_probability", 0) for x in items) / len(items)
             sorted_items = sorted(items, key=lambda x: x["change_pct"], reverse=True)
             top_lead = sorted_items[0]
+            top_breakout = max(items, key=lambda x: x.get("breakout_probability", 0))
 
             if avg_chg >= 1.2:
                 status = "LEADING_INFLOW"
@@ -328,13 +342,25 @@ class IndiaMarketsService:
             else:
                 status = "OUTFLOW_DEFENSIVE"
 
+            # The US heatmap publishes `avg_probability`; this one did not, which
+            # is why a panel bound to both shapes rendered blanks for India.
+            # There is deliberately no `avg_cmf` here: the India engine does not
+            # compute a money-flow index, and deriving one from the change
+            # percentage would be a fabricated indicator.
+            sources = sorted({x.get("data_source", "unknown") for x in items})
+
             heatmap_list.append({
                 "sector": sec,
                 "stock_count": len(items),
+                "count": len(items),
                 "avg_change_pct": round(avg_chg, 2),
+                "avg_probability": round(avg_prob, 1),
                 "top_leader_symbol": top_lead["symbol"],
                 "top_leader_change": top_lead["change_pct"],
-                "rotation_status": status
+                "top_breakout_symbol": top_breakout["symbol"],
+                "top_breakout_prob": round(top_breakout.get("breakout_probability", 0), 1),
+                "rotation_status": status,
+                "data_source": sources[0] if len(sources) == 1 else "mixed"
             })
 
         heatmap_list.sort(key=lambda x: x["avg_change_pct"], reverse=True)
