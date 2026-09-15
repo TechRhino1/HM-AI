@@ -68,9 +68,9 @@ def wilder_atr(df: pd.DataFrame, period: int = 14) -> np.ndarray:
     return pd.Series(tr).ewm(alpha=1.0 / period, adjust=False, min_periods=1).mean().to_numpy()
 
 
-def load_symbol(symbol: str, tf: str):
-    bars_path = os.path.join(REAL_DIR, symbol, f"{symbol}_{tf}_183d.parquet")
-    cand_path = os.path.join(SIGNAL_DIR, f"{symbol}_{tf}_183d_candidates.parquet")
+def load_symbol(symbol: str, tf: str, window: int = 183):
+    bars_path = os.path.join(REAL_DIR, symbol, f"{symbol}_{tf}_{window}d.parquet")
+    cand_path = os.path.join(SIGNAL_DIR, f"{symbol}_{tf}_{window}d_candidates.parquet")
     if not (os.path.exists(bars_path) and os.path.exists(cand_path)):
         return None, None
     df = pd.read_parquet(bars_path).sort_values("time").reset_index(drop=True)
@@ -220,6 +220,7 @@ def main() -> int:
     ap.add_argument("--symbols", default="")
     ap.add_argument("--out", default=os.path.join(REPO, "reports", "trade_quality_audit.json"))
     ap.add_argument("--risk-pct", type=float, default=REALISED_RISK_PCT)
+    ap.add_argument("--window", type=int, default=183, help="data window in days")
     args = ap.parse_args()
 
     tfs = [t.strip().upper() for t in args.tf.split(",") if t.strip()]
@@ -236,6 +237,7 @@ def main() -> int:
                  "jarvis/risk/position_sizing.py:56 pins at its 1.50 cap; measured "
                  "realised risk is 0.74-1.32%. Drawdown % is reported at the "
                  "realised figure."),
+        "window_days": args.window,
         "styles": {},
     }
 
@@ -243,7 +245,7 @@ def main() -> int:
         style = next((s for s, t in STYLE_TF.items() if t == tf), tf)
         style_rep: Dict[str, object] = {}
         for sym in symbols:
-            df, cands = load_symbol(sym, tf)
+            df, cands = load_symbol(sym, tf, args.window)
             if df is None:
                 continue
             cands = dynamic_regimes(df, cands)
