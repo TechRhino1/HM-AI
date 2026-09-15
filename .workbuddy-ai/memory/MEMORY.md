@@ -100,6 +100,20 @@ Consequences to work by:
   intermediate frame swallows it. Pin the *call* (patch the callee with a recorder) instead.
 * **Clear both caches in `setUp` when testing anything that caches.** `_quote_cache` has a 15s TTL,
   and a sibling test warming it silently made a re-entry test pass against the broken code.
+* **Never seed a modelled value from `hash()`.** CPython salts it per process (PYTHONHASHSEED), so
+  the value changes on every interpreter start. Use `jarvis.data.determinism.stable_seed` — the one
+  definition, in a module that imports nothing. Eight sites were seeding from `hash()`: option-chain
+  skew/OI/volume, the options signal `pcr` (which picks BUY CALL vs BUY PUT), candle walks, the
+  Monte Carlo seed, and — user-facing — earnings dates, implied volatility and `is_fno_ban`.
+* **Salting is constant WITHIN a process, so "call it twice and compare" passes against this bug.**
+  The discriminating test must spawn a subprocess under a different `PYTHONHASHSEED`. Same trap for
+  `RecursionError`: an intermediate `except Exception` swallows it, so pin the *call*, not the
+  exception. Five tests this cycle passed against the code they were meant to catch.
+* **Test against pre-change code with `git archive HEAD <path> | tar -x -C .scratch/oldtree`,** never
+  `git stash`.
+* **Environment gotchas:** plain `pytest -q` exits 1 *after all tests pass* (a safe-delete hook
+  blocks pytest's temp-dir cleanup) — use `--basetemp=.scratch/pttmp`. And prefixing a command with
+  `rm -rf X &&` silently swallows the whole command's stdout; run the `rm` separately.
 * **Verification entry points:** `python tools/verify_ui_live.py` (44 live HTTP checks, exits
   non-zero on failure), `python tools/verify_dashboard_render.js` (88 headless render checks, needs
   `node`), `python tools/audit_wiring.py`, `python tools/audit_endpoints.py`,
