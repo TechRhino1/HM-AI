@@ -21,6 +21,15 @@ Cause unknown (AV/EDR quarantine and cloud-sync clients are the leading hypothes
 `fsmonitor`, automations, disk pressure, repo scripts all ruled out). **`.git/` is not safe** — the
 packfiles died while the working tree survived untouched.
 
+Observed 2026-09-15 23:2x: **remote-tracking refs are wiped the moment they are written.** `git fetch
+origin` printed `* [new branch] main -> origin/main` and exited 0, but `refs/remotes/origin/main` was
+gone immediately after. `git update-ref refs/remotes/origin/main <sha>` also exits 0 and writes
+nothing. Writing the file by hand (`mkdir -p .git/refs/remotes/origin` + `printf`) works and
+`git rev-parse origin/main` resolves — until it too disappears. `refs/heads/main` and plain files in
+`.git/` are unaffected; only `.git/refs/remotes/` is targeted. Consequences: upstream tracking
+cannot be persisted, so `git status` will keep reporting `[gone]` — ignore it and push with an
+explicit refspec (`git push origin main:refs/heads/main`) rather than relying on `-u`.
+
 Rules:
 * **Commit and push early.** The remote is the only durable store; only uncommitted work is at risk.
 * **Never `git stash` here.** To compare old vs new behaviour, use
