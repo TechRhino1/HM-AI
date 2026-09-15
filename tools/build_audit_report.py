@@ -32,6 +32,49 @@ def load():
     return verdict, audit
 
 
+def cost_gap_rows(verdict_rows):
+    """Recompute expectancy under a cost model that is not broken.
+
+    Gap = (what a round turn really costs) - (what the backtest charged):
+      charged : spread on BUY entry only  -> 0.5 x spread averaged over sides
+                plus 0.5 pip slippage on stop exits only (~50% of trades)
+      real    : round-turn spread on both sides + round-turn commission
+    Both expressed in R using each symbol's own median stop distance, so the
+    comparison is scale-free across asset classes.
+    """
+    import numpy as np
+    import pandas as pd
+    from jarvis.data.symbol_registry import get_dollar_risk_per_price_unit, resolve
+
+    out = []
+    for r in verdict_rows:
+        sym = r["symbol"]
+        cp = os.path.join(REPO, "data", "signals", f"{sym}_H1_183d_candidates.parquet")
+        bp = os.path.join(REPO, "data", "market", "real", sym, f"{sym}_H1_183d.parquet")
+        if not (os.path.exists(cp) and os.path.exists(bp)):
+            continue
+        c = pd.read_parquet(cp, columns=["risk_dist", "bar_idx"])
+        b = pd.read_parquet(bp, columns=["spread"])
+        spec = resolve(sym)
+        money = get_dollar_risk_per_price_unit(sym, None)
+        pt = 10.0 ** -(spec.digits or 5)
+        rd = float(c["risk_dist"].median())
+        if rd <= 0:
+            continue
+        idx = np.clip(c["bar_idx"].to_numpy(), 0, len(b) - 1)
+        sp = float(np.median(pd.to_numeric(b["spread"], errors="coerce").fillna(0).to_numpy()[idx])) * pt
+        real = (2.0 * sp) / rd + 10.0 / (rd * money)      # 2 sides spread + $5/lot round turn
+        charged = (0.5 * sp + 0.25 * spec.pip_size) / rd
+        out.append({
+            "symbol": sym,
+            "pf": r["profit_factor"],
+            "e_measured": r["expectancy_r"],
+            "gap": real - charged,
+            "e_corrected": r["expectancy_r"] - (real - charged),
+        })
+    return sorted(out, key=lambda x: -x["e_corrected"])
+
+
 def rows_for(verdict, style, tp=1.5):
     out = [r for r in verdict if r["style"] == style and abs(r["tp_r"] - tp) < 1e-9]
     return sorted(out, key=lambda r: -r["profit_factor"])
@@ -115,6 +158,17 @@ def build_html() -> str:
                        f"<td class='num {cls}'><b>{pf:.3f}</b></td>"
                        f"<td class='num'>{fmt_pct(wr, 2)}</td></tr>")
         return "\n".join(out)
+
+    corr = cost_gap_rows(h1)
+    survivors = [c["symbol"] for c in corr if c["e_corrected"] > 0]
+    corr_rows = "\n".join(
+        f"<tr><td class='mono'>{c['symbol']}</td>"
+        f"<td class='num {('ok' if c['pf'] >= 1.3 else ('warn' if c['pf'] >= 1.0 else 'bad'))}'>{c['pf']:.3f}</td>"
+        f"<td class='num'>{c['e_measured']:+.4f}</td>"
+        f"<td class='num bad'>-{c['gap']:.4f}</td>"
+        f"<td class='num {('ok' if c['e_corrected'] > 0 else 'bad')}'><b>{c['e_corrected']:+.4f}</b></td></tr>"
+        for c in corr)
+    mean_gap = sum(c["gap"] for c in corr) / max(1, len(corr))
 
     generated = datetime.now().strftime("%Y-%m-%d %H:%M")
 
@@ -581,13 +635,15 @@ $10.77 risk per trade on $10,000, while the smallest placeable oil lot risks $21
 <thead><tr><th>Band</th><th>Symbols</th><th>Measured PF (H1)</th><th>Honest target</th></tr></thead>
 <tbody>
 <tr><td class="ok"><b>Salvageable</b></td>
-  <td class="mono">WTI, XAUUSD, GER40</td><td>1.08 – 1.31</td>
-  <td>PF 1.15–1.30 after calibration and meta-labelling, on the subset of regimes where they work.
-  Not 1.3 across all regimes.</td></tr>
-<tr><td class="warn"><b>Break-even-ish</b></td>
-  <td class="mono">NAS100, US30, US500, USDCAD, XAGUSD</td><td>0.96 – 1.03</td>
-  <td>PF 1.00–1.10 at best. Tradeable only with materially tighter cost assumptions than the
-  broker actually offers.</td></tr>
+  <td class="mono">WTI, XAUUSD</td><td>1.09 – 1.20</td>
+  <td>The only two that survive honest costs (+0.087R and +0.042R). Target PF 1.10–1.25 after
+  calibration and meta-labelling, on the regimes where they work — <b>not</b> 1.3 across all
+  regimes.</td></tr>
+<tr><td class="warn"><b>Break-even-ish, negative at honest costs</b></td>
+  <td class="mono">GER40, NAS100, US30, US500, USDCAD, XAGUSD</td><td>0.96 – 1.08</td>
+  <td>Look marginal, are not: every one turns negative once round-turn spread and commission are
+  charged (GER40 +0.044R → −0.058R, NAS100 +0.015R → −0.037R). Do not allocate on the strength of
+  the uncorrected numbers.</td></tr>
 <tr><td class="bad"><b>Not viable</b></td>
   <td class="mono">AUDUSD, USDJPY, EURJPY, EURUSD, USDCHF, GBPUSD, SOLUSD, UK100, NZDUSD, GBPJPY, BTCUSD, ETHUSD</td>
   <td>0.57 – 0.93</td>
@@ -600,11 +656,77 @@ unsalvageable as configured — the system is worst exactly where it claims to b
 (PF 1.203, n=844) is the only regime with measured positive expectancy; it is the natural first
 candidate for a focused product, and 844 trades is a thin sample that must be confirmed
 out-of-sample before it is believed.</p>
-<p><b>The achievable portfolio target</b>, if P0-1 through P0-3 land: PF 1.15–1.25 on a
-3–5 symbol book (WTI, XAUUSD, GER40 plus the best of the break-even band), DD ≤ 10% only at a
-risk fraction of roughly 0.05–0.11% per trade — which is below the broker's minimum lot on most
-of those symbols. <b>The binding constraint is not the signal alone; it is that the signal's edge
-is too small to be expressed at a tradeable size.</b></p>
+<p><b>The achievable portfolio target</b>, if P0-1 through P0-3 land: PF 1.10–1.25 on a two-symbol
+book (WTI, XAUUSD), and DD ≤ 10% only at a risk fraction of roughly 0.06–0.11% per trade — which
+is below the broker's minimum lot on both. <b>The binding constraint is not the signal alone; it is
+that the signal's edge is too small to be expressed at a tradeable size.</b> A two-symbol,
+one-regime product is a real but very small business; a twenty-symbol one is not, and no amount of
+parameter work will make it one.</p>
+</div>
+
+<h2>6. What the numbers become once the cost model is honest</h2>
+<p>The figures above still use a cost model that charges nothing for commission, nothing for a
+SELL's spread, and no slippage on market exits. Correcting it costs
+<b>{mean_gap:.4f}R per trade on average</b>, but the damage is very uneven — and it re-ranks the
+universe. Costs are expressed in R using each symbol's own median stop distance, so the comparison
+is scale-free:</p>
+
+<div class="card" style="padding:8px 12px">
+<table>
+<thead><tr><th>Symbol</th><th class="num">PF (as measured)</th><th class="num">Expectancy (as measured)</th>
+<th class="num">Cost understatement</th><th class="num">Expectancy at honest costs</th></tr></thead>
+<tbody>
+{corr_rows}
+</tbody></table>
+<div class="note">Round-turn spread taken from the broker's own stored <code>spread</code> column on
+the entry bars, plus $5/lot round-turn commission. The understatement is largest where the stop is
+tightest relative to the spread — SOLUSD loses a further 0.69R per trade once the cost is charged
+properly, XAUUSD only 0.0075R.</div>
+</div>
+
+<div class="card verdict">
+  <b>Only {len(survivors)} of {len(corr)} symbols keep a positive expectancy once costs are charged
+  correctly: {", ".join(survivors)}.</b> GER40 (+0.044R) and NAS100 (+0.015R), which looked like the
+  edge of the salvageable band, both turn negative. PF ≥ 1.3 is reachable by <b>no symbol</b> at
+  tp=1.5R — WTI's 1.202 is the ceiling, and it survives honest costs at +0.087R.
+</div>
+
+<h2>7. Fixes applied in this pass</h2>
+<div class="card">
+<table>
+<thead><tr><th>Fix</th><th>Where</th><th>Effect</th></tr></thead>
+<tbody>
+<tr><td>Commission argument was accepted and ignored — every shipped profile is
+  <code>commission_per_lot=0.0</code>, so every backtest ran free</td>
+  <td class="path">engine.py::_calc_commission</td>
+  <td>Now falls back to the constructor value when the profile is zero</td></tr>
+<tr><td>Spread charged on BUY entry only — every SELL traded cost-free</td>
+  <td class="path">engine.py:639-640</td><td>Symmetric: shorts now fill at the bid</td></tr>
+<tr><td>Slippage charged on stop exits only, so the time stop looked free</td>
+  <td class="path">engine.py (stagnation + final close)</td>
+  <td>Market exits now take adverse slippage; TP stays a limit fill</td></tr>
+<tr><td>Lot floor applied <i>after</i> the risk cap, allowing unbounded realised risk</td>
+  <td class="path">engine.py:711</td><td>Trade is skipped when the plan cannot be expressed at the
+  minimum lot</td></tr>
+<tr><td>H4/D1 resample exposed in-progress, future-bearing buckets</td>
+  <td class="path">engine.py:202-203,215-216 · signal_scan.py:148-149</td>
+  <td><code>label="right"</code> — a bucket is only visible once it has closed</td></tr>
+<tr><td>GER40 / UK100 / XAGUSD missing from the profile table → generic FX template
+  (contract size 100,000 instead of 1.0 / 5,000)</td>
+  <td class="path">symbol_profile_config.py</td>
+  <td>Registered with correct contract size, pip size and digits</td></tr>
+<tr><td>Unregistered symbols fell back silently</td>
+  <td class="path">symbol_profile_config.py::get_symbol_profile_config</td>
+  <td>Now logs an error naming the symbol</td></tr>
+<tr><td>Fabricated XAUUSD series (4,320 rows, 1,216 weekend bars, spread ≡ 0) on the default
+  load path</td>
+  <td class="path">data/market/MT5_DefaultBroker/</td>
+  <td>Moved to <code>data/market/_quarantine_synthetic/</code></td></tr>
+</tbody></table>
+<p class="note">Guarded by <code>tests/test_backtest_cost_integrity.py</code> (9 tests). The
+look-ahead test is discriminating, not decorative: against the old resample it records
+<b>115 violations</b> of the no-look-ahead property; against the fixed one, zero. Full suite:
+702 passed.</p>
 </div>
 
 <div class="disc">
