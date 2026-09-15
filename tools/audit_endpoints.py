@@ -49,9 +49,20 @@ POST_ONLY = {
     "/api/copilot/ask",
 }
 
-# Endpoints that reach a live external provider (NSE / equity data). In a
-# sandbox without outbound access these hang rather than fail, so they are
-# reported separately instead of being mistaken for broken wiring.
+# Routes that reach a live external provider (NSE / equity data). They get a
+# short leash, because a provider stall is indefinite rather than merely slow.
+#
+# These were previously reported as "hang rather than fail" and tolerated, on
+# the theory that a sandbox without outbound access would hang on them. That was
+# wrong twice over. Outbound access works here, and the reason three of them
+# (heatmap, indices, scanner) never answered was a defect in this repo: an
+# unbounded fetch_quotes -> get_india_profile -> get_profile -> hydrate_batch
+# cycle, fixed in 2c655c6 but still running in a server process that predated
+# the commit. Tolerating the timeout meant this tool could not see the very bug
+# it exists to catch. All six answer in well under the leash now.
+#
+# So a timeout here is reported as HANG and fails the run. Use
+# --allow-provider-hang only in a genuinely air-gapped environment.
 EXTERNAL = {
     "/api/india/export_csv",
     "/api/india/heatmap",
@@ -123,6 +134,12 @@ def main() -> int:
     ap.add_argument("--base", default="http://127.0.0.1:8501")
     ap.add_argument("--start-server", action="store_true")
     ap.add_argument("--port", type=int, default=8599)
+    ap.add_argument(
+        "--allow-provider-hang",
+        action="store_true",
+        help="tolerate a timeout on a provider-backed route (air-gapped hosts "
+             "only; by default a hang is a failure)",
+    )
     args = ap.parse_args()
 
     proc = None
@@ -153,29 +170,33 @@ def main() -> int:
             q = NEEDS_PARAMS.get(path, "")
             target = f"{path}?{q}" if q else path
             method = "POST" if path in POST_ONLY else "GET"
-            # External-provider routes get a short leash: a sandbox with no
-            # outbound access will hang on them, and that is not a wiring bug.
+            # Provider-backed routes get a short leash; a stall there is
+            # indefinite, and this run should not wait on it.
             timeout = 6 if path in EXTERNAL else 20
             status, body = probe(base, target, method=method, timeout=timeout)
 
-            if path in EXTERNAL and status == -1:
-                external.append((path, body))
-                print(f"EXT   {path}  (needs a live external provider)")
-            elif status == 404:
+            if status == 404:
                 dead.append((path, status, body))
                 print(f"DEAD  {method} {path}")
                 if body:
                     print(f"        {body[:120]}")
             elif status == -1:
-                dead.append((path, status, body))
-                print(f"ERR   {method} {path}  {body[:100]}")
+                if path in EXTERNAL and args.allow_provider_hang:
+                    external.append((path, body))
+                    print(f"EXT   {path}  (provider unreachable, tolerated by flag)")
+                else:
+                    # A provider-backed route that does not answer is a finding,
+                    # not an excuse. This is the symptom that hid a live defect.
+                    dead.append((path, status, body))
+                    label = "HANG" if path in EXTERNAL else "ERR "
+                    print(f"{label}  {method} {path}  {body[:100]}")
             else:
                 ok += 1
                 print(f"  ok  {method} {path}  -> {status}")
 
         print("=" * 78)
         print(f"dispatched        : {ok}/{len(endpoints)}")
-        print(f"external-provider : {len(external)}  (not a wiring fault)")
+        print(f"external-provider : {len(external)}  (tolerated by --allow-provider-hang)")
         print(f"dead/error        : {len(dead)}")
         return 1 if dead else 0
     finally:
