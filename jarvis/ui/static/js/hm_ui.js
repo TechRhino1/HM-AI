@@ -47,6 +47,17 @@
         return node;
     }
 
+    // setAttribute queues a MutationObserver record even when the value is
+    // already what we are writing. A callback that both observes an attribute
+    // and writes it therefore re-queues itself on every pass, and because
+    // microtasks drain before the browser may paint or dispatch input, that
+    // spins the main thread forever with no error to show for it. Writing only
+    // on a real change is what makes such a callback settle: once the group
+    // matches its markup, a pass produces no records and the loop stops.
+    function setIfChanged(node, name, value) {
+        if (node.getAttribute(name) !== value) node.setAttribute(name, value);
+    }
+
     var FOCUSABLE = [
         'a[href]', 'area[href]', 'button:not([disabled])',
         'input:not([disabled]):not([type="hidden"])',
@@ -412,16 +423,29 @@
                 : 'Section tabs');
         }
 
+        // `sync` writes `aria-selected`, which the observer below is watching,
+        // so it must be idempotent or it feeds itself: every pass would queue a
+        // record for the next, and the microtask queue would never drain - a
+        // hard main-thread freeze with no error and no recovery. The guard flag
+        // covers re-entry, and setIfChanged keeps a settled group silent.
+        var syncing = false;
+
         function sync() {
-            tabs.forEach(function (t) {
-                var isActive = t.classList.contains('active') ||
-                               t.getAttribute('aria-selected') === 'true';
-                t.setAttribute('role', 'tab');
-                t.setAttribute('aria-selected', isActive ? 'true' : 'false');
-                // Roving tabindex: only the selected tab is in the tab order.
-                t.setAttribute('tabindex', isActive ? '0' : '-1');
-                if (!t.id) t.id = 'hm-tab-' + Math.random().toString(36).slice(2, 8);
-            });
+            if (syncing) return;
+            syncing = true;
+            try {
+                tabs.forEach(function (t) {
+                    var isActive = t.classList.contains('active') ||
+                                   t.getAttribute('aria-selected') === 'true';
+                    setIfChanged(t, 'role', 'tab');
+                    setIfChanged(t, 'aria-selected', isActive ? 'true' : 'false');
+                    // Roving tabindex: only the selected tab is in the tab order.
+                    setIfChanged(t, 'tabindex', isActive ? '0' : '-1');
+                    if (!t.id) t.id = 'hm-tab-' + Math.random().toString(36).slice(2, 8);
+                });
+            } finally {
+                syncing = false;
+            }
         }
 
         sync();
