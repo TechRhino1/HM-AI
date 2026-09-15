@@ -139,6 +139,16 @@ Audit tools: `tools/audit_trade_quality.py`, `audit_verdict.py`, `audit_lookahea
   `verify_dashboard_nav.js` (31), `audit_wiring.py`, `audit_endpoints.py`; tests
   `test_mode_aggregator.py`, `test_backtest_optimizer.py`, `test_regime_optimizer.py`,
   `test_ui_wiring.py`, `test_provider_recursion.py`.
+* **India endpoint latency = one hydration call, not the scan.** `analyze_india_instrument` is pure
+  maths over synthetic candles, so the whole 42-symbol scan re-runs in 0.14s once profiles are
+  cached. The only real work is a single batched `fetch_quotes()` of the universe, paid once per
+  **60s hydrator TTL** (not the 15s scan TTL — that is not the constraint). That call alone measures
+  0.32–3.56s; a fresh server serves `/api/india/heatmap` in 0.01–1.35s with a ~0.9s bump at t=65s.
+  So these routes are sub-second in normal operation. An unexplained 17.8s outlier was seen once on
+  a long-running instance and does not reproduce — treat it as an upper bound, not a cost.
+* **A spot-check taken right after another call measures the cache, not the endpoint.** The first
+  timings recorded for these routes (0.31–3.44s) were all inside the TTL window and were wrong by
+  an order of magnitude. Sample with gaps longer than the TTL or the number is fiction.
 * **`docs/MARKETS_DATA_CONTRACTS.md`** — shapes for the ten stocks/India endpoints, plus the
   timeout token (`fast` 8s / `normal` 15s / `provider` 30s / `slow` 60s, `dashboard.js:46`). Two
   traps: `/api/stocks/screener` returns `count=47` with 40 rows (**`count` is the matching total**),
