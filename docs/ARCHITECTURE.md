@@ -396,6 +396,30 @@ variance lives. The next work is **signal research** — new information at entr
 (order-flow, session, volatility regime at entry, cross-asset confirmation), not
 new transforms of the existing features. See `reports/entry_edge_verdict.md`.
 
+**Independently corroborated (2026-09-15).** Three measurements taken from a
+different direction — the optimiser's own objective rather than the attribution
+scan — reach the same verdict, and add the mechanism:
+
+* A complete sweep (3 styles × 20 symbols × 183 d, walk-forward 3 folds) returned
+  `NO FEASIBLE GEOMETRY` for every mode: −0.1236R (SWING), −0.1741R (DAY_TRADING),
+  −0.4253R (SCALP) full-window, with all three validation folds negative in each.
+* **Zeroing slippage and commission does not make any mode profitable**
+  (−0.0757 / −0.0802 / −0.1961R), and the win rates barely move (37.14 % → 37.23 %).
+  Costs amplify the loss; they do not cause it. Break-even at the seed's 1.5R
+  target is a 40.0 % win rate, and the signal delivers 37.1–37.2 %.
+* **Neither the target nor the ranking rescues it.** Sweeping `tp_r` 1.0 → 3.0
+  leaves **profit factor almost invariant** (SWING 0.878–0.903, DAY_TRADING
+  0.838–0.907, SCALP 0.678–0.706): the win-rate/loss-ratio trade-off is
+  proportional, so no target choice crosses 1.0. Sweeping the `min_score`
+  quantile to its top 1 % leaves every mode negative — though DAY_TRADING shows
+  an ordered top-tail trend (win rate 37.14 % → 38.47 % → 39.36 % across
+  q=0.9/0.97/0.99, expectancy −0.0763R → −0.0410R → −0.0235R) that stops 0.64
+  points short of break-even. That trend is one window and **not** out-of-sample;
+  it is a thread to pull, not a result.
+
+Reports: `reports/optimizer/complete_sweep_20260915_summary.md`,
+`cost_drag_20260915.md`, `score_quantile_20260915.md`.
+
 ### Regime-conditioned optimisation (`jarvis/backtesting/regime_optimizer.py`)
 
 The attribution scan above is a *pooled* statement: it says every regime is
@@ -706,7 +730,8 @@ the guard working.
 | `_static_market_values` only catches bare numeric literals | A fabricated value written as a formatted string (`"4,380.00"` built in JS) is invisible to it. The check is a strong net, not a proof | `tools/verify_ui_live.py` |
 | The India option chain's `iv_rank` is a random draw | It gates the `iv_rank < 50` branch in `options_signal_engine`, so *which* branch runs is arbitrary. Deliberately left in place, because removing the draw changes the branch rather than fixing it; the UI labels it "IV rank (modelled)" and the live verifier checks the chain declares itself modelled. It should eventually be computed from the chain's own implied vols | `jarvis/india/options_engine.py` |
 | A provider route's own timeout is not bounded | The recursion bug that made three endpoints hang is fixed, but a route that genuinely stalls still pins a `ThreadingHTTPServer` thread. `tools/verify_ui_live.py` now gives provider routes a 60s client budget and reports a hang as a named failure instead of crashing | `jarvis/api/server.py` |
-| `tools/verify_dashboard_render.js` stubs the DOM | It proves the controller issues the right drawing calls and queries only ids the template defines; it cannot prove the result *looks* right. No browser is installed in this environment, so layout, overlap and colour contrast remain unverified by machine | `tools/verify_dashboard_render.js` |
+| `tools/verify_dashboard_render.js` stubs the DOM | It proves the controller issues the right drawing calls and queries only ids the template defines; it cannot prove the result *looks* right. A real browser **is** available now (Chrome and Edge are installed; `puppeteer-core` lives in the managed node workspace) and `tools/verify_dashboard_nav.js` uses it to drive real clicks — but layout, overlap and colour contrast remain unverified by machine | `tools/verify_dashboard_render.js` |
+| `objective_value` returns `-inf` for any geometry with non-positive expectancy | Correct for *selection* — a losing geometry must never win a comparison — but it makes the coordinate descent blind *inside* the losing region: every candidate scores `-inf`, so `score > best.score` can never fire and the search reports "no improvement" for dimensions it has in fact explored. When a sweep says `NO FEASIBLE GEOMETRY` and the best geometry is the seed, that is **not** evidence the dimension is useless. Measure the dimension directly by pinning it (`reports/optimizer/score_quantile_20260915.md`); that sweep is what revealed the `tp_r` invariance | `jarvis/backtesting/optimizer.py` |
 
 ---
 
