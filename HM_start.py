@@ -144,15 +144,30 @@ def _serveo_worker(port: int = 8501, custom_subdomain: str = "hm2026"):
                 if "Forwarding HTTP traffic from" in line or f"{custom_subdomain}.serveousercontent.com" in line:
                     _TUNNEL_STATE["serveo_url"] = f"https://{custom_subdomain}.serveousercontent.com"
                     _TUNNEL_STATE["serveo_status"] = "CONNECTED"
-                    _TUNNEL_STATE["url"] = _TUNNEL_STATE["serveo_url"]
-                    _save_active_tunnel_url(_TUNNEL_STATE["serveo_url"], "serveo")
+                    # Only take the primary slot when Cloudflare is unavailable — see
+                    # _cloudflare_worker for why serveo is not dependable as the main link.
+                    if _TUNNEL_STATE.get("cloudflare_status") != "CONNECTED":
+                        _TUNNEL_STATE["url"] = _TUNNEL_STATE["serveo_url"]
+                        _save_active_tunnel_url(_TUNNEL_STATE["serveo_url"], "serveo")
+                        print(f"\n[HM_START] CUSTOM SUBDOMAIN ACTIVE (MOBILE LINK): {_TUNNEL_STATE['serveo_url']}\n", flush=True)
                     logger.info(f"Custom Subdomain Active: {_TUNNEL_STATE['serveo_url']}")
-                    print(f"\n[HM_START] 🌐 CUSTOM SUBDOMAIN ACTIVE (MOBILE LINK): {_TUNNEL_STATE['serveo_url']}\n", flush=True)
                     break
                 if "Free users are limited" in line or "failed for listen port" in line:
                     rate_limited = True
 
-            # Keep alive while process is running
+            # Keep alive while process is running. stdout MUST be drained: ssh blocks
+            # forever once the ~64KB pipe buffer fills, and a blocked ssh stops sending
+            # keepalives — so the tunnel silently dies without the process ever exiting.
+            def _drain_serveo():
+                try:
+                    for _ in proc.stdout:
+                        pass
+                except Exception:
+                    pass
+
+            threading.Thread(target=_drain_serveo, daemon=True,
+                             name="hm_serveo_stdout_drain").start()
+
             while proc.poll() is None:
                 time.sleep(2.0)
 
@@ -170,7 +185,7 @@ def _serveo_worker(port: int = 8501, custom_subdomain: str = "hm2026"):
             time.sleep(10)
 
 def _cloudflare_worker(port: int = 8501):
-    """Dedicated worker for Cloudflare Edge Tunnel as high-speed redundant edge."""
+    """Dedicated worker for Cloudflare Edge Tunnel — primary mobile link when available."""
     cloudflared_bin = find_cloudflared_binary()
     if not cloudflared_bin:
         logger.warning("cloudflared binary not found; skipping secondary edge tunnel.")
@@ -199,15 +214,21 @@ def _cloudflare_worker(port: int = 8501):
                     continue
                 if "429 Too Many Requests" in line or "1015" in line:
                     rate_limited = True
-                m = re.search(r"https://[a-zA-Z0-9-]+\.trycloudflare\.com", line)
+                    m = re.search(r"https://[a-zA-Z0-9-]+\.trycloudflare\.com", line)
                 if m:
                     url = m.group(0)
                     if "api.trycloudflare.com" in url:
                         continue
                     _TUNNEL_STATE["cloudflare_url"] = url
                     _TUNNEL_STATE["cloudflare_status"] = "CONNECTED"
-                    logger.info(f"Cloudflare Edge Tunnel Active (Backup): {url}")
-                    print(f"\n[HM_START] ⚡ CLOUDFLARE EDGE ACTIVE (SECONDARY): {url}\n", flush=True)
+                    # Cloudflare is the PRIMARY mobile link. serveo.net tears the SSH session
+                    # down on a ~12-minute cycle (measured 12m09s +/- 1s over 6 consecutive
+                    # drops), so the custom subdomain is up but 502s between reconnects.
+                    # Cloudflare's subdomain is random per restart but stays up.
+                    _TUNNEL_STATE["url"] = url
+                    _save_active_tunnel_url(url, "cloudflare")
+                    logger.info(f"Cloudflare Edge Tunnel Active (PRIMARY): {url}")
+                    print(f"\n[HM_START] MOBILE LINK (CLOUDFLARE, PRIMARY): {url}\n", flush=True)
                     break
             while proc.poll() is None:
                 line = proc.stdout.readline()
@@ -228,7 +249,11 @@ def _cloudflare_worker(port: int = 8501):
             time.sleep(5)
 
 def _start_background_tunnel(port: int = 8501):
-    """Launches Serveo (custom domain hm2026) as primary mobile link, and Cloudflare Edge in parallel."""
+    """Launches Cloudflare Edge as the primary mobile link, with Serveo (hm2026) as fallback.
+
+    Serveo keeps the stable custom subdomain but drops the SSH session every ~12 minutes,
+    so it is demoted to backup. Both run in parallel whichever connects first wins the
+    primary slot (see the promotion guards in each worker)."""
     t_serveo = threading.Thread(target=_serveo_worker, args=(port, "hm2026"), daemon=True, name="hm_tunnel_serveo")
     t_serveo.start()
 
