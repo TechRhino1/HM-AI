@@ -7,20 +7,7 @@ from typing import Dict, Any, List
 from datetime import datetime, timezone, timedelta
 import random
 
-
-def stable_seed(text: str) -> int:
-    """
-    Deterministic seed for a symbol/text, identical in every process.
-
-    Deliberately NOT ``hash()``: CPython salts ``hash()`` per process
-    (PYTHONHASHSEED), so a hash-derived seed yields a different value on every
-    interpreter start — the opposite of what a "stable" sample needs. This is
-    the single definition of that rule; callers that need a per-instrument RNG
-    should seed a local ``random.Random(stable_seed(...))`` rather than touching
-    the module-level generator, which leaks into every other caller of
-    ``random`` in the process.
-    """
-    return sum((i + 1) * ord(c) for i, c in enumerate(text)) % 100000
+from jarvis.data.determinism import stable_seed
 
 
 class IndiaNewsAnalyzer:

@@ -14,7 +14,7 @@ import numpy as np
 
 from jarvis.stocks.universe import STOCK_UNIVERSE, get_stock_profile
 from jarvis.data.market_data_provider import fetch_real_candles
-from jarvis.india.news_analyzer import stable_seed
+from jarvis.data.determinism import stable_seed
 
 
 class StockIntelligenceEngine:

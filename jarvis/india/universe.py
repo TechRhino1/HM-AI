@@ -5,6 +5,8 @@ Comprehensive repository of Indian Benchmark Indices, Sectoral Baskets, and Top 
 from typing import Dict, Any, List
 from datetime import datetime, timezone, timedelta
 
+from jarvis.data.determinism import stable_seed
+
 
 INDIA_UNIVERSE: Dict[str, Dict[str, Any]] = {
     # =========================================================================
@@ -780,15 +782,17 @@ def get_india_profile(symbol: str) -> Dict[str, Any]:
         is_index = (profile.get("sector") == "Indices" or "INDEX" in profile.get("tags", []))
         profile["is_index"] = is_index
 
-        # Deterministic Indian quarterly earnings date
-        seed_offset = (abs(hash(sym)) % 45) + 3
+        # Deterministic Indian quarterly earnings date. Seeded via `stable_seed`
+        # (not `hash()`, which is salted per process) so a symbol's reported
+        # earnings date and surveillance status do not change on every restart.
+        seed_offset = (stable_seed(sym) % 45) + 3
         earnings_dt = datetime.now(timezone.utc) + timedelta(days=seed_offset)
         profile["earnings_date"] = earnings_dt.strftime("%d-%b-%Y")
         profile["days_to_earnings"] = seed_offset
-        profile["implied_volatility"] = round(12.5 + (profile.get("beta", 1.1) * 8.5) + (abs(hash(sym)) % 6), 1)
+        profile["implied_volatility"] = round(12.5 + (profile.get("beta", 1.1) * 8.5) + (stable_seed(sym) % 6), 1)
 
         # 2024-2026 SEBI Surveillance & MWPL status
-        hash_val = abs(hash(sym))
+        hash_val = stable_seed(sym)
         profile["circuit_limit_pct"] = "NO_BAND (F&O)" if "F&O" in profile.get("tags", []) else "20%"
         profile["asm_stage"] = 1 if (hash_val % 19 == 0) else 0
         profile["gsm_stage"] = 0

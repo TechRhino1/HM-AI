@@ -11,7 +11,7 @@ from datetime import datetime, timezone, timedelta
 
 from jarvis.india.universe import get_india_profile, INDIA_UNIVERSE
 from jarvis.india.nse_rules import NSE_RULES
-from jarvis.india.news_analyzer import stable_seed
+from jarvis.data.determinism import stable_seed
 from jarvis.data.market_data_provider import fetch_real_candles
 
 

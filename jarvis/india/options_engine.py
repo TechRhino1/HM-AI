@@ -15,7 +15,7 @@ from jarvis.india.universe import get_india_profile, INDIA_UNIVERSE
 from jarvis.india.nse_rules import NSE_RULES
 from jarvis.india.greeks import GREEKS_ENGINE, norm_cdf, norm_pdf
 from jarvis.india.gamma_exposure import compute_gex, interpret_for_signal
-from jarvis.india.news_analyzer import stable_seed
+from jarvis.data.determinism import stable_seed
 
 
 class IndiaOptionsEngine:

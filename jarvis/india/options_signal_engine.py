@@ -13,7 +13,8 @@ from jarvis.india.universe import get_india_profile, INDIA_UNIVERSE, get_all_ind
 from jarvis.india.nse_rules import NSE_RULES
 from jarvis.india.greeks import GREEKS_ENGINE
 from jarvis.india.india_engine import INDIA_ENGINE
-from jarvis.india.news_analyzer import INDIA_NEWS, stable_seed
+from jarvis.india.news_analyzer import INDIA_NEWS
+from jarvis.data.determinism import stable_seed
 from jarvis.india.options_engine import INDIA_OPTIONS
 from jarvis.india.gamma_exposure import interpret_for_signal
 

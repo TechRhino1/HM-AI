@@ -31,6 +31,7 @@ except ImportError:
     YFINANCE_AVAILABLE = False
 
 from jarvis.data.tradingview_provider import TRADINGVIEW_PROVIDER
+from jarvis.data.determinism import stable_seed
 
 
 def format_market_cap(val: Optional[Union[float, int, str]], market: str = "US") -> str:
@@ -399,8 +400,10 @@ class DynamicMarketDataHydrator:
             if is_index:
                 tags.append("INDEX")
 
-        # Deterministic earnings date and implied volatility
-        hash_val = abs(hash(symbol))
+        # Deterministic earnings date and implied volatility. Seeded via
+        # `stable_seed` (not `hash()`, which is salted per process) so the
+        # reported date and IV are the same in every process.
+        hash_val = stable_seed(symbol)
         seed_offset = (hash_val % 45) + 3
         earnings_dt = datetime.now(timezone.utc) + timedelta(days=seed_offset)
         earnings_fmt = "%d-%b-%Y" if is_india else "%b %d, %Y"

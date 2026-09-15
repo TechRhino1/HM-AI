@@ -800,6 +800,9 @@ STOCK_UNIVERSE: Dict[str, Dict[str, Any]] = {
 
 from datetime import datetime, timezone, timedelta
 
+from jarvis.data.determinism import stable_seed
+
+
 def get_all_symbols() -> List[str]:
     return list(STOCK_UNIVERSE.keys())
 
@@ -830,12 +833,14 @@ def get_stock_profile(symbol: str) -> Dict[str, Any]:
             "tags": ["US_EQUITIES"]
         }).copy()
 
-        # Deterministic earnings date & days remaining
-        seed_offset = (abs(hash(sym)) % 55) + 4
+        # Deterministic earnings date & days remaining. Seeded via `stable_seed`
+        # (not `hash()`, which is salted per process) so the reported date is the
+        # same in every process.
+        seed_offset = (stable_seed(sym) % 55) + 4
         earnings_dt = datetime.now(timezone.utc) + timedelta(days=seed_offset)
         base_data["earnings_date"] = earnings_dt.strftime("%b %d, %Y")
         base_data["days_to_earnings"] = seed_offset
-        base_data["implied_volatility"] = round(24.0 + (base_data.get("beta", 1.2) * 14.0) + (abs(hash(sym)) % 10), 1)
+        base_data["implied_volatility"] = round(24.0 + (base_data.get("beta", 1.2) * 14.0) + (stable_seed(sym) % 10), 1)
         base_data["price"] = base_data.get("base_price", 100.00)
         base_data["change_val"] = 0.0
         base_data["change_pct"] = 0.0
