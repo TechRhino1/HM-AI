@@ -31,9 +31,32 @@ these rather than inventing a number:
 | `provider` | 30 000 | anything that reaches a live external feed |
 | `slow` | 60 000 | full-universe scans |
 
-Measured cold-start timings sit far inside these (worst case 3.4 s), so the
-budget is headroom, not a constraint. It exists because a provider stall is
-indefinite, not slow.
+**Bind the provider-backed routes to `provider` (30 s), not `normal` (15 s).**
+Their latency is bimodal, and the slow mode is the one that matters:
+
+| Route | Warm (cache hit) | Cold (rescan) |
+|---|---|---|
+| `/api/india/heatmap` | 0.7–2.9 s | **up to 17.8 s** |
+| `/api/india/indices` | 0.9 s | **up to 17.1 s** |
+| `/api/india/scanner` | 0.2–3.2 s | (shares the master scan) |
+| `/api/stocks/screener` | 1.8–3.2 s | — |
+
+A 15 s budget would abort the cold path, so these routes must not use `normal`.
+
+Two things are worth separating here, because only one of them is understood:
+
+* **Measured.** Warm and cold differ by an order of magnitude, and
+  `_scan_cache_ttl = 15.0` (`india_service.py:40`) is shorter than the slow
+  observations — so the cache expires before the work that refills it has
+  finished, and a rescan is paid roughly every 15 s. The fast figures above were
+  taken inside the TTL window, the slow ones just outside it; that is easy to
+  confuse when spot-checking a single request.
+* **Not explained.** The same call takes **~1.6 s in a fresh interpreter**, so
+  the rescan is not inherently 17 s, and the gap between the two has not been
+  established. Thread contention is ruled out — a `py-spy` dump taken while the
+  server was idle shows every thread idle. Treat 17.8 s as an observed upper
+  bound rather than a derived cost, and do not build a budget on the assumption
+  that it is fixed.
 
 ---
 
@@ -103,7 +126,7 @@ Cold: **0.01 s** · Consumer: **none**
 
 ### `GET /api/india/indices`
 
-Cold: **3.44 s** · Consumer: `dashboard.js:2694` (`TIMEOUT.provider`), `india.js:114`
+Warm **0.9 s** / cold **up to 17.1 s** · Consumer: `dashboard.js:2694` (`TIMEOUT.provider`), `india.js:114`
 
 The service returns a bare list; the route wraps it (`india_service.py:434`):
 
@@ -187,7 +210,7 @@ Cold: **2.07 s** · Consumer: `india_options.js:235`
 
 ### `GET /api/india/heatmap`
 
-Cold: **0.68 s** · Consumer: `india.js:789`
+Warm **0.7 s** / cold **up to 17.8 s** (full-universe rescan) · Consumer: `india.js:789`
 
 ```jsonc
 {
@@ -210,7 +233,7 @@ what it computes** — no invented `avg_cmf`, and no unflagged row.
 
 `?sector=&market=&cpr=&min_prob=&sort_by=&sort_dir=` — all optional.
 
-Cold: **0.31 s** · Consumer: `india.js:150`
+Warm **0.2–3.2 s**, shares the master scan · Consumer: `india.js:150`
 
 ```jsonc
 {
