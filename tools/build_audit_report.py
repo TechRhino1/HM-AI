@@ -253,6 +253,13 @@ def build_html() -> str:
     does not fix it (no quantile reaches break-even). The direction is simply wrong more often
     than the payoff structure can absorb.
   </p>
+  <p style="margin:0">
+    The strongest form of this result: a <b>learned</b> secondary model cannot find a profitable
+    subset either. Trained on 62k labelled trades with purged, embargoed splits, the meta-label
+    gate reaches a held-out AUC of <b>0.48</b> — no better than a coin, and selecting its top
+    decile makes the win rate worse. There is no subset of these signals that is being filtered
+    out by a threshold. There is no subset to find.
+  </p>
 </div>
 
 <div class="kpis">
@@ -546,17 +553,33 @@ score is the precondition for any threshold to do work.</p>
 </div>
 
 <div class="card">
-<h3><span class="tag p0">P0-2</span>Make the meta-label gate actually run — this is the standard fix for "no edge"</h3>
-<p><b>Change.</b> Pass <code>recent_candles</code> from both the engine and the scanner; train the
-<code>MetaLabeler</code> offline and ship the artefact; let its probability veto or size the trade.</p>
-<p><b>Mechanism.</b> Meta-labelling (López de Prado) separates <i>which direction</i> from
-<i>whether to take this bet</i>. The primary signal's 32–45% hit rate is not fatal if a secondary
-model can identify the subset worth betting on. This is the only intervention on this list that
-can raise profit factor without improving the directional call.</p>
-<p><b>Expected impact.</b> Potentially the largest single lever; genuinely unknown until measured.
-Set the threshold from a target bet frequency, not from a fixed probability.</p>
-<p><b>Acceptance.</b> Walk-forward: PF ≥ 1.3 on the accepted subset with ≥ 200 accepted trades
-per symbol, and the subset must be stable across folds (fold-to-fold PF spread < 0.3).</p>
+<h3><span class="tag p0">P0-2</span>Meta-labelling — <span class="bad">measured, and it does not work here</span></h3>
+<p>I recommended this as the largest single lever. I then ran it, and it fails. Reporting the
+measurement rather than the expectation:</p>
+<table>
+<thead><tr><th>Model</th><th class="num">Train AUC</th><th class="num">Test AUC</th><th class="num">Win rate, top decile vs base</th></tr></thead>
+<tbody>
+<tr><td>Window features (the shipped 14)</td><td class="num">0.746</td><td class="num bad">0.481</td>
+  <td class="num bad">0.341 vs 0.359</td></tr>
+<tr><td>+ primary-model outputs (score, regime, trend, ATR%, confluence)</td>
+  <td class="num">0.783</td><td class="num bad">0.479</td><td class="num bad">0.335 vs 0.359</td></tr>
+</tbody></table>
+<p>62k labelled samples, purged and embargoed forward splits, 20 symbols. Training AUC of 0.75–0.78
+against a test AUC <i>below</i> 0.5 is textbook overfitting, and selecting the top decile by
+predicted probability makes the win rate <b>worse</b>, not better. I swept the labelling horizon
+(5/10/20/40 bars) on the shipped model too: test AUC 0.527 / 0.507 / 0.508 / 0.507. No horizon
+rescues it.</p>
+<p><b>Why, and what it means.</b> Meta-labelling only adds value when the secondary model answers a
+different question with information the primary model did not already use. These 14 features are
+price and volume statistics of the same 30-bar window the primary signal reads — and adding the
+primary model's own outputs made the overfitting worse, not better. <b>The gate is therefore left
+inert on purpose</b>; that is now an evidence-based decision recorded in
+<code>meta_labeler.py::_load</code>, not an oversight.</p>
+<p><b>What a viable version requires.</b> Information the primary model does not have: cross-asset
+or cross-timeframe context, order-flow/imbalance, session and calendar state, volatility term
+structure. Do not spend effort training harder on these features — spend it on new inputs, and
+require out-of-sample AUC &gt; 0.55 on a purged split before the gate is allowed to veto
+anything.</p>
 </div>
 
 <div class="card">
