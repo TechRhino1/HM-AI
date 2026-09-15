@@ -32,31 +32,60 @@ these rather than inventing a number:
 | `slow` | 60 000 | full-universe scans |
 
 **Bind the provider-backed routes to `provider` (30 s), not `normal` (15 s).**
-Their latency is bimodal, and the slow mode is the one that matters:
 
-| Route | Warm (cache hit) | Cold (rescan) |
+Measured on a freshly started server:
+
+| Route | Typical | Periodic bump |
 |---|---|---|
-| `/api/india/heatmap` | 0.7–2.9 s | **up to 17.8 s** |
-| `/api/india/indices` | 0.9 s | **up to 17.1 s** |
-| `/api/india/scanner` | 0.2–3.2 s | (shares the master scan) |
+| `/api/india/heatmap` | **0.01–1.35 s** | ~0.9 s every 60 s |
+| `/api/india/indices` | 0.9 s | — |
+| `/api/india/scanner` | 0.2–3.2 s | shares the master scan |
 | `/api/stocks/screener` | 1.8–3.2 s | — |
 
-A 15 s budget would abort the cold path, so these routes must not use `normal`.
+These are comfortably fast. The reason for the 30 s budget is not the typical
+case but the outlier below.
 
-Two things are worth separating here, because only one of them is understood:
+### Where the time actually goes
 
-* **Measured.** Warm and cold differ by an order of magnitude, and
-  `_scan_cache_ttl = 15.0` (`india_service.py:40`) is shorter than the slow
-  observations — so the cache expires before the work that refills it has
-  finished, and a rescan is paid roughly every 15 s. The fast figures above were
-  taken inside the TTL window, the slow ones just outside it; that is easy to
-  confuse when spot-checking a single request.
-* **Not explained.** The same call takes **~1.6 s in a fresh interpreter**, so
-  the rescan is not inherently 17 s, and the gap between the two has not been
-  established. Thread contention is ruled out — a `py-spy` dump taken while the
-  server was idle shows every thread idle. Treat 17.8 s as an observed upper
-  bound rather than a derived cost, and do not build a budget on the assumption
-  that it is fixed.
+The whole India scan is **free except for one call**. Instrumenting it shows the
+42-symbol universe is hydrated in a single batched `fetch_quotes()`, and that
+call is the entire cost:
+
+```
+call 1:  3.53s   fetch_quotes: 1 call,  3.39s    <- the batched hydration
+call 2:  0.14s   fetch_quotes: 0 calls, 0.00s    <- everything cached
+call 3:  0.14s   fetch_quotes: 0 calls, 0.00s
+```
+
+So the latency is that one provider round-trip, paid once per **60 s** (the
+hydrator's cache TTL). Measured on its own, with the provider cache cleared
+before each sample, it costs **0.32–3.56 s** — the first call paying TLS and DNS
+setup, the rest about 0.4 s.
+
+`_scan_cache_ttl` is 15 s (`india_service.py:40`) and the rescan is far cheaper
+than that, so the scan cache is not the constraint; the hydrator's 60 s TTL is
+what sets the rhythm.
+
+### One outlier, left open
+
+The long-running server was observed at **up to 17.8 s** for heatmap and 17.1 s
+for indices, on three consecutive samples. That figure is real but it does not
+reproduce, and the honest position is that it is unexplained:
+
+* not an endpoint cost — a fresh server answers in 0.01–1.35 s
+* not the rescan — the rescan is 0.14 s, and the provider call is 0.32–3.56 s
+* not thread contention — a `py-spy` dump while idle shows all four threads idle
+* not startup warm-up — a fresh server polled from boot shows no slow stretch
+
+It was only ever seen in the instance that had been up for a while, and that
+instance later settled back to 2.6–2.9 s. Treat 17.8 s as an observed upper
+bound and size the budget to absorb it; do not treat it as a fixed cost, and do
+not assume it is gone.
+
+**The measurement trap this section exists to record:** a spot-check taken right
+after another call measures the *cache*, not the endpoint. The first figures
+written here (0.31–3.44 s) were all inside the TTL window. Sample with gaps
+longer than the TTL, or the number is fiction.
 
 ---
 
@@ -126,7 +155,7 @@ Cold: **0.01 s** · Consumer: **none**
 
 ### `GET /api/india/indices`
 
-Warm **0.9 s** / cold **up to 17.1 s** · Consumer: `dashboard.js:2694` (`TIMEOUT.provider`), `india.js:114`
+Typical **0.9 s** · Consumer: `dashboard.js:2694` (`TIMEOUT.provider`), `india.js:114`
 
 The service returns a bare list; the route wraps it (`india_service.py:434`):
 
@@ -210,7 +239,7 @@ Cold: **2.07 s** · Consumer: `india_options.js:235`
 
 ### `GET /api/india/heatmap`
 
-Warm **0.7 s** / cold **up to 17.8 s** (full-universe rescan) · Consumer: `india.js:789`
+Typical **0.01–1.35 s**, with a ~0.9 s bump every 60 s · Consumer: `india.js:789`
 
 ```jsonc
 {
