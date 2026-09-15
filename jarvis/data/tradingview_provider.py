@@ -560,20 +560,38 @@ class TradingViewDataProvider:
                     base_p = 155.00 if clean_s == "USDJPY" else 168.00
                     name = f"{clean_s[:3]}/{clean_s[3:]} Forex"
                 else:
-                    try:
-                        from jarvis.india.universe import get_india_profile
-                        prof = get_india_profile(clean_s)
-                        base_p = float(prof.get("base_price", 1000.0))
-                        name = prof.get("name", f"{clean_s} Ltd.")
-                    except Exception:
-                        try:
-                            from jarvis.stocks.universe import get_stock_profile
-                            prof = get_stock_profile(clean_s)
-                            base_p = float(prof.get("base_price", 150.0))
-                            name = prof.get("name", f"{clean_s} Inc.")
-                        except Exception:
-                            base_p = 150.0
-                            name = f"{clean_s} Inc."
+                    # A STATIC REFERENCE PRICE, read straight from the universe
+                    # tables.
+                    #
+                    # This must NOT go through get_india_profile() or
+                    # get_stock_profile(). Those hydrate, and hydration resolves
+                    # quotes by calling back into this very function for the same
+                    # symbol, so the two formed an unbounded cycle:
+                    #
+                    #   fetch_quotes -> get_india_profile -> get_profile
+                    #     -> hydrate_batch -> fetch_quotes -> ...
+                    #
+                    # Nothing raised, so the except clauses below never ran; the
+                    # stack simply grew while each level opened another blocking
+                    # connection. Measured: 233 re-entries for a single NIFTY
+                    # lookup, and the price that came back was the last-resort
+                    # 150.0 rather than NIFTY's own reference. Any /api/india/*
+                    # route reaching a symbol this branch handles — every index,
+                    # since NIFTY and BANKNIFTY match no earlier pattern — never
+                    # returned.
+                    #
+                    # All this branch needs is a baseline number, which is
+                    # exactly what the static tables hold.
+                    from jarvis.india.universe import INDIA_UNIVERSE
+                    from jarvis.stocks.universe import STOCK_UNIVERSE
+
+                    prof = INDIA_UNIVERSE.get(clean_s) or STOCK_UNIVERSE.get(clean_s)
+                    if prof:
+                        base_p = float(prof.get("base_price", 150.0))
+                        name = prof.get("name", f"{clean_s} Inc.")
+                    else:
+                        base_p = 150.0
+                        name = f"{clean_s} Inc."
                 quotes[clean_s] = {
                     "price": base_p,
                     "open": round(base_p * 0.995, 4),

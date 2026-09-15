@@ -86,3 +86,6 @@ reports/_prio_frame_*.parquet
 # Runtime output of the geometry optimiser (/api/backtest/run). Each job writes
 # one JSON per symbol; regenerable by re-running the job, so not committed.
 reports/optimizer/
+
+# Local scratch space for one-off probes and diagnostics.
+.scratch/
