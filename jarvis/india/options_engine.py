@@ -15,6 +15,7 @@ from jarvis.india.universe import get_india_profile, INDIA_UNIVERSE
 from jarvis.india.nse_rules import NSE_RULES
 from jarvis.india.greeks import GREEKS_ENGINE, norm_cdf, norm_pdf
 from jarvis.india.gamma_exposure import compute_gex, interpret_for_signal
+from jarvis.india.news_analyzer import stable_seed
 
 
 class IndiaOptionsEngine:
@@ -57,6 +58,10 @@ class IndiaOptionsEngine:
             base_price = float(live_chain.get("spot_price") or base_price)
             strikes_list = sorted({float(r["strike"]) for r in live_chain["chain"]})
             atm_strike = min(strikes_list, key=lambda s: abs(s - base_price))
+            # Local RNG for the modelled fields below (e.g. iv_rank). Seeding the
+            # module-level generator here used to leak into every other caller of
+            # `random`; `stable_seed` keeps it identical across processes.
+            rng = random.Random(stable_seed(sym + str(atm_strike)))
             for r in live_chain["chain"]:
                 ce = r["call"]
                 pe = r["put"]
@@ -119,8 +124,11 @@ class IndiaOptionsEngine:
                 strikes_list.append(round(curr_k, 2))
                 curr_k += strike_step
 
-            seed_val = int(hash(sym + str(atm_strike)) % 100000)
-            random.seed(seed_val)
+            # Local RNG for the modelled skew/OI/volume fields below. Previously
+            # this seeded the module-level generator from `hash()`, which both
+            # leaked into every other caller of `random` and produced a different
+            # chain on every process start.
+            rng = random.Random(stable_seed(sym + str(atm_strike)))
 
             rows = []
             for strike in strikes_list:
@@ -137,19 +145,19 @@ class IndiaOptionsEngine:
 
                 # Volatility Skew Smile
                 moneyness = math.log(strike / max(0.01, base_price))
-                iv_ce = round((iv_base + (moneyness * moneyness * 0.15) + random.uniform(-0.008, 0.008)) * 100.0, 1)
-                iv_pe = round((iv_base + (moneyness * moneyness * 0.18) + random.uniform(-0.008, 0.008)) * 100.0, 1)
+                iv_ce = round((iv_base + (moneyness * moneyness * 0.15) + rng.uniform(-0.008, 0.008)) * 100.0, 1)
+                iv_pe = round((iv_base + (moneyness * moneyness * 0.18) + rng.uniform(-0.008, 0.008)) * 100.0, 1)
 
                 # Open Interest distribution
                 dist_factor = math.exp(-0.5 * ((strike - base_price) / max(1.0, base_price * 0.04)) ** 2)
-                ce_oi = int((dist_factor * 140000 + random.uniform(5000, 45000)) * (lot_size / 25.0))
-                pe_oi = int((dist_factor * 155000 + random.uniform(5000, 45000)) * (lot_size / 25.0))
+                ce_oi = int((dist_factor * 140000 + rng.uniform(5000, 45000)) * (lot_size / 25.0))
+                pe_oi = int((dist_factor * 155000 + rng.uniform(5000, 45000)) * (lot_size / 25.0))
 
-                ce_oi_chg = round(random.uniform(-18.5, 34.0), 1)
-                pe_oi_chg = round(random.uniform(-14.0, 42.0), 1)
+                ce_oi_chg = round(rng.uniform(-18.5, 34.0), 1)
+                pe_oi_chg = round(rng.uniform(-14.0, 42.0), 1)
 
-                ce_vol = int(ce_oi * random.uniform(0.4, 2.2))
-                pe_vol = int(pe_oi * random.uniform(0.4, 2.2))
+                ce_vol = int(ce_oi * rng.uniform(0.4, 2.2))
+                pe_vol = int(pe_oi * rng.uniform(0.4, 2.2))
 
                 ce_price = greeks["call"]["price"]
                 pe_price = greeks["put"]["price"]
@@ -163,7 +171,7 @@ class IndiaOptionsEngine:
                     "is_atm": is_atm,
                     "call": {
                         "ltp": ce_price,
-                        "change_pct": round(random.uniform(-25.0, 45.0), 1),
+                        "change_pct": round(rng.uniform(-25.0, 45.0), 1),
                         "oi": ce_oi,
                         "oi_change_pct": ce_oi_chg,
                         "volume": ce_vol,
@@ -179,7 +187,7 @@ class IndiaOptionsEngine:
                     },
                     "put": {
                         "ltp": pe_price,
-                        "change_pct": round(random.uniform(-25.0, 45.0), 1),
+                        "change_pct": round(rng.uniform(-25.0, 45.0), 1),
                         "oi": pe_oi,
                         "oi_change_pct": pe_oi_chg,
                         "volume": pe_vol,
@@ -228,7 +236,7 @@ class IndiaOptionsEngine:
                 "lower_breakeven": straddle_lower_breakeven,
                 "expected_move_pct": round((straddle_premium / max(0.01, base_price)) * 100.0, 2)
             },
-            "iv_rank": round(random.uniform(25.0, 75.0), 1),
+            "iv_rank": round(rng.uniform(25.0, 75.0), 1),
             "chain": rows,
             "gex": compute_gex(
                 {"chain": rows, "data_source": data_source},

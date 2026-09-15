@@ -14,6 +14,7 @@ import numpy as np
 
 from jarvis.stocks.universe import STOCK_UNIVERSE, get_stock_profile
 from jarvis.data.market_data_provider import fetch_real_candles
+from jarvis.india.news_analyzer import stable_seed
 
 
 class StockIntelligenceEngine:
@@ -76,9 +77,11 @@ class StockIntelligenceEngine:
         vol_scalar = (0.015 * beta) * math.sqrt(bar_step_sec / 86400.0)
         vol_scalar = max(0.003, min(vol_scalar, 0.045))
 
-        # Pseudo-deterministic random seed based on symbol & current hour to maintain continuity
+        # Pseudo-deterministic random seed based on symbol & current hour to maintain continuity.
+        # Seeded via `stable_seed` (not `hash()`, which is salted per process) so the series is
+        # the same in every process for a given symbol/hour.
         current_epoch_hour = int(time.time() // 3600)
-        seed_val = hash(f"{symbol}_{timeframe}_{current_epoch_hour}") % (2**32)
+        seed_val = stable_seed(f"{symbol}_{timeframe}_{current_epoch_hour}")
         rng = np.random.RandomState(seed_val)
 
         # Generate geometric brownian walk with slight upward drift and realistic regime waves
@@ -91,7 +94,7 @@ class StockIntelligenceEngine:
         # Squeeze compression: tight range
         returns[squeeze_start:breakout_start] *= 0.35
         # Breakout expansion: directional surge
-        trend_direction = 1.0 if (hash(symbol) % 3 != 0) else -0.7
+        trend_direction = 1.0 if (stable_seed(symbol) % 3 != 0) else -0.7
         returns[breakout_start:] = np.abs(returns[breakout_start:]) * 1.8 * trend_direction
 
         cum_ret = np.cumsum(returns)

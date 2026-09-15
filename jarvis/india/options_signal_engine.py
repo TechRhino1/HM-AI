@@ -13,7 +13,7 @@ from jarvis.india.universe import get_india_profile, INDIA_UNIVERSE, get_all_ind
 from jarvis.india.nse_rules import NSE_RULES
 from jarvis.india.greeks import GREEKS_ENGINE
 from jarvis.india.india_engine import INDIA_ENGINE
-from jarvis.india.news_analyzer import INDIA_NEWS
+from jarvis.india.news_analyzer import INDIA_NEWS, stable_seed
 from jarvis.india.options_engine import INDIA_OPTIONS
 from jarvis.india.gamma_exposure import interpret_for_signal
 
@@ -87,11 +87,14 @@ class OptionSignalEngine:
         rvol = analysis["rvol"]
         is_squeeze = analysis["is_squeeze"]
 
-        # Synthetic PCR for symbol
-        seed = int(hash(symbol) % 10000)
-        random.seed(seed)
-        pcr = round(random.uniform(0.75, 1.45), 2)
-        iv_rank = round(random.uniform(22.0, 68.0), 1)
+        # Modelled PCR / IV rank for the symbol. Drawn from a local RNG seeded
+        # deterministically from the symbol, so the same instrument yields the
+        # same value in every process. This used to seed the module-level
+        # generator from `hash()`, which both leaked into every other caller of
+        # `random` in the process and changed on every interpreter start.
+        rng = random.Random(stable_seed(symbol))
+        pcr = round(rng.uniform(0.75, 1.45), 2)
+        iv_rank = round(rng.uniform(22.0, 68.0), 1)
 
         # 1. Determine Trade Direction (CALL vs PUT)
         # Bullish conditions: Price > VWAP, Price > CPR TCP, Camarilla >= H3, PCR > 1.05
@@ -246,6 +249,13 @@ class OptionSignalEngine:
             },
             "pcr": pcr,
             "iv_rank": iv_rank,
+            # PROVENANCE: `pcr` and `iv_rank` above are modelled from the
+            # symbol-seeded RNG, and `pcr` participates in the direction decision
+            # earlier in this method. The vocabulary matches the rest of the
+            # India engines (india_engine `_last_data_source`: live /
+            # calibrated_feed / synthetic_fallback; options_engine: live /
+            # synthetic) rather than inventing a new one.
+            "data_source": analysis.get("data_source", "synthetic_fallback"),
             "gex": {
                 "applicable": bool(gex_interp.get("gex_applicable")),
                 "regime": gex_interp.get("regime"),

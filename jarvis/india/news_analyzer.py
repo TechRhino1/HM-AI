@@ -8,6 +8,21 @@ from datetime import datetime, timezone, timedelta
 import random
 
 
+def stable_seed(text: str) -> int:
+    """
+    Deterministic seed for a symbol/text, identical in every process.
+
+    Deliberately NOT ``hash()``: CPython salts ``hash()`` per process
+    (PYTHONHASHSEED), so a hash-derived seed yields a different value on every
+    interpreter start — the opposite of what a "stable" sample needs. This is
+    the single definition of that rule; callers that need a per-instrument RNG
+    should seed a local ``random.Random(stable_seed(...))`` rather than touching
+    the module-level generator, which leaks into every other caller of
+    ``random`` in the process.
+    """
+    return sum((i + 1) * ord(c) for i, c in enumerate(text)) % 100000
+
+
 class IndiaNewsAnalyzer:
     """
     Indian Market News, Corporate Actions, and FII/DII Institutional Flow Tracker.
@@ -15,11 +30,23 @@ class IndiaNewsAnalyzer:
 
     def get_fii_dii_flows(self) -> Dict[str, Any]:
         """
-        Returns real-time proxy of FII & DII net buying/selling in Cash and Index Derivatives.
+        Returns FII & DII cash and index-derivative positioning.
+
+        PROVENANCE: no live FII/DII feed is connected to this deployment. The
+        figures below are fixed sample values, not today's provisional cash
+        numbers. `data_source` states that explicitly and every consumer is
+        expected to render it: an institutional-flow panel that presents
+        invented numbers as today's prints misleads a trader about where the
+        money actually went, which is worse than showing no panel at all.
         """
         now = datetime.now(timezone.utc)
         return {
             "date": now.strftime("%d-%b-%Y"),
+            "data_source": "sample",
+            "data_source_note": (
+                "Fixed sample values. No live FII/DII feed is connected; these "
+                "are not today's cash-market flows."
+            ),
             "fii_cash_net_cr": 1845.50,
             "dii_cash_net_cr": 2410.20,
             "total_net_institutional_cr": 4255.70,
@@ -44,10 +71,16 @@ class IndiaNewsAnalyzer:
             (f"Management of {sym} affirms strong guidance with order book exceeding ₹45,000 Cr", "BULLISH", 0.85, "1 day ago", "CNBC-TV18")
         ]
 
-        if sym in ["RELIANCE", "TCS", "HDFCBANK", "INFY", "TATAMOTORS", "TMPV", "ZOMATO"]:
-            random.seed(int(hash(sym) % 1000))
-        
-        selected = random.sample(headline_templates, min(4, len(headline_templates)))
+        # A local RNG seeded from the symbol, so the same instrument yields the
+        # same sample across runs. The previous form seeded the module-level
+        # generator, which leaked into every other caller of `random` in the
+        # process — including the options engine's IV rank, making that value
+        # depend on which symbol happened to be queried last. `hash()` is also
+        # randomised per process, so the "stable" seed was not stable; see
+        # `stable_seed`.
+        seed = stable_seed(sym)
+        rng = random.Random(seed)
+        selected = rng.sample(headline_templates, min(4, len(headline_templates)))
 
         news_items = []
         for h, sent, score, time_ago, src in selected:
@@ -57,7 +90,10 @@ class IndiaNewsAnalyzer:
                 "sentiment_score": score,
                 "time_ago": time_ago,
                 "source": src,
-                "summary": f"Institutional analysts view the development as a major medium-term catalyst strengthening price discovery on NSE."
+                "summary": f"Institutional analysts view the development as a major medium-term catalyst strengthening price discovery on NSE.",
+                # PROVENANCE: these are generated from templates above, not read
+                # from a news wire. The UI must label them as sample copy.
+                "data_source": "sample"
             })
 
         return news_items

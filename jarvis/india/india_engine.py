@@ -11,6 +11,7 @@ from datetime import datetime, timezone, timedelta
 
 from jarvis.india.universe import get_india_profile, INDIA_UNIVERSE
 from jarvis.india.nse_rules import NSE_RULES
+from jarvis.india.news_analyzer import stable_seed
 from jarvis.data.market_data_provider import fetch_real_candles
 
 
@@ -58,8 +59,10 @@ class IndiaTechnicalEngine:
             "1MO": 2592000,
         }.get(timeframe.upper(), 86400)
 
-        seed_val = int(hash(symbol) % 100000)
-        rng = np.random.RandomState(seed_val)
+        # Seeded from the symbol via `stable_seed` (not `hash()`, which is salted
+        # per process) so one instrument yields the same synthetic series in
+        # every process.
+        rng = np.random.RandomState(stable_seed(symbol))
 
         # Generate price walk anchored to live_price as the latest close
         vol_scalar = volatility / math.sqrt(252 * (86400 / max(step_seconds, 60)))
@@ -70,7 +73,7 @@ class IndiaTechnicalEngine:
         squeeze_start = int(num_bars * 0.65)
         breakout_start = int(num_bars * 0.88)
         returns[squeeze_start:breakout_start] *= 0.35
-        trend_direction = 1.0 if (hash(symbol) % 3 != 0) else -0.7
+        trend_direction = 1.0 if (stable_seed(symbol) % 3 != 0) else -0.7
         returns[breakout_start:] = np.abs(returns[breakout_start:]) * 1.8 * trend_direction
 
         cum_ret = np.cumsum(returns)
@@ -354,7 +357,9 @@ class IndiaTechnicalEngine:
         # 10-Day Monte Carlo Simulations (1,000 paths)
         mc_days = 10
         iv_daily = float(profile.get("implied_volatility", 18.0)) / (100.0 * math.sqrt(252.0))
-        seed_mc = int(abs(hash(f"mc_{symbol}_{int(current_price * 100)}"))) % (2**32)
+        # Seeded via `stable_seed` for the same reason as the candle series above:
+        # a `hash()` seed makes the forecast differ on every process start.
+        seed_mc = stable_seed(f"mc_{symbol}_{int(current_price * 100)}")
         rng_mc = np.random.RandomState(seed_mc)
         shocks = rng_mc.normal(loc=0.0004, scale=iv_daily, size=(1000, mc_days))
         paths = current_price * np.exp(np.sum(shocks, axis=1))
