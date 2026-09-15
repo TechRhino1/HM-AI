@@ -310,6 +310,10 @@
     state.view = view;
     document.body.setAttribute('data-view', view);
 
+    // Switching views dismisses any open menu. A panel left hanging over the new
+    // view reads as part of it.
+    closeDropdown(false);
+
     Array.prototype.forEach.call(document.querySelectorAll('[data-view-btn]'), function (btn) {
       btn.setAttribute('aria-selected', String(btn.getAttribute('data-view-btn') === view));
     });
@@ -357,6 +361,7 @@
       [eq, pf, mg, rk].forEach(function (el) {
         if (el) { el.textContent = '—'; el.setAttribute('data-state', 'empty'); }
       });
+      renderAccountDetails(null);
       return;
     }
 
@@ -376,6 +381,131 @@
     if (rk) rk.className = 'tt-metric__value ' + (ml > 0 && ml < 200 ? 'tt-down' : 'tt-flat');
 
     [eq, pf, mg, rk].forEach(function (el) { if (el) el.setAttribute('data-state', 'ready'); });
+
+    renderAccountDetails(acc);
+  }
+
+  /* The identity behind those figures. The login is the broker account number
+     and the only field that says WHICH account the strip is showing, so it sits
+     on the strip and the rest of the snapshot hangs off it.
+
+     Every value is copied from the telemetry payload as sent. A field the
+     broker did not report reads "—" rather than being defaulted to a
+     plausible-looking number: an absent leverage and a real 1:1 are different
+     facts, and the panel must not conflate them. */
+  function renderAccountDetails(acc) {
+    var id = $('acc-id');
+    var login = acc && acc.login != null ? String(acc.login) : '—';
+
+    setText(id, login);
+    if (id) id.setAttribute('data-state', acc && acc.login != null ? 'ready' : 'empty');
+
+    setText($('acc-d-login'), login);
+    setText($('acc-d-name'), acc ? (acc.name || '—') : '—');
+    setText($('acc-d-server'), acc ? (acc.server || '—') : '—');
+    setText($('acc-d-company'), acc ? (acc.company || '—') : '—');
+    setText($('acc-d-sync'), acc ? (acc.last_sync_time || '—') : '—');
+
+    if (!acc) {
+      ['acc-d-balance', 'acc-d-equity', 'acc-d-free', 'acc-d-level',
+       'acc-d-leverage', 'acc-d-trade'].forEach(function (k) {
+        var el = $(k);
+        if (el) { el.textContent = '—'; el.removeAttribute('data-state'); }
+      });
+      return;
+    }
+
+    var cur = acc.currency || '';
+    var money = function (v) {
+      return v == null ? '—' : num(v, 2) + (cur ? ' ' + cur : '');
+    };
+
+    setText($('acc-d-balance'), money(acc.balance));
+    setText($('acc-d-equity'), money(acc.equity));
+    setText($('acc-d-free'), money(acc.free_margin));
+
+    var ml = Number(acc.margin_level || 0);
+    var level = $('acc-d-level');
+    setText(level, ml > 0 ? num(ml, 1) + '%' : 'flat');
+    if (level) {
+      // Below 200% is the level a margin call becomes likely, so it earns the
+      // warning colour. Zero is not a low margin level - it means no exposure.
+      if (ml > 0 && ml < 200) level.setAttribute('data-state', 'warn');
+      else level.removeAttribute('data-state');
+    }
+
+    setText($('acc-d-leverage'), acc.leverage ? '1:' + acc.leverage : '—');
+
+    // trade_allowed is tri-state: true, false, or absent. Absent must not be
+    // rendered as "blocked" - that would invent a restriction the broker never
+    // stated - so it gets its own dash.
+    var trade = $('acc-d-trade');
+    if (trade) {
+      if (acc.trade_allowed === true) {
+        trade.textContent = 'allowed';
+        trade.setAttribute('data-state', 'ok');
+      } else if (acc.trade_allowed === false) {
+        trade.textContent = 'blocked';
+        trade.setAttribute('data-state', 'warn');
+      } else {
+        trade.textContent = '—';
+        trade.removeAttribute('data-state');
+      }
+    }
+  }
+
+  /* ── Dropdowns ────────────────────────────────────────────────────────────
+     One delegated controller for every [data-dropdown] on the page.
+
+     Deliberately NOT a MutationObserver. An observer whose callback writes the
+     attribute it watches re-queues itself on every pass, and because microtasks
+     drain before the browser may paint or dispatch input, that blocks the main
+     thread permanently with no error raised - which is exactly how the tab ARIA
+     sync in hm_ui.js used to freeze the page on the first nav click. A click is
+     a discrete event, so there is nothing here to loop over.
+
+     The open panel is tracked in a variable rather than read back out of the
+     DOM, so a panel left open by some future renderer cannot wedge the state. */
+  var openDropdown = null;
+
+  function setDropdown(trigger, open) {
+    var panel = document.getElementById(trigger.getAttribute('aria-controls'));
+    if (!panel) return;
+    trigger.setAttribute('aria-expanded', open ? 'true' : 'false');
+    if (open) panel.removeAttribute('hidden');
+    else panel.setAttribute('hidden', '');
+  }
+
+  function closeDropdown(focusTrigger) {
+    if (!openDropdown) return;
+    var trigger = openDropdown;
+    openDropdown = null;
+    setDropdown(trigger, false);
+    if (focusTrigger && typeof trigger.focus === 'function') trigger.focus();
+  }
+
+  function wireDropdowns() {
+    document.addEventListener('click', function (ev) {
+      var target = ev.target;
+      if (!target || typeof target.closest !== 'function') return;
+
+      var trigger = target.closest('[data-dropdown-trigger]');
+      if (trigger) {
+        ev.preventDefault();
+        var willOpen = openDropdown !== trigger;
+        closeDropdown(false);
+        if (willOpen) { setDropdown(trigger, true); openDropdown = trigger; }
+        return;
+      }
+
+      // A click inside an open panel is real use - usually a link. Only a click
+      // somewhere else dismisses it.
+      if (openDropdown && !target.closest('[data-dropdown-panel]')) closeDropdown(false);
+    });
+
+    document.addEventListener('keydown', function (ev) {
+      if (ev.key === 'Escape' && openDropdown) closeDropdown(true);
+    });
   }
 
   /* ── Watchlist ────────────────────────────────────────────────────────── */
@@ -3466,6 +3596,8 @@
 
   /* ── Boot ─────────────────────────────────────────────────────────────── */
   function bind() {
+    wireDropdowns();
+
     Array.prototype.forEach.call(document.querySelectorAll('[data-view-btn]'), function (btn) {
       btn.addEventListener('click', function () { setView(btn.getAttribute('data-view-btn')); });
     });

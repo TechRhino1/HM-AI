@@ -1,5 +1,5 @@
 /* ===========================================================================
-   Live navigation check for the JARVIS dashboard (tools/verify_dashboard_nav.js)
+   Live interaction check for the JARVIS dashboard (tools/verify_dashboard_nav.js)
 
    WHY THIS EXISTS
    ---------------
@@ -14,10 +14,15 @@
    drained: no exception, no console error, no recovery. Nothing that inspects
    source text or fetches a URL can see that. Only a real browser can.
 
-   So this drives a real headless Chrome: it clicks every view tab and asserts
-   (a) the main thread still answers within a deadline and (b) the view actually
-   switched. It also asserts the ARIA observer still WORKS, so the fix cannot be
-   quietly reduced to deleting the feature.
+   WHAT IT CHECKS
+   --------------
+   1. an idle page stays responsive - the control that rules out a poll loop;
+   2. every view tab clicks through, the main thread keeps answering, and the
+      view actually switched;
+   3. the ARIA observer still mirrors a .active class toggle, so the freeze
+      cannot be "fixed" by deleting the feature that caused it;
+   4. the account id is readable on the strip and its panel is populated;
+   5. the Indian and global market links are offered and reachable on screen.
 
    Run: node tools/verify_dashboard_nav.js
    Needs the server up:  python -m jarvis.ui.server   (127.0.0.1:8501)
@@ -231,6 +236,170 @@ async function serverIsUp() {
     ok('the active tab is the only one in the tab order', aria.value.tabindex === '0',
        'tabindex=' + aria.value.tabindex);
     ok('inactive tabs are marked not-selected', aria.value.othersFalse === true);
+  }
+
+  /* ---- 4. Account identity: on the strip, full details one click away -----
+     The strip shows equity / P&L / margin / risk but never said WHICH account
+     those belong to. The login now sits on the strip with the rest of the
+     snapshot behind it, so this checks both halves: the id is readable without
+     interacting, and the panel it opens is populated rather than placeholder. */
+  console.log('\naccount identity');
+  const acct = await deadline(
+    page.evaluate(() => {
+      const t = document.getElementById('acc-id-trigger');
+      const panel = document.getElementById('acc-details');
+      if (!t || !panel) return { missing: 'trigger or panel absent from the template' };
+      return {
+        triggerText: (t.textContent || '').trim(),
+        expanded: t.getAttribute('aria-expanded'),
+        panelHidden: panel.hasAttribute('hidden'),
+      };
+    }),
+    5000,
+    'account'
+  );
+
+  if (!acct.ok || acct.value.missing) {
+    ok('the account id is reachable', false, acct.ok ? acct.value.missing : acct.error);
+  } else {
+    ok('the account id is shown on the strip', /^\d+$/.test(acct.value.triggerText),
+       'trigger reads ' + JSON.stringify(acct.value.triggerText));
+    ok('the details panel starts closed',
+       acct.value.panelHidden === true && acct.value.expanded === 'false');
+
+    await deadline(page.click('#acc-id-trigger'), 8000, 'click-account');
+    await sleep(300);
+
+    const opened = await deadline(
+      page.evaluate(() => {
+        const panel = document.getElementById('acc-details');
+        const rows = {};
+        Array.prototype.forEach.call(panel.querySelectorAll('dt'), (dt) => {
+          const dd = dt.nextElementSibling;
+          if (dd) rows[dt.textContent.trim()] = (dd.textContent || '').trim();
+        });
+        return {
+          hidden: panel.hasAttribute('hidden'),
+          visible: panel.getBoundingClientRect().height > 0,
+          expanded: document.getElementById('acc-id-trigger').getAttribute('aria-expanded'),
+          rows: rows,
+        };
+      }),
+      5000,
+      'account-open'
+    );
+
+    ok('clicking the id opens the panel',
+       opened.ok && opened.value.hidden === false && opened.value.visible === true &&
+       opened.value.expanded === 'true',
+       opened.ok ? JSON.stringify(opened.value) : opened.error);
+
+    if (opened.ok) {
+      const EXPECTED = ['Login', 'Name', 'Server', 'Company', 'Balance', 'Equity',
+                        'Free margin', 'Margin level', 'Leverage', 'Trading', 'Last sync'];
+      const rows = opened.value.rows;
+      const missingRows = EXPECTED.filter((k) => !(k in rows));
+      ok('the panel lists every account field', missingRows.length === 0,
+         'missing: ' + missingRows.join(', '));
+
+      ok('the panel login matches the strip', rows.Login === acct.value.triggerText,
+         'panel=' + JSON.stringify(rows.Login) + ' strip=' + JSON.stringify(acct.value.triggerText));
+
+      // A panel of dashes would pass every structural check above while telling
+      // the trader nothing, so the values themselves are asserted.
+      const blank = EXPECTED.filter((k) => rows[k] === '—');
+      ok('every field carries a value, not a placeholder', blank.length === 0,
+         'still dashes: ' + blank.join(', ') + ' (is the broker reporting?)');
+    }
+
+    await deadline(page.mouse.click(5, 700), 8000, 'click-away');
+    await sleep(300);
+    const closed = await deadline(
+      page.evaluate(() => document.getElementById('acc-details').hasAttribute('hidden')),
+      5000, 'account-close'
+    );
+    ok('clicking away closes the panel', closed.ok && closed.value === true,
+       closed.ok ? String(closed.value) : closed.error);
+
+    await deadline(page.click('#acc-id-trigger'), 8000, 'click-account-again');
+    await sleep(200);
+    await page.keyboard.press('Escape');
+    await sleep(300);
+    const escaped = await deadline(
+      page.evaluate(() => document.getElementById('acc-details').hasAttribute('hidden')),
+      5000, 'account-escape'
+    );
+    ok('Escape closes the panel', escaped.ok && escaped.value === true,
+       escaped.ok ? String(escaped.value) : escaped.error);
+  }
+
+  /* ---- 5. Market links: the Indian and global pages must be reachable -----
+     The dashboard was the only page without a route to the market sections; the
+     other four carry a .nav-links-wrapper row. The rail has no space for a row,
+     so the same four destinations live in a dropdown here. Both the hrefs and
+     the fact that the panel is not clipped off-screen are checked. */
+  console.log('\nmarket links');
+  const markets = await deadline(
+    page.evaluate(() => {
+      const t = document.getElementById('markets-trigger');
+      const panel = document.getElementById('markets-menu');
+      if (!t || !panel) return { missing: 'trigger or panel absent from the template' };
+      return {
+        hidden: panel.hasAttribute('hidden'),
+        expanded: t.getAttribute('aria-expanded'),
+        hrefs: Array.prototype.map.call(panel.querySelectorAll('a[href]'),
+                                       (a) => a.getAttribute('href')),
+      };
+    }),
+    5000,
+    'markets'
+  );
+
+  if (!markets.ok || markets.value.missing) {
+    ok('the market links are reachable', false, markets.ok ? markets.value.missing : markets.error);
+  } else {
+    const WANTED = ['/', '/stocks', '/india', '/options'];
+    const absent = WANTED.filter((h) => markets.value.hrefs.indexOf(h) === -1);
+    ok('the market links start closed', markets.value.hidden === true);
+    ok('the Indian market link is offered', markets.value.hrefs.indexOf('/india') !== -1,
+       'hrefs: ' + markets.value.hrefs.join(' '));
+    ok('the global (US) market link is offered', markets.value.hrefs.indexOf('/stocks') !== -1,
+       'hrefs: ' + markets.value.hrefs.join(' '));
+    ok('all four destinations are offered, matching the other pages', absent.length === 0,
+       'absent: ' + absent.join(', '));
+
+    await deadline(page.click('#markets-trigger'), 8000, 'click-markets');
+    await sleep(300);
+
+    const box = await deadline(
+      page.evaluate(() => {
+        const panel = document.getElementById('markets-menu');
+        const r = panel.getBoundingClientRect();
+        return {
+          hidden: panel.hasAttribute('hidden'),
+          expanded: document.getElementById('markets-trigger').getAttribute('aria-expanded'),
+          top: Math.round(r.top), left: Math.round(r.left),
+          right: Math.round(r.right), bottom: Math.round(r.bottom),
+          vw: window.innerWidth, vh: window.innerHeight,
+        };
+      }),
+      5000,
+      'markets-open'
+    );
+
+    ok('clicking Markets opens the links',
+       box.ok && box.value.hidden === false && box.value.expanded === 'true',
+       box.ok ? JSON.stringify(box.value) : box.error);
+
+    // The rail is sticky with a stacking context; a panel that opens behind it or
+    // past the viewport edge is present but unreachable.
+    ok('the open panel sits fully on screen',
+       box.ok && box.value.left >= 0 && box.value.right <= box.value.vw &&
+       box.value.top >= 0 && box.value.bottom <= box.value.vh,
+       box.ok ? JSON.stringify(box.value) : box.error);
+
+    await page.keyboard.press('Escape');
+    await sleep(200);
   }
 
   ok('no uncaught page errors', pageErrors.length === 0, pageErrors.join(' | '));

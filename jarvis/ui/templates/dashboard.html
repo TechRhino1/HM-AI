@@ -54,6 +54,27 @@
             aria-selected="false" aria-controls="view-backtest">Backtest</button>
   </nav>
 
+  <!-- Cross-page navigation. The four market pages carry these as a visible
+       .nav-links-wrapper row; the rail has no room for one, so the terminal
+       exposes the same destinations in a dropdown instead. The hrefs and labels
+       are copied from stocks.html / india.html verbatim, so markActiveNav() in
+       hm_ui.js marks the current page the same way from either entry point. -->
+  <div class="tt-dropdown" data-dropdown>
+    <button type="button" class="tt-nav-trigger" id="markets-trigger"
+            data-dropdown-trigger aria-haspopup="true" aria-expanded="false"
+            aria-controls="markets-menu">
+      <span>Markets</span>
+      <span class="tt-caret" aria-hidden="true"></span>
+    </button>
+    <nav class="tt-dropdown__panel tt-dropdown__panel--left" id="markets-menu"
+         data-dropdown-panel hidden aria-label="Market sections">
+      <a href="/" class="market-nav-item"><span>⚡ Forex / Crypto</span></a>
+      <a href="/stocks" class="market-nav-item"><span>🇺🇸 US Stocks</span></a>
+      <a href="/india" class="market-nav-item"><span>🇮🇳 India Stocks</span></a>
+      <a href="/options" class="market-nav-item"><span>📊 India Options (F&amp;O)</span></a>
+    </nav>
+  </div>
+
   <span class="tt-rail__spacer"></span>
 
   <!-- Account strip: every figure comes from /api/telemetry_state. -->
@@ -77,6 +98,39 @@
       <span class="tt-metric__label">Risk</span>
       <span class="tt-metric__value" id="acc-risk"
             data-state="loading" style="font-size:var(--hm-text-sm)">—</span>
+    </div>
+
+    <!-- Account identity. The login is the broker account number, and it is the
+         one field that says WHICH account the figures beside it belong to, so it
+         sits on the strip with the rest of the snapshot one click away. Every
+         value is written by dashboard.js from /api/telemetry_state - none is
+         hard-coded here. -->
+    <div class="tt-metric tt-metric--account tt-dropdown" data-dropdown
+         style="padding:0 var(--hm-space-3)">
+      <span class="tt-metric__label">Account</span>
+      <button type="button" class="tt-account-id" id="acc-id-trigger"
+              data-dropdown-trigger aria-haspopup="true" aria-expanded="false"
+              aria-controls="acc-details" title="Account details">
+        <span class="tt-num" id="acc-id" data-state="loading">—</span>
+        <span class="tt-caret" aria-hidden="true"></span>
+      </button>
+      <div class="tt-dropdown__panel tt-dropdown__panel--right" id="acc-details"
+           data-dropdown-panel hidden role="group" aria-label="Account details">
+        <p class="tt-dropdown__title">Account</p>
+        <dl class="tt-kv">
+          <dt>Login</dt><dd class="tt-num" id="acc-d-login">—</dd>
+          <dt>Name</dt><dd id="acc-d-name">—</dd>
+          <dt>Server</dt><dd id="acc-d-server">—</dd>
+          <dt>Company</dt><dd id="acc-d-company">—</dd>
+          <dt>Balance</dt><dd class="tt-num" id="acc-d-balance">—</dd>
+          <dt>Equity</dt><dd class="tt-num" id="acc-d-equity">—</dd>
+          <dt>Free margin</dt><dd class="tt-num" id="acc-d-free">—</dd>
+          <dt>Margin level</dt><dd class="tt-num" id="acc-d-level">—</dd>
+          <dt>Leverage</dt><dd class="tt-num" id="acc-d-leverage">—</dd>
+          <dt>Trading</dt><dd id="acc-d-trade">—</dd>
+          <dt>Last sync</dt><dd class="tt-num" id="acc-d-sync">—</dd>
+        </dl>
+      </div>
     </div>
   </div>
 

@@ -435,6 +435,126 @@
   color: var(--hm-text-dim);
 }
 
+/* ── Dropdowns ────────────────────────────────────────────────────────────
+   One component serves both the account details and the cross-page market
+   links. The panel is absolutely positioned inside a `position: relative`
+   wrapper, so it escapes the rail's flex row without needing a portal.
+
+   `[hidden]` is honoured explicitly. The UA rule for it is weak, so any
+   `display` declared on the panel would silently beat it and leave the panel
+   stuck open - the same class of mistake as the self-watching observer. */
+.tt-dropdown { position: relative; }
+
+.tt-caret {
+  width: 0; height: 0;
+  border-left: 3px solid transparent;
+  border-right: 3px solid transparent;
+  border-top: 4px solid currentColor;
+  opacity: 0.65;
+  transition: transform var(--hm-dur-fast) var(--hm-ease);
+}
+[data-dropdown-trigger][aria-expanded="true"] .tt-caret { transform: rotate(180deg); }
+
+.tt-dropdown__panel {
+  position: absolute;
+  top: calc(100% + var(--hm-space-2));
+  min-width: 15rem;
+  padding: var(--hm-space-2);
+  background: var(--hm-bg-overlay);
+  border: 1px solid var(--hm-border-subtle);
+  border-radius: var(--hm-radius);
+  box-shadow: var(--hm-shadow-lg);
+  z-index: var(--hm-z-drawer);
+}
+.tt-dropdown__panel[hidden] { display: none; }
+.tt-dropdown__panel--right { right: 0; }
+.tt-dropdown__panel--left { left: 0; }
+
+.tt-dropdown__title {
+  margin: 0 0 var(--hm-space-2);
+  padding: 0 var(--hm-space-2);
+  font-size: var(--hm-text-2xs);
+  text-transform: uppercase;
+  letter-spacing: var(--hm-tracking-caps);
+  color: var(--hm-text-dim);
+}
+
+/* Key/value rows. `auto 1fr` puts every value on one left edge so the column
+   can be read straight down, which is the point of showing them together. */
+.tt-kv {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 3px var(--hm-space-4);
+  margin: 0;
+  padding: 0 var(--hm-space-2);
+  font-size: var(--hm-text-xs);
+}
+.tt-kv dt {
+  color: var(--hm-text-dim);
+  white-space: nowrap;
+}
+.tt-kv dd {
+  margin: 0;
+  color: var(--hm-text-primary);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.tt-kv dd[data-state="warn"] { color: var(--hm-warn); }
+.tt-kv dd[data-state="ok"] { color: var(--hm-bull); }
+
+/* The account tile is a metric like its neighbours, but its value is a button,
+   so it opts out of the column stretch the metric applies to its children. */
+.tt-metric--account { align-items: flex-start; }
+.tt-account-id {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--hm-space-2);
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--hm-text-primary);
+  font-family: var(--tt-num-font);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--hm-text-sm);
+  font-weight: var(--hm-weight-semibold);
+  letter-spacing: var(--tt-num-tracking);
+  cursor: pointer;
+  border-bottom: 1px dashed var(--hm-border-subtle);
+}
+.tt-account-id:hover { color: var(--hm-accent); border-bottom-color: var(--hm-accent); }
+.tt-account-id:focus-visible { outline: none; box-shadow: var(--hm-shadow-focus); border-radius: var(--hm-radius-sm); }
+.tt-account-id[data-state="empty"] { color: var(--hm-text-dim); }
+
+/* Rail trigger for the market links. Deliberately the same shape as a tab, so
+   it reads as navigation rather than as one more status chip. */
+.tt-nav-trigger {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--hm-space-1);
+  min-height: 34px;
+  padding: var(--hm-space-2) var(--hm-space-3);
+  border: 1px solid var(--hm-border-subtle);
+  border-radius: var(--hm-radius);
+  background: var(--hm-bg-raised);
+  color: var(--hm-text-secondary);
+  font-family: var(--hm-font-sans);
+  font-size: var(--hm-text-xs);
+  font-weight: var(--hm-weight-semibold);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background var(--hm-dur-fast) var(--hm-ease),
+              color var(--hm-dur-fast) var(--hm-ease),
+              border-color var(--hm-dur-fast) var(--hm-ease);
+}
+.tt-nav-trigger:hover {
+  background: var(--hm-bg-hover);
+  color: var(--hm-text-primary);
+  border-color: var(--hm-accent);
+}
+.tt-nav-trigger:focus-visible { outline: none; box-shadow: var(--hm-shadow-focus); }
+
 /* ── Gauge (confidence / risk) ──────────────────────────────────────────── */
 .tt-gauge { display: flex; align-items: center; gap: var(--hm-space-3); }
 .tt-gauge__bar {
