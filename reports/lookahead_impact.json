@@ -1,0 +1,81 @@
+{
+  "tf": "H1",
+  "geometry": "tp1.5_beoff_pcoffx0.5_troff@2_mb200_s0",
+  "symbols": {
+    "EURUSD": {
+      "leaky": {
+        "n": 818,
+        "win_rate": 0.3019559902200489,
+        "profit_factor": 0.6288070858815255,
+        "expectancy_r": -0.2551541797066015,
+        "net_r": -208.71611899999996,
+        "max_dd_r": 218.45305099999996,
+        "scan_seconds": 14.8,
+        "candidates": 818
+      },
+      "fixed": {
+        "n": 818,
+        "win_rate": 0.3019559902200489,
+        "profit_factor": 0.6288070858815255,
+        "expectancy_r": -0.2551541797066015,
+        "net_r": -208.71611899999996,
+        "max_dd_r": 218.45305099999996,
+        "scan_seconds": 15.9,
+        "candidates": 818
+      },
+      "expectancy_delta_r": 0.0,
+      "win_rate_delta_pp": 0.0,
+      "pf_delta": 0.0
+    },
+    "XAUUSD": {
+      "leaky": {
+        "n": 905,
+        "win_rate": 0.38232044198895027,
+        "profit_factor": 0.9201543353982339,
+        "expectancy_r": -0.04893796243093923,
+        "net_r": -44.288856,
+        "max_dd_r": 127.0,
+        "scan_seconds": 15.8,
+        "candidates": 905
+      },
+      "fixed": {
+        "n": 905,
+        "win_rate": 0.38232044198895027,
+        "profit_factor": 0.9201543353982339,
+        "expectancy_r": -0.04893796243093923,
+        "net_r": -44.288856,
+        "max_dd_r": 127.0,
+        "scan_seconds": 14.4,
+        "candidates": 905
+      },
+      "expectancy_delta_r": 0.0,
+      "win_rate_delta_pp": 0.0,
+      "pf_delta": 0.0
+    },
+    "GBPUSD": {
+      "leaky": {
+        "n": 815,
+        "win_rate": 0.3226993865030675,
+        "profit_factor": 0.7246581219711445,
+        "expectancy_r": -0.1818334846625767,
+        "net_r": -148.19428999999997,
+        "max_dd_r": 171.728141,
+        "scan_seconds": 14.3,
+        "candidates": 815
+      },
+      "fixed": {
+        "n": 815,
+        "win_rate": 0.3226993865030675,
+        "profit_factor": 0.7246581219711445,
+        "expectancy_r": -0.1818334846625767,
+        "net_r": -148.19428999999997,
+        "max_dd_r": 171.728141,
+        "scan_seconds": 13.7,
+        "candidates": 815
+      },
+      "expectancy_delta_r": 0.0,
+      "win_rate_delta_pp": 0.0,
+      "pf_delta": 0.0
+    }
+  }
+}

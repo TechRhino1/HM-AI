@@ -99,6 +99,41 @@ Backticks in a `git commit -m` argument get eaten by bash — use plain text.
   plus `tests/test_mode_aggregator.py`, `test_backtest_optimizer.py`, `test_regime_optimizer.py`,
   `test_ui_wiring.py`, `test_provider_recursion.py`.
 
+## The entry signal has no measured edge (audited 2026-09-15, 183d real bars, 20 symbols)
+
+Profit factor **0.568–1.202** on SWING/H1; **1 of 40** symbol×target combos reaches 1.3. Win rate
+28.2–44.8% where a 1.5R target needs 40.0%. At the realised ~1% risk/trade, drawdown is 62–100%;
+holding DD to 10% needs **0.012–0.108% risk per trade**, below the broker minimum lot on most
+symbols. Ruled out by measurement: costs (free execution still loses), exit geometry (best == seed
+in every mode), target width (PF is invariant to tp), candidate ranking (no score quantile reaches
+break-even). What remains is the directional call.
+
+* Directional call = a 7-branch if/elif on `choch`/`bos`/`trend_score`
+  (`decision_engine.py:105-122`). The gate "probability" is `0.45 ×` a hand-typed 6-bin table that
+  *inflates* inputs (`confidence.py:13-20`) `+ 0.55 ×` an **untrained** prior clipped to [0.35,0.88]
+  (`online_ml_predictor.py:564-573,417`). 55% of the gate weight has never seen a trade.
+* The only learned component, the meta-label gate, is inert in every backtest — `recent_candles` is
+  never passed and the model loads `None` offline (`decision_engine.py:1033-1045`).
+* `signal_engine.py` (`REGIME_WEIGHTS`) is **dead code** — never imported anywhere. Don't cite it.
+* Sizing realises 1.5–2.6× nominal risk: the quarter-Kelly term pins at its 1.50 cap, so it is a
+  constant (`position_sizing.py:56`). `engine.py:711` applies the lot floor *after* the risk cap.
+* Best regime is **COMPRESSION** (PF 1.203); worst is **TREND_BULL** (0.872). A "TREND_FOLLOWING"
+  strategy that loses most in trends is a mean-reversion signal with the wrong label.
+* Backtest costs: commission $0 (the `commission_per_lot=5.0` argument is dead), spread on BUY
+  entry only, slippage on stop exits only, no swap, flat 2.0 pips misprices BTCUSD by 750×.
+* Two registries both fall back silently to a generic FX spec; `GER40`/`UK100` are then sized
+  **100,000×** wrong. `XAGUSD` ×20 wrong.
+* **The H4/D1 resample look-ahead is real but measured ~zero impact** (Δ 0.0000R over 1,200 bars on
+  3 symbols) — `market_structure.py:29` needs 5 confirming bars per pivot, so the contaminated
+  newest bucket never forms one. Fix as a landmine; don't expect P&L to move.
+* **The M5/SCALP candidate set is truncated to bar 60–14,398 of 37,440.** Replaying it gives
+  PF 1.09–1.74 — the opposite sign to the live optimiser. Every SCALP number is unsafe.
+* A fabricated XAUUSD series is still on the default load path (`acquisition.py:73` →
+  `"MT5_DefaultBroker"`); 4,320 rows, 1,216 weekend bars, spread ≡ 0.
+
+Audit tools: `tools/audit_trade_quality.py`, `tools/audit_verdict.py`, `tools/audit_lookahead.py`,
+`tools/build_audit_report.py` (→ `reports/trade_plan_audit.html`).
+
 ## Testing traps (each of these has produced a test that passes against the bug)
 
 * A test that only looks for a raised exception misses unbounded recursion when an intermediate
