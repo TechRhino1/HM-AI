@@ -302,5 +302,66 @@ class TestDynamicLevelsAndRefactoring(unittest.TestCase):
         self.assertGreater(levels_sell["risk_dist"], 0.0)
 
 
+    def test_sl_price_and_risk_dist_describe_the_same_level(self):
+        """risk_dist must equal the distance implied by sl_price.
+
+        Regression: risk_dist was floored (`max(pip_size * 5, ...)`) while sl_price
+        kept the tight structural stop. The sizer prices risk off sl_price but the
+        post-fill re-anchor (execution_engine.py:95) uses sl_distance, so a 0.7-pip
+        stop got sized at 0.69 lots and then re-anchored to 5 pips — ~7x the
+        intended risk on an already-filled position.
+        """
+        # A near-zero ATR drives a sub-pip structural stop, which is exactly the
+        # regime where the old floor silently diverged from sl_price.
+        def _ctx(bias):
+            return MarketContext(
+                symbol="EURUSD",
+                timestamp=datetime.now(timezone.utc),
+                current_price=1.0850,
+                bid=1.0849,
+                ask=1.0851,
+                structure=StructureContext(bias=bias),
+                liquidity=LiquidityContext(),
+                volatility=VolatilityContext(atr=0.00005, current_spread_pips=1.0, state="NORMAL"),
+                momentum=MomentumContext(trend_score=60.0 if bias == "BULLISH" else -60.0, adx=30.0),
+                session=SessionContext(is_prime_session=True),
+            )
+
+        regime = RegimeOutput(primary_regime=MarketRegime.TREND_BULL, probabilities={}, confidence=0.85)
+
+        for bias in ("BUY", "SELL"):
+            levels = self.levels_engine.calculate_levels(_ctx(bias), regime, tentative_bias=bias)
+            self.assertAlmostEqual(
+                levels["risk_dist"],
+                abs(levels["entry_price"] - levels["sl_price"]),
+                places=6,
+                msg=f"{bias}: risk_dist diverges from sl_price — sizing and the post-fill re-anchor disagree",
+            )
+            self.assertGreater(levels["risk_dist"], 0.0)
+
+    def test_stop_floor_is_derived_from_spread_not_hardcoded(self):
+        """The stop floor scales with the live spread rather than a fixed pip count."""
+        def _ctx(spread_pips):
+            return MarketContext(
+                symbol="EURUSD",
+                timestamp=datetime.now(timezone.utc),
+                current_price=1.0850,
+                bid=1.0850 - (spread_pips * 0.0001) / 2,
+                ask=1.0850 + (spread_pips * 0.0001) / 2,
+                structure=StructureContext(bias="BULLISH"),
+                liquidity=LiquidityContext(),
+                volatility=VolatilityContext(atr=0.00005, current_spread_pips=spread_pips, state="NORMAL"),
+                momentum=MomentumContext(trend_score=60.0, adx=30.0),
+                session=SessionContext(is_prime_session=True),
+            )
+
+        regime = RegimeOutput(primary_regime=MarketRegime.TREND_BULL, probabilities={}, confidence=0.85)
+        narrow = self.levels_engine.calculate_levels(_ctx(1.0), regime, tentative_bias="BUY")
+        wide = self.levels_engine.calculate_levels(_ctx(4.0), regime, tentative_bias="BUY")
+
+        self.assertGreater(wide["risk_dist"], narrow["risk_dist"],
+                           "a wider spread must widen the minimum stop")
+
+
 if __name__ == "__main__":
     unittest.main()

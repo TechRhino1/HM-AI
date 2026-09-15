@@ -104,6 +104,13 @@ class ExecutionEngine:
                     f"⚓ RE-ANCHORING SL/TP to real fill: Ticket=#{ticket} Fill={fill_price} "
                     f"(planned {decision.entry_price}) -> Real SL={actual_sl:.4f}, TP={actual_tp:.4f} (R:R={actual_rr})"
                 )
+                planned_dist = abs(decision.entry_price - decision.stop_loss)
+                if planned_dist > 0 and sl_dist > planned_dist * 1.25:
+                    logger.warning(
+                        f"Post-fill stop on #{ticket} is {sl_dist / planned_dist:.1f}x the planned "
+                        f"distance — the broker minimum stop distance likely widened it. Lots are "
+                        f"not recomputed after fill, so realised risk exceeds the sizer's target."
+                    )
                 mod_res = self.mt5_client.modify_position(ticket=ticket, sl=actual_sl, tp=actual_tp)
                 if mod_res and mod_res.get("status") == "MODIFIED":
                     res["sl"] = actual_sl

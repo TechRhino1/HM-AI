@@ -206,8 +206,18 @@ class DynamicRiskAndLevelsEngine:
 
                 sl_dist = min(max_swing_sl, max(min_floor_sl, struct_sl_dist))
 
+            # The stop-distance floor must be applied to the *distance*, not just to
+            # risk_dist. Previously risk_dist was lifted to the floor while sl_price kept
+            # the tight structural stop, so the sizer priced risk off a 0.7-pip stop while
+            # the post-fill re-anchor (execution_engine.py:95) re-applied the floored
+            # 5-pip sl_distance to an already-filled 0.69-lot position — a ~7x blow-up of
+            # realised risk. sl_price and risk_dist must describe the same level.
+            # Floor is derived from current conditions: >=3x spread so the spread stays a
+            # small share of the risk budget, and >=10% ATR so we never stop inside noise.
+            min_sl_dist = max(3.0 * spread_dist, 0.10 * atr)
+            sl_dist = max(sl_dist, min_sl_dist)
             sl_price = round(entry_price - sl_dist, digits)
-            risk_dist = max(spec.pip_size * 5, abs(entry_price - sl_price))
+            risk_dist = abs(sl_price - entry_price)
 
             # 3. Liquidity-Anchored Dynamic Take Profit
             opposing_targets: List[float] = []
@@ -332,8 +342,12 @@ class DynamicRiskAndLevelsEngine:
 
                 sl_dist = min(max_swing_sl + spread_dist, max(min_floor_sl, struct_sl_dist))
 
+            # See the BUY branch above: the floor must widen the distance, not just
+            # risk_dist, or sizing and the post-fill re-anchor disagree by ~7x.
+            min_sl_dist = max(3.0 * spread_dist, 0.10 * atr)
+            sl_dist = max(sl_dist, min_sl_dist)
             sl_price = round(entry_price + sl_dist, digits)
-            risk_dist = max(spec.pip_size * 5, abs(sl_price - entry_price))
+            risk_dist = abs(sl_price - entry_price)
 
             # 3. Liquidity-Anchored Dynamic Take Profit
             opposing_targets = []
