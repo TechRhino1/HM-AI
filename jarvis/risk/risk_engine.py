@@ -351,6 +351,22 @@ class RiskEngine:
                     "heat_zone": heat_res.zone
                 }
 
+            # Volatility ratio: realised ATR vs the symbol's own typical ATR — the same
+            # normalisation dynamic_levels uses. Drives volatility-targeted sizing in
+            # PositionSizer. No caller passed this before, so it silently defaulted to
+            # 1.0 and the volatility adjustment never did anything.
+            atr_ratio = 1.0
+            if context is not None:
+                try:
+                    _vol = getattr(context, "volatility", None)
+                    _atr = float(getattr(_vol, "atr", 0.0) or 0.0)
+                    _price = float(getattr(context, "current_price", 0.0) or 0.0)
+                    _typ = float(getattr(resolve_symbol(decision.symbol), "typical_atr_pct", 0.0) or 0.0)
+                    if _atr > 0 and _price > 0 and _typ > 0:
+                        atr_ratio = min(3.0, max(0.33, (_atr / _price) * 100.0 / _typ))
+                except Exception:
+                    atr_ratio = 1.0
+
             # 9. Dynamic Position Sizing with Heat & 2nd Position Scaling
             sample_size = getattr(decision, "pattern_sample_size", 0)
             lots = self.position_sizer.calculate_lot_size(
@@ -364,7 +380,8 @@ class RiskEngine:
                 pattern_sample_size=sample_size,
                 portfolio_heat_multiplier=heat_res.risk_multiplier,
                 is_second_trade=is_second_trade,
-                target_rr=decision.risk_reward_ratio
+                target_rr=decision.risk_reward_ratio,
+                atr_ratio=atr_ratio
             )
 
             if lots <= 0.0:

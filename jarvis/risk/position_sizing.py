@@ -32,9 +32,17 @@ class PositionSizer:
         if is_high_vol:
             risk_pct *= 0.92  # Was 0.85 — high-vol assets penalized too harshly
 
-        if atr_ratio > 1.5:
-            risk_pct *= 0.85  # Was 0.70 — 30% cut killed profitability in expansion regimes
-            
+        # --- Volatility targeting (P1-1) -------------------------------------
+        # Scale the risk budget so a trade contributes roughly constant volatility
+        # whatever the regime. atr_ratio is realised ATR / the symbol's own typical
+        # ATR, so it is already normalised per symbol — no fixed pip or percentage
+        # thresholds. Replaces the old step rule (`atr_ratio > 1.5 -> *0.85`), which
+        # was flat everywhere except above an arbitrary cut-off and in practice never
+        # fired at all: no caller passed atr_ratio, so it defaulted to 1.0.
+        atr_ratio_safe = min(3.0, max(0.33, float(atr_ratio))) if atr_ratio and atr_ratio > 0 else 1.0
+        vol_scalar = max(0.40, min(1.25, 1.0 / atr_ratio_safe))
+        risk_pct *= vol_scalar
+
         if current_drawdown_pct > 5.0:
             # Graduated drawdown penalty instead of binary 50% at >5%
             if current_drawdown_pct > 8.0:
@@ -49,11 +57,15 @@ class PositionSizer:
         # Portfolio heat scaling (e.g. 1.0x Normal, 0.75x Moderate, 0.50x High)
         risk_pct *= max(0.25, min(1.0, portfolio_heat_multiplier))
 
-        # Conviction scaling & Dynamic Fractional Kelly Criterion Edge Calculation (E4)
+        # Fractional Kelly is computed for reporting but deliberately NOT used for
+        # sizing. Quarter-Kelly saturates at its 1.50 cap for every plausible (p, R) —
+        # (0.60, 2.0) already yields 10.0 — so it contributed a constant +0.75pp
+        # rather than information, and `model_confidence` is not yet calibrated
+        # (see P0-1). Sizing off an uncalibrated probability is not defensible.
         p = max(0.20, min(0.95, model_confidence))
         R = max(1.20, min(5.0, float(target_rr)))  # Regime-adaptive payoff ratio
         full_kelly = (p * R - (1.0 - p)) / R
-        quarter_kelly_pct = max(0.15, min(1.50, (full_kelly / 4.0) * 100.0)) if full_kelly > 0 else 0.15
+        kelly_pct = (full_kelly / 4.0) * 100.0 if full_kelly > 0 else 0.0
 
         conviction_factor = max(0.70, min(1.35, (model_confidence / 0.60)))
 
@@ -71,9 +83,15 @@ class PositionSizer:
 
         combined_scaler = max(0.65, min(1.40, conviction_factor * evidence_factor))
 
-        # Blended risk percentage using baseline risk and Fractional Kelly mathematical edge
-        blended_risk_pct = (0.50 * risk_pct) + (0.50 * quarter_kelly_pct)
-        effective_risk_pct = max(0.10, min(1.50, blended_risk_pct * invalidation_risk_coefficient * combined_scaler))
+        effective_risk_pct = max(
+            0.10,
+            min(1.50, risk_pct * invalidation_risk_coefficient * combined_scaler),
+        )
+        logger.debug(
+            f"[{sym_name}] risk target {effective_risk_pct:.2f}% "
+            f"(base {risk_pct:.2f}% after vol_scalar {vol_scalar:.2f}; "
+            f"kelly {kelly_pct:.2f}% computed but unused)"
+        )
         risk_amount_dollars = account_balance * (effective_risk_pct / 100.0)
 
         from jarvis.data.symbol_registry import get_dollar_risk_per_price_unit

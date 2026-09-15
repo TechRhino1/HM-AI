@@ -232,10 +232,15 @@ class TestRegressionFixes(unittest.TestCase):
         base_size = PositionSizer.calculate_lot_size(
             account_balance=20000.0, entry_price=2400.0, sl_price=2390.0, risk_pct=1.0, symbol_info=sym_base
         )
-        # Gold should receive 0.92x reduction: 0.24 lots vs 0.25 lots (was 0.23 with 0.85)
+        # Gold keeps the 0.92x high-vol reduction: 0.92% of $20,000 = $184, over
+        # $1,000 of risk per lot = 0.184 -> 0.18 lots. Previously 0.24, because the
+        # risk budget carried a constant +0.75pp from the saturated fractional-Kelly
+        # term; that term is no longer used for sizing (P1-1).
         self.assertLess(gold_size, base_size)
-        self.assertEqual(gold_size, 0.24)
-        self.assertEqual(base_size, 0.25)
+        self.assertEqual(gold_size, 0.18)
+        # Baseline is now 0.20 (1.0% of $20,000 = $200 / $1,000 per lot); it was 0.25
+        # only because of the same constant Kelly uplift.
+        self.assertEqual(base_size, 0.20)
 
     def test_b1_devil_advocate_spread_typical_spec(self):
         """B1-BUG: Verify devil_advocate handles is_excessive_spread without AttributeError."""

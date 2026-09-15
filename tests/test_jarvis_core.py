@@ -77,8 +77,13 @@ class TestJarvisCore(unittest.TestCase):
 
     def test_position_sizer_floor(self):
         """§8: Verify position sizing does not crash and calculates lots correctly at floor."""
+        # $1,500 rather than $1,000: removing the constant fractional-Kelly uplift
+        # (P1-1) shrank the risk target from ~0.98% to 0.46%, and the acceptance
+        # ceiling is 2x target. At $1,000 the 0.01 minimum lot now forces 1.00%
+        # against a 0.92% ceiling, so it is correctly *refused* rather than floored.
+        # $1,500 keeps this on the floor path the test is named for.
         lots = PositionSizer.calculate_lot_size(
-            account_balance=1000.0,
+            account_balance=1500.0,
             entry_price=4350.0,
             sl_price=4340.0,
             risk_pct=0.5,
