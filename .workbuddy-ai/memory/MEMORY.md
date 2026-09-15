@@ -8,6 +8,12 @@ Curated facts that outlive a session. Day-to-day detail lives in `YYYY-MM-DD.md`
 * Use the Bash tool, not PowerShell (returns no output; `tasklist`/`Get-Process` blocked).
 * Python is managed 3.13.12 on PATH. No project venv; `pytest`, `pandas`, `numpy` import directly.
 * `rm -rf X && cmd` silently swallows the command's stdout — run the `rm` separately.
+* **`py-spy` is installed** in the managed venv
+  (`…/python/envs/default/Scripts/py-spy.exe dump --pid <pid>`) and works on Windows against a
+  3.13 process. It attaches **without restarting**, which is the whole point: restarting destroys
+  the wedged state you are trying to inspect. `netstat -ano | grep 8501` gives the pid.
+* Running a script *by path* puts the **script's** dir on `sys.path`, not the cwd — `.scratch/*.py`
+  needs `sys.path.insert(0, <repo root>)` or `import jarvis` fails.
 
 ## Data-loss hazard (unresolved, 3x, all in the small hours)
 
@@ -60,6 +66,24 @@ Redirect to a file and read `$?` (piping masks the exit code); verify the remote
 `https://github.com/TechRhino1/HM-AI.git`. Setting upstream does **not** remove the need for this.
 Backticks in a `git commit -m` argument get eaten by bash — use plain text.
 
+## The live server does not hot-reload — restart it after a fix
+
+Started as an inline `python -c "…start_server(host='127.0.0.1', port=8501, mt5_client=None,
+orchestrator=None)"` from the repo root, under `ThreadingHTTPServer`. **Edits on disk do nothing
+until the process is restarted.** A long-running instance therefore keeps executing whatever the
+code said when it booted — and can look like a live bug when it is really a stale one.
+
+**The diagnostic rule:** a hang that does *not* reproduce in a fresh interpreter is a
+stale-process problem, not a logic problem. Compare the two before reading any code. Worked example:
+`get_indices_snapshot()` returned in 0.88s in a fresh process while `/api/india/indices` hung past
+240s in the server. `py-spy` showed the server 997 frames deep in a recursion that commit `2c655c6`
+had already removed — the dump was executing a line that is a *comment* in the working tree. Fix
+was a restart; no code change.
+
+Symptom that gives it away: the three index-bearing India routes hang while everything else is
+healthy. `netstat -ano | grep 8501` showing `CLOSE_WAIT` on the server side means a handler thread
+is still stuck and never closed its socket.
+
 ## Conventions worth knowing
 
 * Backtest job statuses: `QUEUED | RUNNING | DONE | FAILED | CANCELLED` — `DONE`, not `COMPLETED`.
@@ -89,6 +113,9 @@ Backticks in a `git commit -m` argument get eaten by bash — use plain text.
   silent, because `hydrate_batch` wraps it in `except Exception`. Result: `/api/india/*` never
   answered for any index and returned the last-resort 150.0 instead of 24175.65. Read
   `INDIA_UNIVERSE`/`STOCK_UNIVERSE` directly. Guarded by `tests/test_provider_recursion.py`.
+  **Note the failure mode:** a bare `except Exception` around a hydrating call turns a
+  `RecursionError` into a silent ~1000-second stall. The fix landed in `2c655c6` but the server ran
+  the old code for hours — see "The live server does not hot-reload" above.
 * **Never seed a modelled value from `hash()`** — CPython salts it per process. Use
   `jarvis.data.determinism.stable_seed`. Eight sites did this (option-chain skew/OI/volume, the
   options `pcr` that picks BUY CALL vs BUY PUT, candle walks, Monte Carlo seed, and user-facing
@@ -98,6 +125,12 @@ Backticks in a `git commit -m` argument get eaten by bash — use plain text.
   (31 live checks, exits 2 when it cannot run), `tools/audit_wiring.py`, `tools/audit_endpoints.py`,
   plus `tests/test_mode_aggregator.py`, `test_backtest_optimizer.py`, `test_regime_optimizer.py`,
   `test_ui_wiring.py`, `test_provider_recursion.py`.
+* **`docs/MARKETS_DATA_CONTRACTS.md`** — response shapes for the ten stocks/India endpoints the
+  Markets view binds to, with the timeout token (`fast` 8s / `normal` 15s / `provider` 30s /
+  `slow` 60s, from `dashboard.js:46`) and JS consumer for each. Two traps recorded there:
+  `/api/stocks/screener` returns `count=47` with only 40 rows under `limit=40` (**`count` is the
+  matching total, not `len(stocks)`**), and `/api/stocks/news` + `/api/stocks/recommended_buys`
+  have **no UI consumer at all** — the grid renders `ai_recommended_buys` from the screener payload.
 
 ## The entry signal has no measured edge (audited 2026-09-15, 183d real bars, 20 symbols)
 
