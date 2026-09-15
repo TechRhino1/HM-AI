@@ -19,6 +19,7 @@ Live sources (attempted in order):
 from typing import Optional, List, Dict, Any
 
 from jarvis.data.broker_symbols import resolve_broker_symbol
+from jarvis.data.determinism import stable_seed
 import logging
 import socket
 import re
@@ -393,7 +394,11 @@ def get_calibrated_baseline_candles(
 
     now_ts = int(time.time())
     vol_scalar = max(0.003, min(0.015 * beta_v * math.sqrt(step_sec / 86400.0), 0.045))
-    seed = int(abs(hash(f"{symbol}_{timeframe}_{now_ts // 3600}"))) % (2**32)
+    # Seeded from `stable_seed`, NOT from `hash()`. CPython salts `hash()` per
+    # process, so the same symbol and timeframe produced a different series after
+    # every restart, which made the generated history irreproducible between runs
+    # and moved the chart's derived support/resistance levels.
+    seed = stable_seed(f"{symbol}_{timeframe}_{now_ts // 3600}")
     rng = np.random.RandomState(seed)
 
     returns = rng.normal(loc=0.0003, scale=vol_scalar, size=num_bars)

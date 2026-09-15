@@ -15,6 +15,8 @@ import urllib.request
 from datetime import datetime, timezone
 import numpy as np
 
+from jarvis.data.determinism import stable_seed
+
 logger = logging.getLogger("jarvis.data.tradingview")
 
 # Standard column payload requested from TradingView scanner
@@ -671,7 +673,13 @@ class TradingViewDataProvider:
             }]
 
         # Construct historical candle trajectory anchored to live real-time bar
-        seed_val = int(abs(hash(f"{clean_sym}_{timeframe}_{now_ts // step_sec}"))) % 100000
+        #
+        # Seeded from `stable_seed`, NOT from `hash()`. CPython salts `hash()`
+        # per process, so the same symbol and timeframe produced a different
+        # candle history after every restart — and the chart's support/resistance
+        # levels are derived from these candles, so a restart silently moved every
+        # level on screen.
+        seed_val = stable_seed(f"{clean_sym}_{timeframe}_{now_ts // step_sec}")
         rng = np.random.RandomState(seed_val)
 
         # Volatility estimated around 1.2% to 2.2% scaled by timeframe

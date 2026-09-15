@@ -601,23 +601,56 @@ python -m pytest tests/ -q --ignore=tests/test_india_perf.py
   position at a time must hold across regimes, not within each.
 - `test_regime_optimizer.py::test_gates_match_winrate_targeting` — the
   re-implemented disable thresholds must not drift from the calibrator's.
-- `test_ui_wiring.py` — the UI↔API contract. Three defects that returned HTTP 200
-  and rendered a blank or frozen panel, so no HTTP check could see them:
-  the candles call sending `timeframe=` while the handler read `tf=` (the
-  timeframe selector was inert); `renderPositions` reading `price_open` /
+- `test_ui_wiring.py` — the UI↔API contract, now 24 tests. Three defects that
+  returned HTTP 200 and rendered a blank or frozen panel, so no HTTP check could
+  see them: the candles call sending `timeframe=` while the handler read `tf=`
+  (the timeframe selector was inert); `renderPositions` reading `price_open` /
   `price_current` when the schema serialises `open_price` / `current_price` (the
   Entry and Now columns were permanently dashes); and the controller querying
-  element ids the template need not define. Mutation-tested: reverting either
-  fix fails the suite.
+  element ids the template need not define. It also pins the six-view rail (a tab
+  needs a button, a panel and a `VIEWS` entry — miss one and it renders but does
+  nothing), that the news countdown is derived locally rather than read from the
+  server's stale `status_badge`, and that every response returning modelled values
+  declares it. Mutation-tested: reverting either fix fails the suite.
 - `tools/verify_dashboard_render.js` — runs the real `dashboard.js` in a Node
   `vm` against a stubbed DOM and a recording chart library, then asserts on what
   the module asked the library to draw. This is the only layer that can see the
   chart, because the chart is built at runtime: it proves the swing pivots
   become R1/R2/S1/S2 price lines, that the volume series is populated, that the
   open position's entry/stop/target lines carry the trade details, and that the
-  in-chart HUD is filled. 26 checks.
+  in-chart HUD is filled. 88 checks, including the TradingView switch's lazy load
+  and its explicit failure state.
+- `test_provider_recursion.py` — `fetch_quotes()` must not call the profile
+  hydrators. It used to, and hydration calls back into `fetch_quotes()`, so the
+  two recurred without bound. Nothing raised, because `hydrate_batch` wraps that
+  call in `except Exception` and `RecursionError` is an `Exception`. See §13.
+- `test_synthetic_determinism.py` / `test_candle_seed_stability.py` — modelled
+  values must be a function of the instrument, not of the process. Both
+  generators seeded from `hash()`, which CPython salts per interpreter start, so
+  a symbol's earnings date, F&O-ban status and candle history all changed on
+  restart. These spawn subprocesses under different `PYTHONHASHSEED` values,
+  because salting is constant *within* one process — an in-process test passes
+  against the broken code and pins nothing.
 - Learning-loop R sign correctness.
 - Drift protection retains ≥ 70 % of signal under a 40-loss streak.
+
+### The bar for a new test
+
+**A test must be shown to fail against the code it is meant to catch.** Three
+tests written this cycle passed against the broken code on first attempt and had
+to be rewritten:
+
+| Test | Why it passed while broken |
+|---|---|
+| "expect no `RecursionError`" | An intermediate frame swallowed it (`except Exception`) |
+| re-entry recorded via a cache | A sibling test had warmed the 15s quote cache, so the fallback was never reached |
+| "same result twice in one process" | `hash()` salting is constant within a process |
+
+The reliable way to check is to revert the fix with the editor, run the test, and
+restore it — **not** `git stash`, which is implicated in this repo's data-loss
+incidents (see the project memory file). For source-level checks, prefer parsing
+(`ast`) over substring search: the fixes carry comments naming the very
+identifiers a grep would flag.
 
 When you change exit behaviour, expect the ratchet tests to fail first — that is
 the guard working.
@@ -671,6 +704,8 @@ the guard working.
 | `jarvis/intelligence/signal_engine.py` is orphaned — 545 lines, zero references anywhere | Its regime-adaptive evidence weights (`REGIME_WEIGHTS`, `weights_for_regime`) are **not** wired into `DecisionEngine`, which has no evidence weighting at all. It is a third, unused approach to regime adaptation alongside `realtime_optimizer.get_adjustments(symbol, regime)` (DB-driven P&L adjustment, live) and `regime_optimizer.py` (per-regime exit geometry). Either wire it or delete it — leaving it invites someone to assume it runs | `jarvis/intelligence/signal_engine.py` |
 | A full 3-mode regime sweep over all 20 symbols takes hours | `--passes 3` over M15/M5 means ~200 geometry evaluations per search and 8 searches per mode, each simulating 182k–209k candidates. Budget `--passes 1` and a reduced `--symbols` list for an interactive run | `tools/optimise_regime.py` |
 | `_static_market_values` only catches bare numeric literals | A fabricated value written as a formatted string (`"4,380.00"` built in JS) is invisible to it. The check is a strong net, not a proof | `tools/verify_ui_live.py` |
+| The India option chain's `iv_rank` is a random draw | It gates the `iv_rank < 50` branch in `options_signal_engine`, so *which* branch runs is arbitrary. Deliberately left in place, because removing the draw changes the branch rather than fixing it; the UI labels it "IV rank (modelled)" and the live verifier checks the chain declares itself modelled. It should eventually be computed from the chain's own implied vols | `jarvis/india/options_engine.py` |
+| A provider route's own timeout is not bounded | The recursion bug that made three endpoints hang is fixed, but a route that genuinely stalls still pins a `ThreadingHTTPServer` thread. `tools/verify_ui_live.py` now gives provider routes a 60s client budget and reports a hang as a named failure instead of crashing | `jarvis/api/server.py` |
 | `tools/verify_dashboard_render.js` stubs the DOM | It proves the controller issues the right drawing calls and queries only ids the template defines; it cannot prove the result *looks* right. No browser is installed in this environment, so layout, overlap and colour contrast remain unverified by machine | `tools/verify_dashboard_render.js` |
 
 ---
