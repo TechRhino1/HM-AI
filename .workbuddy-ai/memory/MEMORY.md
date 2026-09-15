@@ -143,3 +143,51 @@ than trusting the local push message. Remote: `https://github.com/TechRhino1/HM-
 
 Backticks inside a `git commit -m` argument are interpreted by bash and get substituted away. Use
 plain text or single quotes in commit messages.
+
+## A self-retriggering MutationObserver freezes the page with no error
+
+**`setAttribute` queues a mutation record even when the value is unchanged.** So an observer whose
+callback writes an attribute inside its own `subtree` + `attributeFilter` re-queues itself on every
+pass, and because microtasks drain before the browser may paint or dispatch input, the main thread
+blocks **permanently, silently** — no exception, no console error, no failed request. It looks like
+a crash and is reported as one.
+
+The rule: **an observer callback must write nothing it observes.** Guard every write with a
+compare (`setIfChanged`) and add a re-entrancy flag. Deleting the observer is not a fix — assert the
+feature still works, or "delete the feature" passes your test.
+
+It only fires on *interaction* when the initial sync ran before the observer was attached, which is
+why an idle page looks perfectly healthy. Two live examples were in `hm_ui.js` (the tab ARIA sync);
+the other two observers there are safe because their callbacks write outside their filter.
+
+## Diagnosing a blocked browser main thread
+
+* **`page.evaluate` ignores its own `timeout` option.** A naive probe hangs the driver instead of
+  failing. Always race it against a timer.
+* **Run a control phase first** — load, do not interact, probe for 30s. Blocks while idle ⇒ poll
+  loop; responsive while idle but blocks on click ⇒ the click handler. This halves the search space.
+* **`Debugger.enable` + `Debugger.pause`** names the blocking frame. A pause arriving ⇒ JavaScript
+  (read `callFrames`). No pause ⇒ native block (dialog or synchronous XHR).
+* Chrome is installed at `C:\Program Files\Google\Chrome\Application\chrome.exe`, Edge too.
+  `puppeteer-core` is in the managed node workspace — set `PUPPETEER_ROOT` / `NODE_PATH`; launch with
+  `--no-sandbox --disable-gpu --disable-dev-shm-usage`. The `agent-browser` skill does **not**
+  support Windows.
+* `node --check` proves a file parses and says nothing about a blocked thread.
+* **`tools/verify_dashboard_nav.js`** is the working harness (31 live checks). Run it with
+  `PUPPETEER_ROOT=<node workspace>/node_modules node tools/verify_dashboard_nav.js`; it exits 2 when
+  it cannot run (no server, no browser) so that is never mistaken for a pass.
+
+## Dashboard rail facts
+
+* `POST /api/telemetry_state`'s `account` object already carries `login`, `name`, `server`,
+  `company`, `balance`, `equity`, `margin`, `free_margin`, `margin_level`, `leverage`, `profit`,
+  `currency`, `trade_allowed`, `last_sync_time`. The account dropdown needs no server change.
+* The canonical cross-page destinations and labels, copied from `stocks.html` / `india.html`, are
+  `/` Forex·Crypto, `/stocks` US Stocks, `/india` India Stocks, `/options` India Options.
+  `dashboard.html` carries them in a `.tt-dropdown`; `markActiveNav()` in `hm_ui.js` already styles
+  `.market-nav-item`, so the current page is marked from either entry point.
+* `.tt-rail` is a **top bar** (`grid-area: rail`, sticky), not a sidebar. The account strip is pushed
+  right by `.tt-rail__spacer`.
+* `[hidden]` is a weak UA rule: any `display` you declare on a panel silently beats it. Declare
+  `.your-panel[hidden] { display: none; }` explicitly.
+
