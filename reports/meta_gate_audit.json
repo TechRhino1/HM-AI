@@ -1,0 +1,26 @@
+{
+  "base_rate_test": 0.3587082386241798,
+  "base_rate_train": 0.3835052479189287,
+  "n_train": 22104,
+  "n_test": 23317,
+  "window_only": {
+    "test_auc": 0.48069575039891455,
+    "train_auc": 0.7456264162151833,
+    "test_brier": 0.24165422911251971,
+    "top_decile": {
+      "n": 2332,
+      "win_rate_selected": 0.3409090909090909,
+      "win_rate_all": 0.3587082386241798
+    }
+  },
+  "window_plus_primary": {
+    "test_auc": 0.47853698563165703,
+    "train_auc": 0.782709323089126,
+    "test_brier": 0.24448901311978802,
+    "top_decile": {
+      "n": 2332,
+      "win_rate_selected": 0.33490566037735847,
+      "win_rate_all": 0.3587082386241798
+    }
+  }
+}

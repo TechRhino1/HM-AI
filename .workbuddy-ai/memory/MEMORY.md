@@ -112,8 +112,15 @@ break-even). What remains is the directional call.
   (`decision_engine.py:105-122`). The gate "probability" is `0.45 ×` a hand-typed 6-bin table that
   *inflates* inputs (`confidence.py:13-20`) `+ 0.55 ×` an **untrained** prior clipped to [0.35,0.88]
   (`online_ml_predictor.py:564-573,417`). 55% of the gate weight has never seen a trade.
-* The only learned component, the meta-label gate, is inert in every backtest — `recent_candles` is
-  never passed and the model loads `None` offline (`decision_engine.py:1033-1045`).
+* The meta-label gate is inert in every backtest — `recent_candles` is never passed and the model
+  loads `None` offline (`decision_engine.py:1033-1045`). **Left inert on purpose, measured:**
+  trained on 62k samples with purged/embargoed splits, test AUC is **0.481** (train 0.746) with the
+  shipped features and 0.479 (train 0.783) after adding the primary model's own outputs; selecting
+  the top decile by P(win) *lowers* the win rate (0.341 vs 0.359 base). Horizon sweep 5/10/20/40 →
+  test AUC 0.527/0.507/0.508/0.507. Meta-labelling needs information the primary model lacks
+  (cross-asset, order flow, session); the 14 shipped features are the same 30-bar window. Evidence
+  recorded in `meta_labeler.py::_load`. Tools: `tools/train_meta_labeler.py`,
+  `tools/audit_meta_gate.py`.
 * `signal_engine.py` (`REGIME_WEIGHTS`) is **dead code** — never imported anywhere. Don't cite it.
 * Sizing realises 1.5–2.6× nominal risk: the quarter-Kelly term pins at its 1.50 cap, so it is a
   constant (`position_sizing.py:56`). `engine.py:711` applies the lot floor *after* the risk cap.

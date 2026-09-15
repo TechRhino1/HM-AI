@@ -1,0 +1,135 @@
+{
+  "out": "D:\\HM_AI\\HM-AI\\data\\models\\meta_labeler.joblib",
+  "tf": "H1",
+  "train_samples": 61986,
+  "test_samples": 61200,
+  "test_auc": 0.5082917739372679,
+  "test_brier": 0.24687415450086178,
+  "train_auc": 0.6083704347857777,
+  "base_rate_test": 0.42594771241830065,
+  "horizon": 20,
+  "label_frac": 0.5,
+  "embargo_bars": 40,
+  "per_symbol": {
+    "AUDUSD": {
+      "train": 2982,
+      "test": 2942,
+      "train_pos": 0.439,
+      "test_pos": 0.4228
+    },
+    "BTCUSD": {
+      "train": 4254,
+      "test": 4214,
+      "train_pos": 0.4123,
+      "test_pos": 0.4134
+    },
+    "ETHUSD": {
+      "train": 4254,
+      "test": 4214,
+      "train_pos": 0.4175,
+      "test_pos": 0.4091
+    },
+    "EURJPY": {
+      "train": 2982,
+      "test": 2942,
+      "train_pos": 0.4188,
+      "test_pos": 0.4222
+    },
+    "EURUSD": {
+      "train": 2982,
+      "test": 2942,
+      "train_pos": 0.4349,
+      "test_pos": 0.4371
+    },
+    "GBPJPY": {
+      "train": 2982,
+      "test": 2942,
+      "train_pos": 0.4222,
+      "test_pos": 0.4167
+    },
+    "GBPUSD": {
+      "train": 2982,
+      "test": 2942,
+      "train_pos": 0.4329,
+      "test_pos": 0.4235
+    },
+    "GER40": {
+      "train": 2750,
+      "test": 2712,
+      "train_pos": 0.4284,
+      "test_pos": 0.4137
+    },
+    "NAS100": {
+      "train": 2828,
+      "test": 2790,
+      "train_pos": 0.4385,
+      "test_pos": 0.4262
+    },
+    "NZDUSD": {
+      "train": 2982,
+      "test": 2942,
+      "train_pos": 0.445,
+      "test_pos": 0.431
+    },
+    "SOLUSD": {
+      "train": 4254,
+      "test": 4214,
+      "train_pos": 0.4241,
+      "test_pos": 0.4224
+    },
+    "UK100": {
+      "train": 2704,
+      "test": 2664,
+      "train_pos": 0.4338,
+      "test_pos": 0.4107
+    },
+    "US30": {
+      "train": 2828,
+      "test": 2790,
+      "train_pos": 0.436,
+      "test_pos": 0.4391
+    },
+    "US500": {
+      "train": 2828,
+      "test": 2790,
+      "train_pos": 0.4335,
+      "test_pos": 0.4387
+    },
+    "USDCAD": {
+      "train": 2982,
+      "test": 2942,
+      "train_pos": 0.4215,
+      "test_pos": 0.4364
+    },
+    "USDCHF": {
+      "train": 2982,
+      "test": 2942,
+      "train_pos": 0.4269,
+      "test_pos": 0.429
+    },
+    "USDJPY": {
+      "train": 2982,
+      "test": 2942,
+      "train_pos": 0.4235,
+      "test_pos": 0.4198
+    },
+    "WTI": {
+      "train": 2816,
+      "test": 2778,
+      "train_pos": 0.4467,
+      "test_pos": 0.437
+    },
+    "XAGUSD": {
+      "train": 2816,
+      "test": 2778,
+      "train_pos": 0.4332,
+      "test_pos": 0.4467
+    },
+    "XAUUSD": {
+      "train": 2816,
+      "test": 2778,
+      "train_pos": 0.4276,
+      "test_pos": 0.4392
+    }
+  }
+}

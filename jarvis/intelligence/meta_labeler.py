@@ -186,6 +186,20 @@ class MetaLabeler:
         # not influence a historical simulation. With model=None the
         # meta-label gate stays neutral, which is the documented behaviour for
         # an untrained model.
+        #
+        # This is now also an EVIDENCE-BASED default, not just a precaution.
+        # Measured 2026-09-15 (tools/train_meta_labeler.py,
+        # tools/audit_meta_gate.py) on 183d real bars, 20 symbols, purged and
+        # embargoed forward splits:
+        #   * window features only         : test AUC 0.481 (train 0.746)
+        #   * + primary-model outputs too  : test AUC 0.479 (train 0.783)
+        #   * selecting the top decile by predicted P(win) LOWERED the win rate
+        #     (0.341 vs a 0.359 base).
+        # So the gate currently carries no out-of-sample information and
+        # selecting on it is actively harmful. Do not enable it in backtests
+        # expecting a gain - it needs a different feature set first (cross-asset
+        # or order-flow information the primary model does not already use),
+        # not merely a trained model.
         from jarvis.config.runtime import is_offline
 
         if is_offline():
