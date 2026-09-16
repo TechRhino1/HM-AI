@@ -239,10 +239,18 @@ in a way that no error message explains.
   wrong `since` does not merely shorten the window, it shifts every `bar_idx` onto the wrong bars.
   Seen live 2026-09-17: `scan_manifest_M5.json` still held `since='2026-07-06', symbols=1` from a
   2026-09-13 single-symbol WTI run while the fresh 20-symbol, untrimmed M5 183d rescan had already
-  written 10 candidate tables. Any M5 backtest in that window would have run 20 symbols against a
-  73-day frame with indexes built for 183 days. **Never start a backtest/optimizer for a timeframe
-  whose scan is still running**; confirm manifest `generated_utc` is newer than the scan start and
-  that `since` matches what you passed (omit `--since` ⇒ expect `null`).
+  written 10 candidate tables. Concretely: the full M5 frame is 37,440 bars, the stale trim cut it to
+  14,400, and fresh candidates were indexed up to bar_idx 37,438. **Never start a backtest/optimizer
+  for a timeframe whose scan is still running**; confirm manifest `generated_utc` is newer than the
+  scan start and that `since` matches what you passed (omit `--since` ⇒ expect `null`).
+  `tests/test_backtest_optimizer.py::TestAgainstRealData::test_scalp_trim_replay_keeps_bar_idx_in_range`
+  and `::test_trim_actually_shortens_the_frame` are the teeth — they fail while a scan is in flight,
+  which is correct behaviour, not a regression. Note the existing guard in `optimizer.load_series`
+  only refuses `bar_idx >= len(frame)`; **a shift small enough to stay in range is still silent**,
+  so the guard catches gross breakage, not subtle misalignment.
+  Fixed 2026-09-17: the scanner now publishes `since` (and `complete: false`) *before* the first
+  candidate table lands, so alignment is right for the whole run. Legacy manifests have no
+  `complete` key at all, so `complete is False` cannot detect them.
 * **A class-level mutable default is a process-global cache.** `MT5Client._shared_paper_positions` is
   aliased into every instance and never cleared, and `get_open_positions()` returned it whenever
   `is_connected` was False — so a simulated position from an earlier paper run was reported as a live

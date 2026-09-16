@@ -141,6 +141,14 @@ def manifest_since(timeframe: str, days: int = DEFAULT_DAYS) -> Optional[str]:
     except (OSError, ValueError) as exc:
         logger.warning("could not read %s (%s) — assuming no trim", path, exc)
         return None
+
+    if payload.get("complete") is False:
+        logger.warning(
+            "%s belongs to a scan that is still running (complete=false). The "
+            "`since` trim is published up front and IS trustworthy, but candidate "
+            "tables for %s are being rewritten underneath this read — results will "
+            "mix fresh and stale symbols.", path, tf,
+        )
     since = payload.get("since")
     return str(since) if since else None
 

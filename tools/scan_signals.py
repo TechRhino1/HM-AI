@@ -107,6 +107,39 @@ def scan_one(symbol: str, days: int = 95, timeframe: str = "H1",
     return summary
 
 
+def manifest_path(timeframe: str) -> Path:
+    tf = str(timeframe).strip().upper()
+    name = "scan_manifest.json" if tf == "H1" else f"scan_manifest_{tf}.json"
+    return OUT_DIR / name
+
+
+def write_manifest(timeframe: str, days: int, since: str | None, extra: dict) -> Path:
+    """Write (or overwrite) the scan manifest for ``timeframe``.
+
+    The manifest is published **before** the scan starts as well as after it.
+    ``optimizer.manifest_since()`` replays ``since`` as an alignment-critical
+    trim: candidate tables are indexed against whatever frame the scanner saw,
+    so a ``since`` that does not match the current run shifts every ``bar_idx``
+    onto the wrong bar. Candidate parquet files are written per symbol as they
+    complete, while the manifest was previously written only at the very end —
+    so during a long rescan the on-disk manifest still described the *previous*
+    run while fresh tables were already being consumed. Publishing ``since`` up
+    front keeps the two in step for the whole run. ``complete`` tells consumers
+    whether the symbol list is trustworthy yet.
+    """
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "generated_utc": pd.Timestamp.now("UTC").isoformat(),
+        "timeframe": str(timeframe).strip().upper(),
+        "days": days,
+        "since": since,
+    }
+    payload.update(extra)
+    path = manifest_path(timeframe)
+    path.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
+    return path
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--symbols", default=None, help="comma-separated subset")
@@ -132,6 +165,11 @@ def main() -> int:
           f"{', '.join(symbols)}")
     t0 = time.time()
     summaries: list[dict] = []
+
+    # Publish the alignment-critical `since` before the first candidate table
+    # lands on disk — see write_manifest().
+    write_manifest(timeframe, args.days, args.since,
+                   {"complete": False, "symbols": []})
 
     if args.workers <= 1:
         for s in symbols:
@@ -159,23 +197,17 @@ def main() -> int:
                     print(f"  {s:8s} -> FAILED: {r.get('error')}")
 
     summaries.sort(key=lambda r: r.get("symbol", ""))
-    manifest = {
-        "generated_utc": pd.Timestamp.now("UTC").isoformat(),
+    mpath = write_manifest(timeframe, args.days, args.since, {
+        "complete": True,
         "elapsed_seconds": round(time.time() - t0, 1),
-        "timeframe": timeframe,
-        "days": args.days,
-        "since": args.since,
         "symbols": summaries,
-    }
-    OUT_DIR.mkdir(parents=True, exist_ok=True)
-    mname = "scan_manifest.json" if timeframe == "H1" else f"scan_manifest_{timeframe}.json"
-    (OUT_DIR / mname).write_text(json.dumps(manifest, indent=2, default=str), encoding="utf-8")
+    })
 
     ok = [r for r in summaries if r.get("ok")]
     total_candidates = sum(int(r.get("candidates", 0)) for r in ok)
     print(f"\nDone in {time.time()-t0:.0f}s. {len(ok)}/{len(symbols)} symbols, "
           f"{total_candidates} candidates total.")
-    print(f"Manifest: {(OUT_DIR / mname).relative_to(REPO_ROOT)}")
+    print(f"Manifest: {mpath.relative_to(REPO_ROOT)}")
     return 0 if len(ok) == len(symbols) else 1
 
 
