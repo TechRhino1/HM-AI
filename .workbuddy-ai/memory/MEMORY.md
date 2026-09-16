@@ -19,10 +19,12 @@ pointer or a rule that has already cost a session; detail is elsewhere on purpos
   CSS/JS/templates *are* re-read per request. *A hang that does not reproduce in a fresh interpreter
   is a stale process, not a logic bug.* `py-spy dump --pid <pid>` attaches without restarting;
   `netstat -ano | grep 8501` for the pid.
-* **Push** stalls ~40s and `git status` always says `[gone]` (`.git/refs/remotes/*` is wiped
-  immediately after being written). Bypass both, redirect to a file, verify with `git ls-remote` —
-  never the push message. Backticks in `-m` are eaten by bash: use `git commit -F <file>`. `/tmp` does
-  not exist; use `.scratch/`.
+* **Push** hangs a long time (observed 40s, but also **3m09s** — do not assume a failure at the
+  40s mark) and `git status` always says `[gone]` (`.git/refs/remotes/*` is wiped
+  immediately after being written). Bypass both: run the push in the **background** redirecting to a
+  file, then verify with `git ls-remote` — never the push message and never the exit code alone
+  (a hung-but-successful push has shown `EXIT=0` only after minutes). Backticks in `-m` are eaten by
+  bash: use `git commit -F <file>`. `/tmp` does not exist; use `.scratch/`.
 
 ## Running the platform
 
