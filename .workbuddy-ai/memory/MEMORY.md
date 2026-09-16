@@ -59,6 +59,9 @@ honest data gives 0/20 skillful and *regresses toward chance* as n doubles. See 
 ## Environment
 
 Sandbox refuses writes outside the project dir. Bash, not PowerShell. `taskkill` needs
-`MSYS_NO_PATHCONV=1`. Python 3.13.12 managed, no venv. `rm -rf X && cmd` swallows the command's
-stdout — run the `rm` separately. Running a script *by path* puts the **script's** dir on `sys.path`.
-The server binds **127.0.0.1 only**, so `http://<LAN-IP>:8501` never works.
+`MSYS_NO_PATHCONV=1`. Python 3.13.12 managed at
+`…\binaries\python\versions\3.13.12\python.exe` — works without a venv, though
+`…\binaries\python\envs\default\Scripts\python.exe` also exists and two skills cite it.
+`rm -rf X && cmd` swallows the command's stdout — run the `rm` separately. Running a script *by path*
+puts the **script's** dir on `sys.path`. The server binds **127.0.0.1 only**, so
+`http://<LAN-IP>:8501` never works.
