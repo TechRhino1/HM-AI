@@ -5,9 +5,14 @@ Provides thread-safe, timeout-guarded OHLCV data streaming from MT5 with realist
 import time
 
 from jarvis.data.broker_symbols import resolve_broker_symbol
+from jarvis.data.broker_time import broker_utc_offset
+# One bar-duration map for the whole codebase. The provider already owned the
+# canonical copy; duplicating it here is how a second source of truth starts.
+from jarvis.data.tradingview_provider import TF_SECONDS_MAP
 import logging
 import numpy as np
 import pandas as pd
+from datetime import datetime, timezone
 from typing import Dict, Optional, Any
 from jarvis.application.timeout_guard import TimeoutGuard
 
@@ -66,6 +71,92 @@ def style_timeframe_set(trade_style: Optional[str]) -> set:
     return set(style_timeframes(trade_style).values())
 
 
+# ─── Bar freshness ──────────────────────────────────────────────────────────
+# A bar is "fresh" while the newest bar's open is no older than this many bar
+# durations. It cannot be 1: with `include_current_bar=False` the newest bar
+# returned is the last CLOSED one, so its open is already 1-2 durations old and
+# a 1x rule would flag every healthy frame. 2.5 leaves room for the in-progress
+# bar plus exchange slack without accepting a genuinely stalled feed.
+_FRESH_BAR_TOLERANCE = 2.5
+
+FRESH = "FRESH"
+STALE = "STALE"
+MARKET_CLOSED = "MARKET_CLOSED"
+FRESHNESS_UNKNOWN = "UNKNOWN"
+
+
+def _is_weekend_gap(now_utc: float) -> bool:
+    """True when the clock sits in the weekly close (forex/metals).
+
+    Without this, the 48h gap a Sunday frame legitimately has would be reported
+    as a stalled feed. The market is closed from ~21:00 UTC Friday to ~21:00 UTC
+    Sunday, so a large age there is expected rather than a defect.
+    """
+    moment = datetime.fromtimestamp(now_utc, tz=timezone.utc)
+    weekday, hour = moment.weekday(), moment.hour          # Mon=0, Sun=6
+    if weekday == 5:                                       # Saturday
+        return True
+    if weekday == 4 and hour >= 21:                        # Friday, after close
+        return True
+    if weekday == 6 and hour < 21:                         # Sunday, before open
+        return True
+    return False
+
+
+def classify_bar_freshness(
+    last_bar_epoch: Optional[float],
+    timeframe: str,
+    *,
+    include_current_bar: bool = False,
+    now_utc: Optional[float] = None,
+    offset_sec: int = 0,
+) -> tuple:
+    """Verdict and age for the newest bar, in the CLOCK THE BARS ARE STAMPED IN.
+
+    `copy_rates_from_pos` stamps bar opens on the BROKER's clock, exactly like
+    tick times, so subtracting them from the real UTC clock under-reports the
+    age by the broker offset (2-3h for XM) and would hide a stalled feed. Pass
+    the offset from `jarvis.data.broker_time`; `offset_sec=0` is the old
+    (wrong, but visible) behaviour.
+
+    Returns `(verdict, age_sec)` where age may be negative if the bar is stamped
+    slightly ahead of now (clock skew). `verdict` is one of FRESH, STALE,
+    MARKET_CLOSED, UNKNOWN - UNKNOWN when the timeframe is unrecognised, so an
+    unverifiable frame is never silently reported as fresh.
+    """
+    bar_sec = TF_SECONDS_MAP.get(str(timeframe or "").upper())
+    if not bar_sec or not last_bar_epoch:
+        return FRESHNESS_UNKNOWN, None
+
+    now = time.time() if now_utc is None else float(now_utc)
+    age = (now + float(offset_sec)) - float(last_bar_epoch)
+
+    # A small negative age is normal skew (the newest bar can open "now").
+    if age < 0:
+        return (FRESH if -age <= bar_sec else FRESHNESS_UNKNOWN), age
+
+    if age <= bar_sec * _FRESH_BAR_TOLERANCE:
+        return FRESH, age
+    if _is_weekend_gap(now):
+        return MARKET_CLOSED, age
+    return STALE, age
+
+
+def first_stale_frame(mtf_data) -> tuple:
+    """First ``(role, age_sec)`` whose frame is STALE, else ``(None, 0.0)``.
+
+    Reads the verdict stamped by `fetch_rates` rather than re-deriving it - a
+    second age calculation would be a second thing to keep in step with the
+    broker's clock. Used by every decision path so "do not act on a stalled
+    feed" cannot be enforced in one entry point and forgotten in another.
+    """
+    for role, frame in (mtf_data or {}).items():
+        attrs = getattr(frame, "attrs", None) or {}
+        if attrs.get("freshness") == STALE:
+            return role, float(attrs.get("bar_age_sec") or 0.0)
+    return None, 0.0
+
+
 class DataFeedEngine:
     _mt5_fetch_lock = threading.Lock()
 
@@ -74,6 +165,9 @@ class DataFeedEngine:
         self.timeout_sec = timeout_sec
         self._cache: Dict[str, Dict[str, Any]] = {}
         self._cache_ttl_sec = 8.0
+        # One warning per symbol/timeframe: a stalled feed repeats on every poll
+        # and would otherwise bury the rest of the log.
+        self._stale_warned: set = set()
 
     def fetch_rates(self, symbol: str, timeframe: str = "H1", num_bars: int = 300, include_current_bar: bool = False) -> pd.DataFrame:
         cache_key = f"{symbol}_{timeframe}_{num_bars}_{include_current_bar}"
@@ -87,6 +181,10 @@ class DataFeedEngine:
             if not MT5_AVAILABLE or self.mt5_client is None or getattr(self.mt5_client, "mode", "dry_run") == "dry_run":
                 df = self._generate_realistic_rates(symbol, timeframe, num_bars)
                 df.attrs["data_source"] = "SYNTHETIC_FALLBACK"
+                # Fabricated bars have no age to verify. Marked UNKNOWN rather
+                # than FRESH so nothing downstream can mistake a synthetic
+                # frame for a verified one.
+                df.attrs["freshness"] = FRESHNESS_UNKNOWN
                 return df
 
             resolved_sym = self.mt5_client.resolve_symbol_name(symbol) if hasattr(self.mt5_client, "resolve_symbol_name") else symbol
@@ -102,6 +200,10 @@ class DataFeedEngine:
                 logger.warning(f"MT5 returned 0 rates for {symbol} ({timeframe}). Falling back to synthetic rates.")
                 df = self._generate_realistic_rates(symbol, timeframe, num_bars)
                 df.attrs["data_source"] = "SYNTHETIC_FALLBACK"
+                # Fabricated bars have no age to verify. Marked UNKNOWN rather
+                # than FRESH so nothing downstream can mistake a synthetic
+                # frame for a verified one.
+                df.attrs["freshness"] = FRESHNESS_UNKNOWN
                 return df
 
             df = pd.DataFrame(rates)
@@ -109,12 +211,38 @@ class DataFeedEngine:
             df.rename(columns={"tick_volume": "volume"}, inplace=True)
             res_df = df[["time", "open", "high", "low", "close", "volume"]].copy()
             res_df.attrs["data_source"] = "LIVE_MT5"
+
+            # Freshness. `rates["time"]` is the broker's clock, so the age must
+            # be measured against now-in-broker-time; against the raw UTC clock
+            # it under-reports by the offset (2-3h for XM) and a stalled feed
+            # looks healthy. `_broker_sym` is the symbol the broker actually
+            # answered for, which is the only one whose tick offset is valid.
+            last_bar_epoch = float(rates["time"][-1])
+            offset = broker_utc_offset(mt5_module=mt5, symbols=[_broker_sym])
+            verdict, age = classify_bar_freshness(
+                last_bar_epoch,
+                timeframe,
+                include_current_bar=include_current_bar,
+                offset_sec=offset,
+            )
+            res_df.attrs["freshness"] = verdict
+            res_df.attrs["bar_age_sec"] = None if age is None else round(age, 1)
+
+            if verdict == STALE and cache_key not in self._stale_warned:
+                self._stale_warned.add(cache_key)
+                bar_sec = TF_SECONDS_MAP.get(str(timeframe).upper(), 1)
+                logger.warning(
+                    "Stale candles for %s %s: newest bar is %.0fs old (%.1f bar durations) "
+                    "while the market is open - decisions should not be taken on this frame.",
+                    symbol, timeframe, age, age / max(1, bar_sec),
+                )
             return res_df
 
 
         def _fallback_gen():
             df = self._generate_realistic_rates(symbol, timeframe, num_bars)
             df.attrs["data_source"] = "SYNTHETIC_FALLBACK"
+            df.attrs["freshness"] = FRESHNESS_UNKNOWN
             return df
 
         df_result = TimeoutGuard.run_sync(
@@ -126,6 +254,9 @@ class DataFeedEngine:
 
         if "data_source" not in df_result.attrs:
             df_result.attrs["data_source"] = "SYNTHETIC_FALLBACK"
+        if "freshness" not in df_result.attrs:
+            # A frame of unknown origin must not read as verified.
+            df_result.attrs["freshness"] = FRESHNESS_UNKNOWN
 
         self._cache[cache_key] = {"df": df_result, "timestamp": now}
         return df_result

@@ -266,6 +266,13 @@ class JarvisOrchestrator:
             })
         return out
 
+    @staticmethod
+    def _first_stale_frame(mtf_data) -> Tuple[Optional[str], float]:
+        """First role whose frame is STALE, with its age. ``(None, 0.0)`` if none."""
+        from jarvis.market.data_feed import first_stale_frame
+
+        return first_stale_frame(mtf_data)
+
     def run_cycle_for_symbol(self, symbol: str, trade_style: Optional[str] = None,
                              dry_run: bool = False) -> Dict[str, Any]:
         """Executes a single end-to-end analytical and decision cycle for a target symbol and trade style.
@@ -279,6 +286,32 @@ class JarvisOrchestrator:
         active_trade_style = (trade_style or self.trade_style or "SWING").upper()
         # 1. Fetch Multi-Timeframe Data based on trade_style
         mtf_data = self.data_feed.fetch_multi_timeframe(symbol, trade_style=active_trade_style)
+
+        # 1b. A frame that claims to be LIVE_MT5 but has stopped updating must not
+        # be reasoned on: a stalled feed yields a decision that looks entirely
+        # valid, which is the worst kind. Only STALE blocks. UNKNOWN is a
+        # synthetic/fallback frame (already labelled as such and surfaced in the
+        # UI), and MARKET_CLOSED is a shut market rather than a broken feed - the
+        # session logic already governs that case.
+        stale_role, stale_age = self._first_stale_frame(mtf_data)
+        if stale_role:
+            logger.warning(
+                "Refusing to decide on %s (%s): the %s timeframe frame is STALE "
+                "(%.0fs old) while the market is open.",
+                symbol, active_trade_style, stale_role, stale_age,
+            )
+            return {
+                "symbol": symbol,
+                "trade_style": active_trade_style,
+                "decision": None,
+                "context": None,
+                "authorized": False,
+                "auth_reason": f"stale {stale_role} candles ({stale_age:.0f}s old)",
+                "dry_run": bool(dry_run),
+                "execution": None,
+                "stale": True,
+            }
+
         _spec = _resolve_sym(symbol)
         
         # 2. Synthesize Multi-Timeframe Market Context with dynamic MTF weighting
@@ -587,6 +620,11 @@ class JarvisOrchestrator:
         for sym, style, res in raw_results:
             try:
                 d = res["decision"]
+                # A cycle that refused to decide (stale candles) has nothing to
+                # arbitrate. Without this it would be handed a None decision and
+                # raise, logging an error for a condition that was handled.
+                if d is None:
+                    continue
                 ctx = res.get("context")
                 cand = self.opportunity_arbiter.evaluate_opportunity(d, ctx, trade_style=style)
                 candidates.append(cand)

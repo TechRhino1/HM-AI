@@ -15,7 +15,7 @@ from typing import Any, Optional, Dict, Tuple
 from jarvis.application.state_manager import StateManager, GLOBAL_STATE
 import threading
 import time
-from jarvis.market.data_feed import DataFeedEngine
+from jarvis.market.data_feed import DataFeedEngine, first_stale_frame
 from jarvis.api.copilot import JarvisCopilot
 from jarvis.execution.mt5_client import MT5Client
 from jarvis.data.schemas import ExecutionMode
@@ -170,6 +170,23 @@ class JarvisRequestHandler(BaseHTTPRequestHandler):
                         for sym in symbols:
                             try:
                                 mtf = cls.data_feed.fetch_multi_timeframe(sym, trade_style=t_style)
+
+                                # A frame that claims to be live but has stopped
+                                # updating must not become a signal. This path
+                                # builds its decision directly rather than going
+                                # through the orchestrator's cycle, so the guard
+                                # has to be applied here too - enforcing it in one
+                                # entry point and not the other is how the same
+                                # defect comes back.
+                                _stale_role, _stale_age = first_stale_frame(mtf)
+                                if _stale_role:
+                                    logger.warning(
+                                        "Skipping %s (%s) in auto-selection: %s frame is "
+                                        "STALE (%.0fs old).",
+                                        sym, t_style, _stale_role, _stale_age,
+                                    )
+                                    continue
+
                                 spec = resolve_symbol(sym)
                                 ctx = ce.build_context(sym, mtf, current_spread_pips=spec.typical_spread_pips, max_allowed_spread_pips=spec.max_spread_pips, trade_style=t_style)
                                 cls.state_manager.update_market_context(sym, ctx)
