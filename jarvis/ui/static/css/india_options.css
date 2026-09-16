@@ -780,7 +780,7 @@ body {
 }
 
 .opt-rec-card {
-    background: linear-gradient(135deg, rgba(17, 26, 46, 0.95), rgba(9, 14, 26, 0.95));
+    background: var(--hm-bg-raised);
     border: 1px solid var(--border-subtle);
     border-radius: 8px;
     padding: 12px 14px;
@@ -938,7 +938,7 @@ body {
 }
 
 .single-sig-card {
-    background: linear-gradient(135deg, rgba(13, 20, 36, 0.95), rgba(7, 11, 20, 0.95));
+    background: var(--hm-bg-raised);
     border: 1px solid var(--border-subtle);
     border-radius: 8px;
     padding: 14px;
@@ -1136,7 +1136,6 @@ body {
         align-items: stretch !important;
         padding: 8px 10px !important;
         gap: 8px !important;
-        background: rgba(8, 12, 22, 0.96) !important;
         position: sticky;
         top: 0;
         z-index: 1000;
@@ -1197,9 +1196,6 @@ body {
         left: 0 !important;
         right: 0 !important;
         height: 56px !important;
-        background: rgba(8, 12, 22, 0.96) !important;
-        backdrop-filter: blur(20px) !important;
-        -webkit-backdrop-filter: blur(20px) !important;
         border-top: 1px solid rgba(251, 191, 36, 0.3) !important;
         box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.8) !important;
         z-index: 9999 !important;

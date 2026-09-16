@@ -166,17 +166,26 @@
    --font-mono           identical                 re-point (no-op)
    --accent-cyan         #38bdf8 vs #00d4ff        UNIFY (pure inconsistency)
    --font-main           India-only name           add cross-alias
-   --bg-card/--bg-panel  DIFFER per page           leave alone (see note)
-   --border-subtle       DIFFER per page           leave alone (see note)
-   --bg-base/--bg-dark/  DIFFER per page           leave alone (see note)
+   --bg-card/--bg-panel  DIFFER per page           UNIFY (done below)
+   --border-subtle       DIFFER per page           UNIFY (done below)
+   --bg-base/--bg-dark/  DIFFER per page           UNIFY (done below)
 
-   Note on the "leave alone" rows: because each page loads exactly one page
-   stylesheet, these values never collide at runtime. They are a maintenance
-   liability (four sources of truth that can drift), not a rendering bug.
-   Repainting them globally from here would be an unbudgeted visual change to
-   pages that currently look correct, so the migration is opt-in per page:
-   swap `var(--bg-card)` -> `var(--hm-bg-raised)` when that page is next
-   touched. The mapping is 1:1 and documented above.
+   On the surface rows: because each page loads exactly one page stylesheet
+   these values never collided at runtime, so leaving them was safe - but it
+   left four sources of truth for one palette, and that is precisely why the
+   four market pages still read as a different product from the dashboard and
+   the console. They are now re-pointed at the --hm-* ladder, so one edit to a
+   surface token lands on all six pages at once.
+
+   Every pair below is within a few RGB points of the value the page already
+   used, so this is a consolidation, not a repaint.
+
+   The one deliberate difference: the market pages' interior cards were solid
+   `--bg-card`/`--bg-panel`, and the dashboard's `.tt-panel` is solid
+   `--hm-bg-surface` too. So the cards stay SOLID - the glass system is for the
+   shared chrome (HUD, nav, `.hm-card`), exactly as it is on the dashboard.
+   Making every card translucent would be a second, invented material rather
+   than the unified one.
    ========================================================================== */
 
 :root {
@@ -201,6 +210,49 @@
     /* Cross-alias the India sheets' divergent font token name. */
     --font-main: var(--hm-font-sans);
     --font-sans: var(--hm-font-sans);
+
+    /* --- Surfaces --------------------------------------------------------
+       One ladder for six pages. The legacy names differ per sheet
+       (--bg-dark on stocks, --bg-main on India, --bg-base/--bg-primary on
+       the terminal) but all four mean "the app background", so they all
+       resolve to the same step. */
+    --bg-dark: var(--hm-bg-base);
+    --bg-base: var(--hm-bg-base);
+    --bg-main: var(--hm-bg-base);
+    --bg-primary: var(--hm-bg-base);
+    --bg-panel: var(--hm-bg-surface);
+    --bg-surface: var(--hm-bg-surface);
+    --bg-card: var(--hm-bg-raised);
+    --bg-card-hover: var(--hm-bg-hover);
+    --bg-card-active: var(--hm-bg-active);
+    --bg-elevated: var(--hm-bg-overlay);
+    --bg-glass-overlay: var(--hm-bg-overlay);
+
+    /* --- Borders ---------------------------------------------------------
+       The legacy `--border-subtle` was a dark slate (51,65,85) that all but
+       disappeared against the surfaces; the unified token is a light grey at
+       low alpha, which reads as a line on every page. */
+    --border-subtle: var(--hm-border-subtle);
+    --border-bright: var(--hm-border-strong);
+    --border-glow: var(--hm-border-strong);
+    --border-glass: var(--hm-border-subtle);
+
+    /* --- Semantic accents ------------------------------------------------
+       `--neon-gold` is already #f59e0b, i.e. byte-identical to --hm-warn;
+       `--neon-amber` is the same caution family a shade brighter. */
+    --neon-amber: var(--hm-warn);
+    --neon-gold: var(--hm-warn);
+    --neon-bull-subtle: var(--hm-bull-subtle);
+    --neon-bear-subtle: var(--hm-bear-subtle);
+    --accent-cyan-subtle: var(--hm-accent-subtle);
+
+    /* India options: ITM row tints are just the bull/bear subtles. */
+    --itm-call-bg: var(--hm-bull-subtle);
+    --itm-put-bg: var(--hm-bear-subtle);
+
+    /* --- Radii / blur ---------------------------------------------------- */
+    --card-radius: var(--hm-radius);
+    --glass-blur: var(--hm-glass-blur);
 }
 
 

@@ -316,7 +316,7 @@ header.terminal-hud {
     left: 0;
     min-width: 240px;
     background: #0e1422;
-    background: linear-gradient(180deg, rgba(17, 24, 39, 0.98) 0%, rgba(10, 15, 26, 0.98) 100%);
+    background: var(--hm-bg-surface);
     border: 1px solid rgba(56, 189, 248, 0.28);
     border-radius: 8px;
     box-shadow: 0 12px 36px rgba(0, 0, 0, 0.8), 0 0 20px rgba(56, 189, 248, 0.15);
@@ -1027,7 +1027,7 @@ header.terminal-hud {
 }
 
 .wl-item-btn:hover {
-    background: rgba(28, 44, 72, 0.95);
+    background: var(--hm-bg-active);
     border-color: var(--accent-cyan);
     transform: translateY(-1px);
 }
@@ -1104,7 +1104,7 @@ header.terminal-hud {
 }
 
 .radar-opportunity-card.active {
-    background: rgba(28, 44, 72, 0.95);
+    background: var(--hm-bg-active);
     border-color: var(--accent-cyan);
     box-shadow: 0 0 10px rgba(56, 189, 248, 0.2);
 }
@@ -1977,7 +1977,7 @@ header.terminal-hud {
 }
 
 .analytics-card {
-    background: rgba(10, 15, 26, 0.7);
+    background: var(--hm-bg-surface);
     border: 1px solid var(--border-subtle);
     border-radius: 4px;
     padding: 8px;
@@ -2286,7 +2286,7 @@ header.terminal-hud {
 }
 
 .structure-matrix-card {
-    background: rgba(10, 15, 26, 0.7);
+    background: var(--hm-bg-surface);
     border: 1px solid var(--border-subtle);
     border-radius: 4px;
     padding: 6px 8px;
@@ -2326,7 +2326,7 @@ header.terminal-hud {
 }
 
 .plan-grid-item {
-    background: rgba(0, 0, 0, 0.35);
+    background: var(--hm-bg-sunken);
     border: 1px solid rgba(51, 65, 85, 0.35);
     border-radius: 3px;
     padding: 3px 5px;
@@ -2348,7 +2348,7 @@ header.terminal-hud {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
     gap: 3px;
-    background: rgba(0, 0, 0, 0.35);
+    background: var(--hm-bg-sunken);
     border: 1px solid var(--border-subtle);
     border-radius: 4px;
     padding: 5px 6px;
@@ -2377,7 +2377,7 @@ header.terminal-hud {
 
 .devil-gauges-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
 .devil-gauge-card {
-    background: rgba(0, 0, 0, 0.35);
+    background: var(--hm-bg-sunken);
     border: 1px solid rgba(245, 158, 11, 0.2);
     border-radius: 3px;
     padding: 4px 6px;
@@ -2413,7 +2413,7 @@ header.terminal-hud {
 .gate-check-fail { color: var(--devil-amber); font-weight: 700; }
 
 .rationale-box {
-    background: rgba(0, 0, 0, 0.35);
+    background: var(--hm-bg-sunken);
     border-radius: 3px;
     padding: 4px 6px;
     font-size: 9px;
@@ -2699,7 +2699,7 @@ header.terminal-hud {
     gap: 6px;
 }
 .macro-metric-card {
-    background: rgba(0,0,0,0.3);
+    background: var(--hm-bg-raised);
     border: 1px solid var(--border-subtle);
     border-radius: 4px;
     padding: 6px 8px;
@@ -2834,9 +2834,6 @@ header.terminal-hud {
         height: 50px !important;
         min-height: 50px !important;
         padding: 0 10px !important;
-        background: rgba(8, 12, 22, 0.96) !important;
-        backdrop-filter: blur(16px) !important;
-        -webkit-backdrop-filter: blur(16px) !important;
         border-bottom: 1px solid rgba(56, 189, 248, 0.2) !important;
         display: flex !important;
         align-items: center !important;
@@ -2885,9 +2882,6 @@ header.terminal-hud {
         left: 0 !important;
         right: 0 !important;
         height: 56px !important;
-        background: rgba(8, 12, 22, 0.97) !important;
-        backdrop-filter: blur(20px) !important;
-        -webkit-backdrop-filter: blur(20px) !important;
         border-top: 1px solid rgba(56, 189, 248, 0.28) !important;
         box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.85) !important;
         z-index: 9999 !important;

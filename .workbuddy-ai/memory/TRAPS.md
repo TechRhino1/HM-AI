@@ -4,6 +4,38 @@ Companion to `MEMORY.md`, which is injected every session and so must stay small
 demand: when touching the UI, when writing a test that has to discriminate, or when a page misbehaves
 in a way that no error message explains.
 
+## Server
+
+* **"No data" is not one fault, and it is usually NOT the server.** Measured on a healthy process
+  *while a page still sat on its `Loading…` placeholder*: `/api/telemetry_state` answered **200 in
+  10-291ms**, threads steady at **33**, no `CLOSE_WAIT`, CPU normal. Two candidate server-side causes
+  were tested and did **not** reproduce — a heavy backtest job (5 symbols x 3 modes, 365d, 400 evals,
+  110s: **0 failures**, worst latency 400ms) and `TimeoutGuard` pool saturation (20 calls each hanging
+  30s behind a 0.1s timeout all returned in ~0.1s; the pool released its workers). So **do not start
+  from "the server is wedged"**. Sample the endpoint *while the page is stuck* — a latency probe plus
+  `py-spy dump --pid <pid>` — before reading any code.
+* **33 threads is the healthy baseline, not a symptom.** `psutil` reports 33 while `py-spy dump` lists
+  only **5** Python threads (MainThread, 2 idle `jarvis_guard`, `web_bg_telemetry_syncer`,
+  `backtest_job_worker`). The other ~28 are native threads py-spy cannot unwind (the BLAS/OpenBLAS
+  pool). A thread-count gap is not evidence of anything.
+* **The UI has no request timeout anywhere.** No `AbortController` and no `setTimeout` around a fetch,
+  in any page script. A request that never settles therefore leaves the template's `Loading…`
+  placeholder on screen indefinitely and silently — indistinguishable from a panel with no data. Two
+  distinct failures produce that, with two different fixes:
+  * `getJSON` **resolves** on transport failure (error envelope), so the placeholder is only replaced
+    if the render is **unconditional**. `renderWatchlist`'s boot seed was `if (syms.length)`, so an
+    empty radar — the normal state with no orchestrator attached — skipped the repaint entirely. **An
+    empty result must still repaint.** (With telemetry aborted, the watchlist now paints its 8
+    fallback symbols at `—` and the dot goes `is-down`.)
+  * A fetch that never settles resolves *nothing*, so only a **watchdog** can repaint. `console.js`
+    has `watchdogFirstPaint()` (12s): it states the stall, marks the connection down, and self-heals
+    on the next successful poll because every render clears the body first.
+  Prove it with `.scratch/probe_watchdog.js` — three phases (**hang / blocked / control**), because a
+  test that only ever sees the healthy path pins nothing.
+* **A short screenshot wait measures the provider timeout, not the page.** `.scratch/shot_one.js` waits
+  2.5s, which is well inside the 30s `provider` budget, so the screener photographs as "Loading…" while
+  the API has already returned 40 rows. Wait past the timeout before concluding a panel is empty.
+
 ## Frontend
 
 * **A self-retriggering MutationObserver freezes the page with no error.** `setAttribute` queues a

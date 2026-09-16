@@ -351,6 +351,21 @@
     setText('cx-watchlist-count', list.length + ' symbols');
     body.textContent = '';
 
+    // An empty list must still replace the template's "Loading…" row. Leaving
+    // the placeholder in place made an empty watchlist indistinguishable from
+    // a request that never came back - the panel read as broken rather than
+    // empty, which is exactly the "no data" report this guards against.
+    if (!list.length) {
+      var emptyRow = document.createElement('tr');
+      var emptyCell = document.createElement('td');
+      emptyCell.colSpan = 4;
+      emptyCell.className = 'cx-empty';
+      emptyCell.textContent = 'No symbols to show.';
+      emptyRow.appendChild(emptyCell);
+      body.appendChild(emptyRow);
+      return;
+    }
+
     list.slice(0, 40).forEach(function (sym) {
       var r = bySymbol[sym];
       var st = statuses[sym] || {};
@@ -1297,6 +1312,50 @@
     state.timers[name] = setTimeout(tick, ms);
   }
 
+  /* ── first-paint watchdog ─────────────────────────────────────────────── */
+  /* Nothing in this file sets a request timeout, so a poll that never settles
+     leaves the template's placeholder on screen indefinitely and silently -
+     the panel simply says "Loading…" forever. A measured run showed the server
+     answering every request in 10-291ms while the page still sat on that
+     placeholder, so the fault is not always server-side and cannot be
+     diagnosed from the panel alone.
+
+     The watchdog makes the state honest rather than guessing at the cause: if
+     the first telemetry poll has not landed by the grace period, the page says
+     so, marks the connection down, and self-heals on the next successful poll
+     (every render clears the body first). */
+  var FIRST_PAINT_GRACE = 12000;
+
+  function watchdogFirstPaint() {
+    setTimeout(function () {
+      if (state.telemetry) return;              // the poll landed - nothing to say
+
+      markConnection(false);
+
+      var wl = $('cx-watchlist-body');
+      if (wl && /Loading/.test(wl.textContent)) {
+        wl.textContent = '';
+        var tr = document.createElement('tr');
+        var td = document.createElement('td');
+        td.colSpan = 4;
+        td.className = 'cx-empty';
+        td.textContent = 'No telemetry after ' + (FIRST_PAINT_GRACE / 1000) +
+          's — the request has not completed. Check the server, then reload.';
+        tr.appendChild(td);
+        wl.appendChild(tr);
+      }
+
+      var sel = $('cx-selection-body');
+      if (sel && /Loading/.test(sel.textContent)) {
+        sel.textContent = '';
+        var p = document.createElement('p');
+        p.className = 'cx-empty';
+        p.textContent = 'The consensus scan has not returned yet.';
+        sel.appendChild(p);
+      }
+    }, FIRST_PAINT_GRACE);
+  }
+
   /* ── boot ─────────────────────────────────────────────────────────────── */
   function boot() {
     initChart();
@@ -1306,12 +1365,21 @@
 
     // Seed the watchlist from whatever the radar already knows, so the first
     // paint is not an empty table while the first poll is in flight.
+    //
+    // Unguarded on purpose. This used to be `if (syms.length) { ... render }`,
+    // so an empty radar - which is the normal state when no orchestrator is
+    // attached - skipped the render entirely and the template's "Loading…" row
+    // stayed on screen for as long as the page was open. The panel was not
+    // broken and the data was not missing; it was never asked to repaint.
     loadTelemetry().then(function () {
       var radar = ((state.telemetry || {}).radar_opportunities) || [];
       var syms = [];
       radar.forEach(function (r) { if (r && r.symbol && syms.indexOf(r.symbol) === -1) syms.push(r.symbol); });
-      if (syms.length) { state.symbols = syms; renderWatchlist(state.telemetry); }
+      if (syms.length) state.symbols = syms;
+      renderWatchlist(state.telemetry);
     });
+
+    watchdogFirstPaint();
 
     loadChart();
     loadSelection(false);

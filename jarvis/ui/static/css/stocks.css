@@ -405,7 +405,7 @@ body {
    AI RECOMMENDED: BUY NOW SHOWCASE SECTION
    ========================================================================== */
 .ai-buy-now-section {
-    background: linear-gradient(180deg, rgba(16, 26, 42, 0.95), rgba(12, 18, 30, 0.98));
+    background: var(--hm-bg-surface);
     border: 1px solid rgba(0, 245, 155, 0.35);
     border-radius: 10px;
     padding: 16px 20px;
@@ -1261,7 +1261,7 @@ body {
 
 /* Trade Setup Card */
 .trade-plan-card {
-    background: linear-gradient(145deg, rgba(18, 25, 39, 0.95), rgba(13, 19, 31, 0.95));
+    background: var(--hm-bg-raised);
     border: 1px solid rgba(0, 212, 255, 0.3);
     border-radius: 8px;
     padding: 16px;
@@ -1424,7 +1424,6 @@ body {
         align-items: stretch !important;
         padding: 8px 10px !important;
         gap: 8px !important;
-        background: rgba(8, 12, 22, 0.96) !important;
         position: sticky;
         top: 0;
         z-index: 1000;
@@ -1484,9 +1483,6 @@ body {
         left: 0 !important;
         right: 0 !important;
         height: 56px !important;
-        background: rgba(8, 12, 22, 0.96) !important;
-        backdrop-filter: blur(20px) !important;
-        -webkit-backdrop-filter: blur(20px) !important;
         border-top: 1px solid rgba(56, 189, 248, 0.3) !important;
         box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.8) !important;
         z-index: 9999 !important;
@@ -1721,7 +1717,7 @@ body {
         display: flex !important;
         flex-direction: column !important;
         overflow: hidden !important;
-        background: #080c14 !important;
+        background: var(--hm-bg-surface) !important;
         box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.9) !important;
         animation: slideUpSheet 0.28s cubic-bezier(0.16, 1, 0.3, 1) !important;
     }
