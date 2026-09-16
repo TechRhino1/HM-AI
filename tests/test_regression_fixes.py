@@ -110,8 +110,15 @@ class TestRegressionFixes(unittest.TestCase):
         """A2: Verify paper mode returns MODIFIED and CLOSED matching callers."""
         client = MT5Client(mode='paper')
         
-        # Place paper trade
-        exec_res = client.send_market_order('EURUSD', 'BUY', 0.01, 1.0850, 1.0800, 1.0950)
+        # Place paper trade. The levels must straddle the fill price, and the fill
+        # now needs a reference price: paper fills used to come from a hardcoded
+        # table (EURUSD 1.0850), so this call could pass an incoherent SL/TP and
+        # still fill. The old call also mis-assigned positionally - the trailing
+        # 1.0950 landed in `comment`, not in `tp_price`.
+        exec_res = client.send_market_order(
+            symbol='EURUSD', order_type='BUY', volume=0.01,
+            sl_price=1.1400, tp_price=1.1700, reference_price=1.15323,
+        )
         ticket = exec_res.get('ticket')
         self.assertIsNotNone(ticket)
         

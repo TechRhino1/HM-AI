@@ -803,7 +803,7 @@ class JarvisRequestHandler(BaseHTTPRequestHandler):
                 lots = float(data.get("lots", data.get("volume", 0.01)))
                 sl = float(data.get("sl", data.get("sl_price", 0.0)))
                 tp = float(data.get("tp", data.get("tp_price", 0.0)))
-                comment = data.get("comment", "JARVIS_ManualDesk")
+                comment = data.get("comment", "HMAlgo2_ManualDesk")
                 current_price = float(data.get("price", data.get("current_price", 0.0)))
                 if action not in {"BUY", "SELL"}:
                     self._send_json({"status": "FAILED", "error": "action must be BUY or SELL"}, status_code=400)
@@ -837,7 +837,8 @@ class JarvisRequestHandler(BaseHTTPRequestHandler):
                     volume=lots,
                     sl_price=sl,
                     tp_price=tp,
-                    comment=comment
+                    comment=comment,
+                    reference_price=current_price
                 )
                 if res and res.get("status") == "FILLED":
                     try:

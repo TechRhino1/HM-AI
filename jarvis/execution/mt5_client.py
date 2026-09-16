@@ -210,12 +210,32 @@ class MT5Client:
     def get_open_positions(self, symbol: Optional[str] = None) -> List[PositionSnapshot]:
 
         self._reconnect_if_needed()
-        if self.mode == "paper" or not self.is_connected or not MT5_AVAILABLE:
+
+        if self.mode == "paper":
             with self._lock:
                 if symbol:
                     resolved = self.resolve_symbol_name(symbol)
                     return [p for p in self._paper_positions.values() if p.symbol == resolved or p.symbol == symbol]
                 return list(self._paper_positions.values())
+
+        if not self.is_connected or not MT5_AVAILABLE:
+            # A live/demo session with no broker link has UNKNOWN positions - not
+            # the paper book. `_paper_positions` is aliased to a CLASS-level dict
+            # (see `_shared_paper_positions`) that is never cleared, so returning
+            # it here put a stale simulated GOLD entry from an earlier paper run
+            # on the dashboard beside the real XM account: "Positions 1", a 2400.0
+            # entry against a 4328.88 market, and a BUY whose stop-loss sat ABOVE
+            # its entry. The MT5 service flag already reports DISCONNECTED, so an
+            # empty list is the honest answer.
+            with self._lock:
+                withheld = len(self._paper_positions)
+            if withheld:
+                logger.warning(
+                    "get_open_positions: MT5 disconnected in %s mode; withholding %d stale "
+                    "paper position(s) instead of reporting them as live.",
+                    self.mode, withheld,
+                )
+            return []
 
         try:
             with self._lock:
@@ -260,6 +280,106 @@ class MT5Client:
             logger.error(f"MT5 get_open_positions failed: {e}")
             return []
 
+    def _paper_fill_price(self, symbol: str, reference_price: float) -> Optional[float]:
+        """A real price for a paper fill, or None when we genuinely have none.
+
+        This used to be a hardcoded table (XAU 2400.0, EUR 1.0850, BTC 65000.0,
+        JPY 155.0, else 1.2700). That recorded a fabricated entry - GOLD filled
+        at 2400.0 while the market was at 4328.88 - and because `current_price`
+        was set to the same constant, `profit` was structurally 0.0 forever, so
+        the dashboard showed "OPEN P&L 0.00" on a position plainly in profit.
+        Worse, the caller had computed SL/TP from the REAL price, so the ticket
+        carried a BUY whose stop-loss (4294.29) sat ABOVE its entry (2400.0) -
+        a structurally impossible order whose displayed R:R was meaningless.
+
+        Callers that already know the price must pass it. Only when they do not
+        do we pay for a quote lookup; if that fails too we return None and the
+        order is refused rather than filled at an invented number.
+        """
+        if isinstance(reference_price, (int, float)) and math.isfinite(reference_price) and reference_price > 0:
+            return float(reference_price)
+        try:
+            from jarvis.data.tradingview_provider import TRADINGVIEW_PROVIDER
+            quotes = TRADINGVIEW_PROVIDER.fetch_quotes([symbol]) or {}
+            for key in (symbol, symbol.upper(), self.resolve_symbol_name(symbol)):
+                q = quotes.get(str(key).strip().upper())
+                if not q:
+                    continue
+                # A `profile_reference` quote is a static baseline, not a market
+                # price. Filling from it would put the same fabricated entry back
+                # on the book that this function exists to prevent.
+                if q.get("is_fallback") or q.get("source") != "tradingview":
+                    logger.warning(
+                        f"[PAPER] {symbol}: provider returned a {q.get('source')!r} reference "
+                        f"rather than a live quote; refusing to fill from it."
+                    )
+                    continue
+                px = q.get("price")
+                if isinstance(px, (int, float)) and math.isfinite(px) and px > 0:
+                    logger.info(f"[PAPER] {symbol}: no reference_price given, using quote {px}")
+                    return float(px)
+        except Exception as e:
+            logger.warning(f"Paper fill price lookup failed for {symbol}: {e}")
+        return None
+
+    @staticmethod
+    def _level_error(order_type: str, price: float, sl: float, tp: float) -> Optional[str]:
+        """Stop-loss and take-profit must straddle the fill price.
+
+        Returns a message when they do not, else None. This is the check whose
+        absence let a BUY with SL above its entry reach the book.
+        """
+        if not (isinstance(sl, (int, float)) and math.isfinite(sl) and sl > 0):
+            return "stop-loss must be a positive finite number"
+        if not (isinstance(tp, (int, float)) and math.isfinite(tp) and tp > 0):
+            return "take-profit must be a positive finite number"
+        if not (isinstance(price, (int, float)) and math.isfinite(price) and price > 0):
+            return "fill price must be a positive finite number"
+        if order_type == "BUY":
+            if sl >= price:
+                return f"BUY stop-loss {sl} is not below the fill price {price}"
+            if tp <= price:
+                return f"BUY take-profit {tp} is not above the fill price {price}"
+        else:
+            if sl <= price:
+                return f"SELL stop-loss {sl} is not above the fill price {price}"
+            if tp >= price:
+                return f"SELL take-profit {tp} is not below the fill price {price}"
+        return None
+
+    def mark_paper_positions(self, prices: Dict[str, float]) -> int:
+        """Mark the paper book to market; returns how many positions moved.
+
+        Paper positions were never re-priced, so `profit` stayed at the 0.0 it
+        was born with and the dashboard reported "OPEN P&L 0.00" no matter where
+        the market went. Positions we cannot price are left alone, and the UI
+        shows their P&L as unknown rather than as a flat zero.
+        """
+        if not prices:
+            return 0
+        from jarvis.data.symbol_registry import resolve, is_registered
+        moved = 0
+        with self._lock:
+            for pos in self._paper_positions.values():
+                px = prices.get(pos.symbol)
+                if px is None:
+                    px = prices.get(str(pos.symbol).strip().upper())
+                if not (isinstance(px, (int, float)) and math.isfinite(px) and px > 0):
+                    continue
+                # An UNregistered symbol resolves to a generic FX fallback spec,
+                # whose contract_size is 1000x too big for gold - a wrong P&L is
+                # worse than none, so skip rather than mark with a guessed size.
+                if not is_registered(pos.symbol):
+                    continue
+                contract = getattr(resolve(pos.symbol), "contract_size", 0.0) or 0.0
+                if contract <= 0:
+                    continue
+                direction = 1.0 if str(pos.type).upper() == "BUY" else -1.0
+                pos.current_price = float(px)
+                pos.profit = round(direction * (float(px) - float(pos.open_price)) * contract * float(pos.volume), 2)
+                moved += 1
+        return moved
+
     def send_market_order(
         self,
         symbol: str,
@@ -267,7 +387,8 @@ class MT5Client:
         volume: float,
         sl_price: float,
         tp_price: float,
-        comment: str = "JARVIS_3.0"
+        comment: str = "HMAlgo2",
+        reference_price: float = 0.0
     ) -> Dict[str, Any]:
         if self.mode not in {"live", "demo", "paper"}:
             return {"status": "BLOCKED", "reason": f"Execution is disabled (mode={self.mode})"}
@@ -279,8 +400,20 @@ class MT5Client:
         resolved = self.resolve_symbol_name(symbol)
         
         if self.mode == "paper" or not MT5_AVAILABLE:
+            price = self._paper_fill_price(symbol, reference_price)
+            if price is None:
+                return {
+                    "status": "FAILED",
+                    "reason": (
+                        f"No reference price available for {symbol}; refusing to fill at a "
+                        f"placeholder. Pass reference_price from the caller's own quote."
+                    ),
+                }
+            incoherent = self._level_error(order_type, price, sl_price, tp_price)
+            if incoherent:
+                return {"status": "FAILED", "reason": incoherent}
+
             with self._lock:
-                price = 2400.0 if "XAU" in symbol else (1.0850 if "EUR" in symbol else (65000.0 if "BTC" in symbol else (155.0 if "JPY" in symbol else 1.2700)))
                 ticket = int(time.time() * 1000) % 100000000
                 pos = PositionSnapshot(
                     ticket=ticket,

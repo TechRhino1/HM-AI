@@ -4,9 +4,23 @@ import logging
 from datetime import datetime, timezone
 import threading
 import os
+import re
 
 from jarvis.config.paths import resolve_db_path, ensure_data_dir
 from jarvis.data.broker_time import broker_utc_offset
+
+# Executor tags, matched as TOKENS. The old `"ai" in comment_lower` substring test
+# also matched "trailing", "pair", "main", "wait" and "chair", so a manual trade
+# commented "trailing stop" was filed as BOT (AI) and skewed the per-executor
+# performance stats. The magic number is authoritative; these are the fallback.
+#
+# The manual side is a plain substring on purpose: "manual"/"desk" are long and
+# distinctive, and our own tag is the compound "ManualDesk", which lowercases to
+# "manualdesk" - word boundaries would never match it. "ai" is the opposite case:
+# three characters is short enough to hide inside ordinary words, so it needs
+# boundaries on both sides.
+_BOT_TAG_RX = re.compile(r"(?<![a-z0-9])(?:hm[_\s-]?algo2?|hma2|jarvis[_\s-]?auto|ai)(?![a-z0-9])")
+_MANUAL_TAG_RX = re.compile(r"(?:manual|desk)")
 
 logger = logging.getLogger("JARVIS_Database")
 
@@ -214,10 +228,17 @@ class SQLiteTradeDB:
                 raw_comment = str(exit_deal.comment if exit_deal else target_deal.comment or "")
                 comment_lower = raw_comment.lower()
                 
-                if magic_num == 888999 or "jarvis_auto" in comment_lower or "ai" in comment_lower:
+                # Determine executor (BOT vs MANUAL). The magic number decides:
+                # the engine stamps 888999 on everything it places, manual tickets
+                # carry 0. Comments are only consulted for foreign tickets.
+                if magic_num == 888999:
                     exec_label = "BOT (AI)"
-                elif magic_num == 0 or "manual" in comment_lower or "desk" in comment_lower:
+                elif magic_num == 0:
                     exec_label = "MANUAL"
+                elif _MANUAL_TAG_RX.search(comment_lower):
+                    exec_label = "MANUAL"
+                elif _BOT_TAG_RX.search(comment_lower):
+                    exec_label = "BOT (AI)"
                 else:
                     exec_label = "BOT (AI)" if magic_num > 0 else "MANUAL"
 

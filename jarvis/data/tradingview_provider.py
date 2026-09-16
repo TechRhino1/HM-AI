@@ -201,6 +201,18 @@ _FOREX_PAIRS = {
     "CADJPY", "CHFJPY", "NZDJPY", "GBPCHF", "GBPAUD", "GBPCAD"
 }
 
+# Precious metals, resolved BEFORE the forex heuristic in _resolve_candidate_tickers.
+# TradingView lists these under OANDA (routed to the `forex` scanner endpoint) and
+# TVC; FX:XAUUSD does not exist.
+_METALS_MAP = {
+    "XAUUSD": ("OANDA:XAUUSD", "TVC:GOLD", "FX_IDC:XAUUSD"),
+    "GOLD": ("TVC:GOLD", "OANDA:XAUUSD"),
+    "XAGUSD": ("OANDA:XAGUSD", "TVC:SILVER", "FX_IDC:XAGUSD"),
+    "SILVER": ("TVC:SILVER", "OANDA:XAGUSD"),
+    "XPTUSD": ("OANDA:XPTUSD", "FX_IDC:XPTUSD"),
+    "XPDUSD": ("OANDA:XPDUSD", "FX_IDC:XPDUSD"),
+}
+
 _CRYPTO_SYMBOLS = {
     "BTCUSD", "BTCUSDT", "ETHUSD", "ETHUSDT", "SOLUSD", "SOLUSDT",
     "BNBUSD", "BNBUSDT", "XRPUSD", "XRPUSDT", "ADAUSD", "ADAUSDT",
@@ -251,6 +263,15 @@ class TradingViewDataProvider:
             candidates.append(f"AMEX:{raw}")
             return candidates
 
+        # Precious metals FIRST. "XAUUSD" is six characters and ends in "USD", so
+        # without this it satisfies the forex heuristic below, gets queried as
+        # FX:XAUUSD - which does not exist on TradingView - and falls through to
+        # the synthetic reference branch, coming back as 150.0 with a fabricated
+        # RSI of 55.0 and a "tradingview" provenance label. Gold is a primary
+        # instrument here, so this is not a rare edge.
+        if raw in _METALS_MAP:
+            return list(_METALS_MAP[raw])
+
         # Check Forex or Crypto
         if raw in _FOREX_PAIRS or (len(raw) == 6 and raw[:3].isalpha() and raw[3:].isalpha() and raw.endswith("USD")):
             return [f"FX:{raw}", f"OANDA:{raw}", f"FX_IDC:{raw}"]
@@ -280,6 +301,8 @@ class TradingViewDataProvider:
         t = ticker.upper()
         if t.startswith("FX:") or t.startswith("OANDA:") or t.startswith("FX_IDC:"):
             return "forex"
+        if t.startswith("TVC:"):
+            return "global"
         if t.startswith("BINANCE:") or t.startswith("COINBASE:") or t.startswith("CRYPTO:"):
             return "crypto"
         if t.startswith("NSE:") or t.startswith("BSE:"):
@@ -607,7 +630,13 @@ class TradingViewDataProvider:
                     "macd": 0.12,
                     "recommendation": 0.5,
                     "description": name,
-                    "source": "tradingview",
+                    # NOT "tradingview". This quote is SYNTHESISED from a static
+                    # reference price, and labelling it as a live source is how a
+                    # fabricated 150.0 gold price became indistinguishable from a
+                    # real one - it even carried a made-up RSI of 55.0. Callers
+                    # that need real data must check `is_fallback`.
+                    "source": "profile_reference",
+                    "is_fallback": True,
                 }
 
         # Update cache under lock

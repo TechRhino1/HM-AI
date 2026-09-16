@@ -26,7 +26,7 @@ class ExecutionEngine:
             return {"status": "BLOCKED", "reason": "Safe mode active"}
 
         mode = self.state_manager.execution_mode
-        comment = f"J3_{decision.strategy[:6]}_{mode.value}"
+        comment = f"HMA2_{decision.strategy[:6]}_{mode.value}"
 
         logger.info(f"DISPATCHING ORDER [{mode.value}]: {decision.bias} {lots} {decision.symbol} @ Entry={decision.entry_price} SL={decision.stop_loss} TP={decision.take_profit}")
 
@@ -72,7 +72,8 @@ class ExecutionEngine:
                     volume=lots,
                     sl_price=decision.stop_loss,
                     tp_price=decision.take_profit,
-                    comment=comment
+                    comment=comment,
+                    reference_price=decision.entry_price
                 )
         else:
             res = self.mt5_client.send_market_order(
@@ -81,7 +82,8 @@ class ExecutionEngine:
                 volume=lots,
                 sl_price=decision.stop_loss,
                 tp_price=decision.take_profit,
-                comment=comment
+                comment=comment,
+                reference_price=decision.entry_price
             )
 
         # §2: Re-anchor SL/TP to actual fill price if slippage occurred

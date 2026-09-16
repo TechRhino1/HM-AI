@@ -390,7 +390,19 @@
     setText(rk, ml > 0 ? num(ml, 1) + '%' : 'flat');
     if (rk) rk.className = 'tt-metric__value ' + (ml > 0 && ml < 200 ? 'tt-down' : 'tt-flat');
 
-    [eq, pf, mg, rk].forEach(function (el) { if (el) el.setAttribute('data-state', 'ready'); });
+    // A snapshot taken while the broker link is down is LAST-KNOWN, not live.
+    // The strip used to present it as current: "broker offline" sat next to a
+    // confident equity figure with nothing to say the number was stale.
+    var brokerUp = (state.services || {}).MT5 === 'CONNECTED';
+    [eq, pf, mg, rk].forEach(function (el) {
+      if (!el) return;
+      el.setAttribute('data-state', brokerUp ? 'ready' : 'stale');
+      if (brokerUp) {
+        el.removeAttribute('title');
+      } else {
+        el.setAttribute('title', 'Last known value - the broker link is down.');
+      }
+    });
 
     renderAccountDetails(acc);
   }
@@ -2977,6 +2989,10 @@
 
     setText($('status-feed'), mt5 === 'CONNECTED' ? 'live' : String(feed).toLowerCase());
 
+    // The age of the last SUCCESSFUL TELEMETRY POLL - not the age of the last
+    // market tick. The label used to read "Last tick", which claimed otherwise
+    // and still showed "0s ago" with the feed down, because the HTTP endpoint
+    // kept answering. A number that cannot go stale is not a freshness check.
     var age = state.telemetryAt ? Math.round((Date.now() - state.telemetryAt) / 1000) : null;
     setText($('status-tick'), age === null ? '—' : agoText(age));
     setText($('status-symbols'), String(symbolList().length));

@@ -461,6 +461,14 @@
   letter-spacing: var(--tt-num-tracking);
   color: var(--hm-text-primary);
 }
+/* A snapshot taken while the broker link was down: last-known, not live. Dimmed
+   so it cannot be misread as current, but still legible - the number is real,
+   it is just old. Deliberately no ::after marker, which would add width to a
+   tabular figure and could clip in the narrow top rail. */
+.tt-metric__value[data-state="stale"] {
+  color: var(--hm-text-dim);
+  opacity: 0.7;
+}
 .tt-metric__sub {
   font-size: var(--hm-text-2xs);
   color: var(--hm-text-dim);
