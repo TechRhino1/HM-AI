@@ -6,6 +6,10 @@ pointer or a rule that has already cost a session; detail is elsewhere on purpos
 * **`TRAPS.md`** — frontend, testing, data-source and data-integrity traps + project conventions.
 * `AUDIT-2026-09.md` — signal-quality evidence, P0/P1/P2 backlog. `YYYY-MM-DD.md` — per-session detail.
 * Skills: `diagnose-git-push-auth`, `recover-vanished-working-tree`.
+  `audit-trading-system-integrity` §5 now holds the **measurement** traps (stale scan manifest
+  misaligning `bar_idx`, `cpu_percent` lying, 1/20-at-0.95 = false-positive rate, grid-boundary
+  artefact, effective-n inflation, expiring conventions) — §§1-4 are wiring only. Check it before
+  auditing signal quality.
 
 ## Non-negotiables
 
