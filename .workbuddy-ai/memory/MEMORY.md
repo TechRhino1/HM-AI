@@ -155,3 +155,19 @@ sizing; `atr_ratio` was never passed by any caller, and quarter-Kelly pinned at 
   `.tt-dropdown` in `dashboard.html`, styled by `markActiveNav()` in `hm_ui.js`.
 * `.tt-rail` is a sticky **top bar** (`grid-area: rail`). `[hidden]` is a weak UA rule — declare
   `.panel[hidden] { display: none; }`.
+
+## Running the dashboard — it does not survive a session
+
+`HM_dashboard.bat` runs the **UI + REST API only** (`start_server(mt5_client=None,
+orchestrator=None)`, port 8501). `HM_start.bat` → `HM_start.py` is the bigger thing: it also boots
+the autonomous trading engine, the MT5 client and a **public remote-access tunnel**. Use the former
+for the web terminal.
+
+**A server started as a background process of an agent session is reaped when the session ends** —
+silently, with nothing in the log but `listening on 8501`. Observed twice: 21h23m and 3h40m, each
+time leaving the dashboard dead with no explanation. Detaching from a session is **not possible
+here**: launching `cmd.exe` from Bash is blocked by the sandbox, and `cmd //c start` through Git
+Bash mangles the path into an interactive shell.
+
+So: never finish a task with the dashboard alive only as a session background task. Point the user
+at `HM_dashboard.bat` and say plainly that closing the window stops it.
