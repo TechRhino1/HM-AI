@@ -14,6 +14,12 @@ in a way that no error message explains.
   30s behind a 0.1s timeout all returned in ~0.1s; the pool released its workers). So **do not start
   from "the server is wedged"**. Sample the endpoint *while the page is stuck* — a latency probe plus
   `py-spy dump --pid <pid>` — before reading any code.
+* **`cpu_percent(None)` will tell you a busy process is idle.** Priming it and calling it again
+  returned `0.0%` for four workers that were actually at ~93% of a core — I nearly declared a
+  healthy 20-symbol scan "stalled" and killed it. The reliable measurement is a **delta**:
+  snapshot `p.cpu_times().user`, sleep 10–12s, subtract. Also expect `multiprocessing` children to
+  show as `spawn_main(parent_pid=…)` in `psutil` — identify them by the parent's cmdline, not their
+  own.
 * **33 threads is the healthy baseline, not a symptom.** `psutil` reports 33 while `py-spy dump` lists
   only **5** Python threads (MainThread, 2 idle `jarvis_guard`, `web_bg_telemetry_syncer`,
   `backtest_job_worker`). The other ~28 are native threads py-spy cannot unwind (the BLAS/OpenBLAS
@@ -225,6 +231,18 @@ in a way that no error message explains.
 
 ## Data integrity
 
+* **A stale `scan_manifest_<TF>.json` silently misaligns every `bar_idx`.** The manifest is written
+  *last*, only after all symbols finish, but each symbol's candidate parquet is written as it
+  completes — so during a long rescan the on-disk manifest still describes the *previous* run.
+  `optimizer.manifest_since()` reads it and replays `since` as a trim on the price frame, and that
+  trim is **alignment-critical**: candidates are indexed against whatever frame the scanner saw, so a
+  wrong `since` does not merely shorten the window, it shifts every `bar_idx` onto the wrong bars.
+  Seen live 2026-09-17: `scan_manifest_M5.json` still held `since='2026-07-06', symbols=1` from a
+  2026-09-13 single-symbol WTI run while the fresh 20-symbol, untrimmed M5 183d rescan had already
+  written 10 candidate tables. Any M5 backtest in that window would have run 20 symbols against a
+  73-day frame with indexes built for 183 days. **Never start a backtest/optimizer for a timeframe
+  whose scan is still running**; confirm manifest `generated_utc` is newer than the scan start and
+  that `since` matches what you passed (omit `--since` ⇒ expect `null`).
 * **A class-level mutable default is a process-global cache.** `MT5Client._shared_paper_positions` is
   aliased into every instance and never cleared, and `get_open_positions()` returned it whenever
   `is_connected` was False — so a simulated position from an earlier paper run was reported as a live
