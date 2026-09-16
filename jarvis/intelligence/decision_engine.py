@@ -212,10 +212,15 @@ class DecisionEngine:
             _honest_style = getattr(context, "trade_style", None) or "SWING"
             honest_base_rate = get_honest_base_rate(context.symbol, _honest_style)
             if honest_base_rate is not None:
-                logger.info(
-                    f"[{context.symbol}] HONEST BASE RATE | "
-                    + describe_honest_gap(final_win_p, honest_base_rate, tp=rr_ratio)
-                )
+                _gap = describe_honest_gap(final_win_p, honest_base_rate, tp=rr_ratio)
+                # INFO only for an actionable bias. This runs for every symbol on every
+                # scan cycle, and logging all of them measured ~11k lines/hour and buried
+                # every other message. The rate is still attached to the DecisionObject
+                # either way, so nothing is lost for the non-actionable cases.
+                if tentative_bias in ("BUY", "SELL"):
+                    logger.info(f"[{context.symbol}] HONEST BASE RATE | {_gap}")
+                else:
+                    logger.debug(f"[{context.symbol}] HONEST BASE RATE | {_gap}")
         except Exception as _honest_exc:  # observability must never break the loop
             logger.debug(f"[{context.symbol}] honest base rate unavailable: {_honest_exc}")
 

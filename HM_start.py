@@ -214,7 +214,10 @@ def _cloudflare_worker(port: int = 8501):
                     continue
                 if "429 Too Many Requests" in line or "1015" in line:
                     rate_limited = True
-                    m = re.search(r"https://[a-zA-Z0-9-]+\.trycloudflare\.com", line)
+                # Must run on EVERY line, not just rate-limited ones: the tunnel URL
+                # only ever appears on a non-429 line. Keeping this scoped to the
+                # branch above left `m` unbound and raised UnboundLocalError.
+                m = re.search(r"https://[a-zA-Z0-9-]+\.trycloudflare\.com", line)
                 if m:
                     url = m.group(0)
                     if "api.trycloudflare.com" in url:
