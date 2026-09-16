@@ -15,7 +15,7 @@ from typing import Any, Optional, Dict, Tuple
 from jarvis.application.state_manager import StateManager, GLOBAL_STATE
 import threading
 import time
-from jarvis.market.data_feed import DataFeedEngine, first_stale_frame, first_unusable_frame
+from jarvis.market.data_feed import DataFeedEngine, first_untrusted_frame, first_unusable_frame
 from jarvis.data.broker_symbols import terminal_ready
 from jarvis.api.copilot import JarvisCopilot
 from jarvis.execution.mt5_client import MT5Client
@@ -172,20 +172,30 @@ class JarvisRequestHandler(BaseHTTPRequestHandler):
                             try:
                                 mtf = cls.data_feed.fetch_multi_timeframe(sym, trade_style=t_style)
 
-                                # A frame that claims to be live but has stopped
-                                # updating must not become a signal. This path
-                                # builds its decision directly rather than going
-                                # through the orchestrator's cycle, so the guard
-                                # has to be applied here too - enforcing it in one
-                                # entry point and not the other is how the same
-                                # defect comes back.
-                                _stale_role, _stale_age = first_stale_frame(mtf)
-                                if _stale_role:
-                                    logger.warning(
-                                        "Skipping %s (%s) in auto-selection: %s frame is "
-                                        "STALE (%.0fs old).",
-                                        sym, t_style, _stale_role, _stale_age,
-                                    )
+                                # A frame that claims to be live but cannot be
+                                # shown to be current must not become a signal.
+                                # This path builds its decision directly rather
+                                # than going through the orchestrator's cycle,
+                                # so the guard has to be applied here too -
+                                # enforcing it in one entry point and not the
+                                # other is how the same defect comes back. Both
+                                # STALE and unverifiable-age-on-a-live-frame
+                                # block; see first_untrusted_frame.
+                                _untrusted_role, _untrusted_reason, _untrusted_age = \
+                                    first_untrusted_frame(mtf)
+                                if _untrusted_role:
+                                    if _untrusted_reason == "stale":
+                                        logger.warning(
+                                            "Skipping %s (%s) in auto-selection: %s frame is "
+                                            "STALE (%.0fs old).",
+                                            sym, t_style, _untrusted_role, _untrusted_age,
+                                        )
+                                    else:
+                                        logger.warning(
+                                            "Skipping %s (%s) in auto-selection: %s frame is "
+                                            "LIVE_MT5 but its age cannot be verified.",
+                                            sym, t_style, _untrusted_role,
+                                        )
                                     continue
 
                                 # Fabricated bars must not be selected on, for the

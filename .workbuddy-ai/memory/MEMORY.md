@@ -35,7 +35,7 @@ plainly that closing the window stops it.
 
 ## Baselines
 
-**pytest 830 passed / 20 deselected.** `tools/`: `verify_ui_live.py` (44) ·
+**pytest 874 passed / 20 deselected.** `tools/`: `verify_ui_live.py` (44) ·
 `verify_dashboard_render.js` (88) · `verify_dashboard_nav.js` (31) · `verify_ui_layout.js` (238) ·
 `audit_endpoints.py` (44) · `audit_wiring.py`. Screenshots: `.scratch/shot_one.js <tag> <page>`
 (**`agent-browser` does not support Windows**).
@@ -52,9 +52,21 @@ plainly that closing the window stops it.
 
 ## Signal quality
 
-**The entry signal has no measured edge.** PF 0.568–1.202 on SWING/H1; 0/20 reach the 1.3 bar at 183d
-*and* 365d. Gate 100% hand-authored; meta-label gate inert (AUC 0.481); refitting calibration on
-honest data gives 0/20 skillful and *regresses toward chance* as n doubles. See `AUDIT-2026-09.md`.
+**The entry signal has no measured edge — now measured four independent ways.** It *loses* money on
+real MT5 data (H1 365d, 94,937 trades: mean R −0.0509, cluster-robust t −3.04, p 0.0067, CI excludes
+0); 8/20 per-symbol verdicts flip when the window is halved; only 3/20 beat always-long in both
+windows against 5 expected by chance; the refitted score calibration is 0/20 skillful in both
+windows (AUC→0.5 as n doubles); and **DSR > 0.95 is met by 0/20 symbols in either window** once
+overlapping trades are counted honestly — 94,937 rows are worth **327 independent bets (0.3%)**.
+Gate 100% hand-authored; meta-label gate inert (AUC 0.481). Full evidence + the P0/P1/P2 backlog:
+**`AUDIT-2026-09.md`**.
+
+**Cost basis is a measurement, not a detail.** Every candidate table had to be regenerated after the
+SELL-leg fix (`fdf8e58`); before that, half of ~95k audited trades carried no spread at all. Two
+independent errors in *my own* measurement tools each moved the verdict — a biased always-long
+control (1/20 → 3/20 survivors) and a 10× units error. **Re-derive nothing the scanner already
+stored: consume `spread_pips`, and never multiply the bars' raw `spread` by `pip_size` (MT5 reports
+points).**
 
 ## Environment
 

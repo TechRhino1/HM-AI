@@ -539,8 +539,15 @@ class TestRegressionFixes(unittest.TestCase):
             "tp": 2425.0
         })
 
-        # Run cycle for symbol
-        res = orch.run_cycle_for_symbol("XAUUSD")
+        # Run cycle for symbol. The stale-feed gate is neutralised: this test mocks
+        # the decision and execution engines and asserts the LEARNING loop, but the
+        # orchestrator still fetches live MT5 bars first, so the outcome otherwise
+        # depends on the wall clock and on the broker connection.
+        with patch(
+            "jarvis.market.data_feed.first_untrusted_frame",
+            return_value=(None, None, 0.0),
+        ):
+            res = orch.run_cycle_for_symbol("XAUUSD")
         self.assertEqual(res.get("execution", {}).get("status"), "FILLED")
 
         # 1. Assert _pending_features populated

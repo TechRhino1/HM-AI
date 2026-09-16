@@ -253,3 +253,60 @@ in a way that no error message explains.
   (normal inherited ACLs, no deny ACE; the same file object writes fine under `.scratch/`), so writes
   must go through a hardlink alias — `HM_start.py` and `jarvis/intelligence/decision_engine.py` are
   blocked the same way. `st_nlink == 2` is the tell.
+* **MT5's `spread` column is in POINTS, not pips.** `symbol_info.spread` is in units of
+  `10^-digits`, so for a 5-digit FX pair 1 point = `0.00001` while `pip_size = 0.0001` — a factor of
+  10. `signal_scan._spread_for_bar` converts correctly (`raw * point_size / pip_size`) and writes the
+  result into the candidates table as `spread_pips`. **Consume that column; never re-derive from the
+  bars.** Multiplying the raw column by `pip_size` — the obvious thing, and what I did — overstates
+  every symbol's round-turn cost by exactly 10×, which is enough to "discover" that AUDUSD costs
+  **1.89R** per trade when it costs **0.19R**. The wrong number is plausible in shape (worst for the
+  tightest stop) and only the magnitude is absurd, so it survives a sanity glance.
+* **Three frame/units errors in one session, all producing plausible numbers.** (1) A partially
+  complete re-scan read as fresh because `ls --time-style=+%H:%M:%S` drops the date. (2) A tp sweep
+  without a benchmark read drift as a target optimum (`best tp=6, E=+0.33R` — pure beta). (3) Points
+  read as pips, a 10× cost overstatement. The common failure is not arithmetic, it is **failing to
+  ask what else would produce this number.** For any measurement: state the control, and check one
+  raw value by hand against its documented units, before believing an aggregate.
+* **A check that fails OPEN reports success — which is worse than no check.** `broker_utc_offset`
+  returned 0 whenever it could not derive the offset (no terminal in this process; canonical symbol
+  instead of the broker's `GOLD.i#`; or one slowly-ticking symbol). `classify_bar_freshness` computes
+  `age = (now + offset) - bar_epoch` against broker-stamped bars, so a 0 offset made `age` **negative**
+  — the bars looked like they were in the *future* — which maps to `UNKNOWN`. And `first_stale_frame`
+  blocks only on `STALE`, never `UNKNOWN`, deliberately, so synthetic frames can still be reasoned on.
+  Net effect: a broken offset **silently disabled the stale-feed gate**, and four tests were passing
+  *because of it*. Fixing the offset turned the ages truthful and the stale frames were then correctly
+  refused. Two independent safety mechanisms shared one failure mode; always ask what a guard does when
+  its *input* is unavailable, not just when the condition it tests is true.
+  **Repairing the input was not the fix** — the guard still could not tell "real bars, age unknown"
+  from "synthetic bars". `first_untrusted_frame` now blocks a `LIVE_MT5` frame whose age is
+  `UNKNOWN` while still tolerating a non-live one. A guard's *decision* has to be a function of the
+  facts it can actually establish, and `UNKNOWN` must not be routed to the permissive branch by
+  default. Test it with a harness that runs the same input through the old and new gate — if both
+  behave the same, you renamed something instead of fixing it.
+* **`symbol_info_tick` needs BOTH an initialised terminal AND the broker's symbol.** It returns `None`
+  for every symbol in a process that never called `mt5.initialize()` (the execution client only does so
+  for modes that place orders), and `None` for canonical names — MT5 knows gold as `GOLD.i#`, so
+  `symbol_info_tick("XAUUSD")` is `None` while `symbol_info_tick("GOLD.i#")` works. Either failure is
+  indistinguishable from "no data", so it degrades silently. Call `ensure_mt5_terminal()` and
+  `resolve_broker_symbol()` first.
+* **A single slow symbol must not be able to degrade a server-wide value.** The broker offset is a
+  property of the *server*, so any fresh tick answers the same question. Deriving it from the one
+  symbol the caller happened to hold meant gold's tick running ~17 min behind EURUSD's pushed the
+  candidate 799s from the nearest 30-minute boundary, past the 300s tolerance, and the whole platform
+  fell back to offset 0. Retry across liquid majors when the supplied symbols yield nothing.
+* **A benchmark must not inherit the treated unit's price basis.** The always-long control in
+  `tools/p0_1_direction_audit.py` entered at the candidate's stored `fill`. But `fill` is
+  **side-dependent** — `fills.entry_fill` gives `open + spread` for a BUY and `open − spread` for a
+  SELL (the SELL leg is charged the spread up front to recover the exit spread the simulator does not
+  model). So reusing `fill` as a long entry handed always-long a free half-spread on every SELL row
+  and biased the comparison *against* the gate. Corrected to `fill + 2 × spread` for SELL rows, worth
+  +0.0988R on NZDUSD — the same order as the effects being measured — and it moved the survivor count
+  from 1/20 to 3/20. **The general form: when a control reuses a field produced by the treatment, ask
+  what that field means for the treatment's *opposite* case.** A biased control hides real effects as
+  easily as it invents them, and it looks conservative, which is why it survives review.
+* **Re-deriving a value the pipeline already converted is how a 10× error gets in.** MT5's `spread`
+  column is in **points** (`10^-digits`), not pips — for 5-digit FX, 1 point is 0.00001 while
+  `pip_size` is 0.0001. `signal_scan._spread_for_bar` converts with `raw × point_size / pip_size` and
+  stores `spread_pips`; a tool that instead multiplied the bars' raw `spread` by `pip_size` reported
+  AUDUSD at 1.91R per trade when it costs 0.19R. **Consume the stored column.** If a stored value and
+  a recomputed one disagree, suspect the recomputation — the scanner had it right.

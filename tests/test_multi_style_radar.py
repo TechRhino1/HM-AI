@@ -7,6 +7,25 @@ from datetime import datetime, timezone
 
 class TestMultiStyleRadar(unittest.TestCase):
     def setUp(self):
+        # These tests exercise radar plumbing across styles, not feed freshness.
+        # The orchestrator reads live MT5 bars, so the stale-feed gate will
+        # (correctly) refuse to decide whenever an instrument sits between bars or
+        # inside its daily break -- which made the assertions below depend on the
+        # wall clock and on the broker connection rather than on the code under
+        # test. Neutralise that one gate; everything else runs for real.
+        #
+        # Note this gate only blocks on STALE, never on UNKNOWN, so before the
+        # broker-offset defect was fixed these tests passed for the wrong reason:
+        # a zero offset made every age negative, which classified frames UNKNOWN,
+        # which the gate tolerates. Fixing the offset made the ages truthful and
+        # exposed the dependency.
+        self._freshness = patch(
+            "jarvis.market.data_feed.first_untrusted_frame",
+            return_value=(None, None, 0.0),
+        )
+        self._freshness.start()
+        self.addCleanup(self._freshness.stop)
+
         self.state_mgr = StateManager()
         self.orchestrator = JarvisOrchestrator(
             symbols=["XAUUSD", "EURUSD"],

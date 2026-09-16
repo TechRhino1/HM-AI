@@ -159,14 +159,112 @@ def time_now():
 
 # ─── The gate ───────────────────────────────────────────────────────────────
 
-def _stamped(verdict, age):
+def _stamped(verdict, age, source=None):
     import pandas as pd
 
     frame = pd.DataFrame({"close": [1.0]})
     frame.attrs["freshness"] = verdict
     frame.attrs["bar_age_sec"] = age
+    if source is not None:
+        frame.attrs["data_source"] = source
     return frame
 
+
+# ─── The broader gate: a live frame whose age cannot be verified ─────────────
+# `first_stale_frame` blocks on STALE alone. That is not enough, because
+# `classify_bar_freshness` returns UNKNOWN not only for an unrecognised
+# timeframe but also when the age cannot be computed at all -- and a frame
+# stamped LIVE_MT5 in that state is "real bars, unknown age", which is not the
+# same statement as "these bars are synthetic". Treating them alike is what let
+# a broken broker-clock offset silently disable the gate.
+
+def test_a_live_frame_with_an_unverifiable_age_is_refused():
+    from jarvis.market.data_feed import first_untrusted_frame
+
+    mtf = {"primary": _stamped(FRESHNESS_UNKNOWN, None, source="LIVE_MT5")}
+    role, reason, _age = first_untrusted_frame(mtf)
+
+    assert role == "primary"
+    assert reason == "unverifiable_age"
+
+
+def test_a_non_live_frame_with_an_unverifiable_age_is_still_tolerated():
+    """The dev/synthetic paths must keep working.
+
+    A frame that does not claim to be live is already labelled and surfaced; the
+    gate is for frames that *claim* to be real. Refusing these would break the
+    synthetic paths rather than protect anything.
+    """
+    from jarvis.market.data_feed import first_untrusted_frame
+
+    assert first_untrusted_frame(
+        {"primary": _stamped(FRESHNESS_UNKNOWN, None, source="SYNTHETIC_FALLBACK")}
+    ) == (None, None, 0.0)
+    # No source claim at all: unchanged from the narrow gate's behaviour.
+    assert first_untrusted_frame({"primary": _stamped(FRESHNESS_UNKNOWN, None)}) == (
+        None, None, 0.0)
+
+
+def test_a_stale_frame_reports_the_stale_reason_not_the_unknown_one():
+    from jarvis.market.data_feed import first_untrusted_frame
+
+    role, reason, age = first_untrusted_frame(
+        {"primary": _stamped(STALE, 7200.0, source="LIVE_MT5")}
+    )
+
+    assert (role, reason) == ("primary", "stale")
+    assert age == 7200.0
+
+
+def test_a_closed_market_never_blocks_even_when_the_frame_is_live():
+    from jarvis.market.data_feed import first_untrusted_frame
+
+    assert first_untrusted_frame(
+        {"macro": _stamped(MARKET_CLOSED, 1e5, source="LIVE_MT5")}
+    ) == (None, None, 0.0)
+
+
+def test_a_fresh_live_frame_is_never_blocked():
+    from jarvis.market.data_feed import first_untrusted_frame
+
+    assert first_untrusted_frame(
+        {"primary": _stamped(FRESH, 5.0, source="LIVE_MT5")}
+    ) == (None, None, 0.0)
+
+
+def test_an_absent_or_empty_map_is_safe():
+    from jarvis.market.data_feed import first_untrusted_frame
+
+    assert first_untrusted_frame({}) == (None, None, 0.0)
+    assert first_untrusted_frame(None) == (None, None, 0.0)
+
+
+def test_the_fail_open_shape_is_closed():
+    """The exact defect, end to end.
+
+    A zero broker offset made `age = (now + 0) - bar_epoch` negative, which
+    `classify_bar_freshness` maps to UNKNOWN, which the old gate tolerated -- so
+    the stale-feed gate stopped blocking anything while still reporting success.
+    Reconstruct that frame and assert it is now refused.
+    """
+    from jarvis.market.data_feed import classify_bar_freshness, first_untrusted_frame
+
+    # An H1 bar stamped 3 hours ahead of the real clock: what a zero offset
+    # produces when the broker runs GMT+3.
+    bar_epoch = WED_NOON + 3 * HOUR
+    verdict, age = classify_bar_freshness(bar_epoch, "H1", now_utc=WED_NOON, offset_sec=0)
+
+    assert verdict == FRESHNESS_UNKNOWN
+    assert age < -HOUR
+
+    # Stamped as a live frame, as `fetch_rates` does, it must now block.
+    role, reason, _ = first_untrusted_frame({"primary": _stamped(verdict, age, source="LIVE_MT5")})
+    assert (role, reason) == ("primary", "unverifiable_age")
+
+    # With the offset supplied the age is truthful and the frame is FRESH, so the
+    # gate does not block a healthy feed -- the fix is not "always refuse".
+    verdict2, _ = classify_bar_freshness(bar_epoch, "H1", now_utc=WED_NOON, offset_sec=3 * HOUR)
+    assert verdict2 == FRESH
 
 def test_the_stale_role_is_reported_across_the_timeframe_map():
     from jarvis.market.data_feed import first_stale_frame
@@ -210,6 +308,60 @@ def test_the_orchestrator_refuses_to_decide_on_a_stale_frame(monkeypatch):
         assert res["authorized"] is False
         assert res["stale"] is True
         assert "STALE" in res["auth_reason"].upper() or "stale" in res["auth_reason"]
+    finally:
+        orch.stop()
+
+
+def test_the_orchestrator_refuses_a_live_frame_with_an_unverifiable_age(monkeypatch):
+    """The enforcement half of the fail-open fix.
+
+    `first_untrusted_frame` existing is not the same as the decision cycle using
+    it. This drives the real cycle with a frame that is stamped LIVE_MT5 but
+    carries no verifiable age, and asserts it refuses rather than deciding.
+    """
+    from jarvis.application.orchestrator import JarvisOrchestrator
+
+    orch = JarvisOrchestrator(mode="paper")
+    try:
+        monkeypatch.setattr(
+            orch.data_feed,
+            "fetch_multi_timeframe",
+            lambda *a, **k: {
+                "primary": _stamped(FRESHNESS_UNKNOWN, None, source="LIVE_MT5"),
+                "macro": _stamped(FRESH, 5.0, source="LIVE_MT5"),
+            },
+        )
+        res = orch.run_cycle_for_symbol("XAUUSD", "SWING")
+
+        assert res["decision"] is None
+        assert res["authorized"] is False
+        assert res["stale"] is True
+        assert "unverifiable" in res["auth_reason"]
+    finally:
+        orch.stop()
+
+
+def test_the_orchestrator_still_decides_when_the_unverifiable_frame_is_not_live(monkeypatch):
+    """Control: a synthetic frame with no age must not block.
+
+    Otherwise the fix trades one failure mode for another -- the synthetic paths
+    legitimately carry UNKNOWN.
+    """
+    from jarvis.application.orchestrator import JarvisOrchestrator
+
+    orch = JarvisOrchestrator(mode="paper")
+    try:
+        monkeypatch.setattr(
+            orch.data_feed,
+            "fetch_multi_timeframe",
+            lambda *a, **k: {
+                "primary": _stamped(FRESHNESS_UNKNOWN, None, source="SYNTHETIC_FALLBACK"),
+                "macro": _stamped(FRESH, 5.0),
+            },
+        )
+        res = orch.run_cycle_for_symbol("XAUUSD", "SWING")
+
+        assert res.get("stale") is not True
     finally:
         orch.stop()
 

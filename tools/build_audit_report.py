@@ -222,6 +222,10 @@ def build_html() -> str:
   .p2 {{ background:#e8f1fb; color:#1f5f9e; }}
   .p3 {{ background:#eef0f2; color:#5a6169; }}
   .note {{ font-size:12.5px; color:var(--ink3); margin-top:10px; }}
+  .measured {{ background:#f3f8f4; border-left:4px solid var(--ok); padding:12px 16px;
+    border-radius:0 8px 8px 0; margin:14px 0; }}
+  .measured table {{ margin:8px 0 4px; }}
+  .measured th {{ background:#e7f0ea; }}
   .disc {{ background:#f0f2f5; border:1px solid var(--line); border-radius:8px;
     padding:14px 18px; font-size:12.5px; color:var(--ink2); margin-top:40px; }}
 </style>
@@ -550,6 +554,50 @@ score is the precondition for any threshold to do work.</p>
 <p><b>Acceptance.</b> Brier score below the base-rate reference and a reliability diagram within
 ±0.05 of the diagonal on held-out folds; score deciles monotone in realised win rate
 (Spearman ρ ≥ 0.5) on out-of-sample data.</p>
+<p class="measured"><b>Measured, on real MT5 bars</b> (<code>tools/p0_1_gate_measurement.py</code>,
+<code>tools/p0_1_direction_audit.py</code>; H1, 365d, 20 symbols, 94,937 trades, tp=1.5R). The
+gate was re-measured twice. The first run was invalid: the scanner charged the spread on
+<b>BUY only</b>, so every SELL candidate entered at the mid with no cost — a free short leg that
+flattered the whole book.</p>
+<table>
+<thead><tr><th>Statistic</th><th class="num">free SELL leg</th><th class="num">both legs pay</th></tr></thead>
+<tbody>
+<tr><td>mean R per trade</td><td class="num">−0.0243</td><td class="num bad">−0.0509</td></tr>
+<tr><td>mean of per-symbol means</td><td class="num">−0.0259</td><td class="num bad">−0.0510</td></tr>
+<tr><td>cluster-robust t (symbols as units)</td><td class="num">−1.77</td><td class="num bad">−3.04</td></tr>
+<tr><td>p</td><td class="num">0.094</td><td class="num bad">0.0067</td></tr>
+<tr><td>95% CI on the mean</td><td class="num">[−0.0546, +0.0011]</td>
+  <td class="num bad">[−0.0835, −0.0201]</td></tr>
+<tr><td>symbols PF ≥ 1.0 / ≥ 1.3</td><td class="num">7/20 / 0/20</td><td class="num">6/20 / 0/20</td></tr>
+</tbody></table>
+<p><b>The corrected cost basis doubles the measured loss and flips the verdict.</b> With the free
+short leg the interval contained zero — "no significant evidence the gate loses". With both legs
+paying it excludes zero, so <b>the gate loses money at p=0.0067</b>. The implied one-spread cost is
+2 × 0.0266R ≈ 0.053R, consistent with a ~1.5-pip spread against a ~24-pip stop, so the magnitude is
+what the arithmetic predicts rather than an artefact. Independent confirmation: the side asymmetry
+<b>inverted</b> from SELL-better on 13/20 symbols to SELL-worse on 12/20 — exactly what removing a
+one-sided subsidy must do.</p>
+<p><b>Pooled statistics lie here.</b> Pooling all 94,937 trades gives t=−12.9, but trades within a
+symbol share time, regime and cost structure, so they are not independent. The honest unit is the
+symbol (n=20), which gives t=−3.04. The pooled figure is reported only as a contrast.</p>
+<p><b>Stage 2 — the apparent survivors are beta, not skill.</b> Only XAUUSD clears the
+multiple-testing bar (t=+4.85 against a max|t| null p95 of 3.01). But measured against
+<i>always-long with the same entries, risk distance and target</i>, the gate is worse on every one
+of them:</p>
+<table>
+<thead><tr><th>Symbol</th><th class="num">Gate mean R</th><th class="num">Always-long</th>
+  <th class="num">Edge over beta</th><th>Verdict</th></tr></thead>
+<tbody>
+<tr><td>XAUUSD</td><td class="num">+0.0889</td><td class="num">+0.1140</td>
+  <td class="num bad">−0.0251</td><td class="bad">BETA</td></tr>
+<tr><td>XAGUSD</td><td class="num">+0.0303</td><td class="num">+0.0808</td>
+  <td class="num bad">−0.0505</td><td class="bad">BETA</td></tr>
+<tr><td>WTI</td><td class="num">+0.0089</td><td class="num">+0.1029</td>
+  <td class="num bad">−0.0940</td><td class="bad">BETA</td></tr>
+</tbody></table>
+<p>A gate that mostly says BUY on a rising instrument shows positive mean R with no directional
+information. Only 3 of 20 symbols are both profitable <i>and</i> better than always-long, and the
+"direction adds value" verdict flips with the window on all of them; only "gate loses" is stable.</p>
 </div>
 
 <div class="card">
@@ -604,6 +652,162 @@ anything.</p>
 </ul>
 <p><b>Acceptance.</b> Per symbol, across the full test period: PF ≥ 1.3 and max DD ≤ 10%, with the
 parameters re-fitted on a rolling window and evaluated only out-of-sample.</p>
+<p class="measured"><b>Measured — the stop's noise band</b>
+(<code>tools/p0_3_exit_geometry_measurement.py --parts A</code>). A stop has to sit outside the range
+an ordinary bar covers by itself, so <code>k</code> is the quantile of
+<code>|close−open| / ATR</code> — not a regime name. The ratio turns out to be
+<b>symbol-invariant and timeframe-invariant</b>: body median 0.322–0.373 across FX, JPY crosses,
+gold, silver, oil, three indices and three cryptos, and adverse q90 of 1.431 (H1) / 1.428 (M15) /
+1.406 (M5).</p>
+<p><b>False-stop rate</b> = P(the bar's own adverse range exceeds k×ATR), directional form (mean of
+the up-side and down-side rates, which is the honest figure for a balanced book):</p>
+<table>
+<thead><tr><th>k</th><th class="num">H1</th><th class="num">M15</th><th class="num">M5</th></tr></thead>
+<tbody>
+<tr><td>0.85</td><td class="num">16.9%</td><td class="num">16.9%</td><td class="num">17.2%</td></tr>
+<tr><td>1.00</td><td class="num">12.2%</td><td class="num">12.1%</td><td class="num">12.2%</td></tr>
+<tr><td><b>1.11</b></td><td class="num"><b>10.0%</b></td><td class="num"><b>10.0%</b></td>
+  <td class="num"><b>10.0%</b></td></tr>
+<tr><td>1.25</td><td class="num">7.3%</td><td class="num">7.1%</td><td class="num">7.0%</td></tr>
+</tbody></table>
+<p>One universal <code>k ≈ 1.11</code> buys a 10% mechanical false-stop rate on <i>every</i>
+timeframe and <i>every</i> symbol. Against that yardstick the style caps in
+<span class="path">dynamic_levels.py:174,303</span> are:</p>
+<table>
+<thead><tr><th>Style cap as shipped</th><th class="num">k</th>
+  <th class="num">False-stop rate</th></tr></thead>
+<tbody>
+<tr><td>SCALP <code>min(0.65×ATR, …)</code></td><td class="num">0.65</td>
+  <td class="num bad">28.3%</td></tr>
+<tr><td>DAY_TRADING index <code>min(0.90×ATR, …)</code></td><td class="num">0.90</td>
+  <td class="num warn">15.3%</td></tr>
+<tr><td>DAY_TRADING forex <code>min(1.05×ATR, …)</code></td><td class="num">1.05</td>
+  <td class="num">11.1%</td></tr>
+<tr><td>DAY_TRADING other <code>min(1.30×ATR, …)</code></td><td class="num">1.30</td>
+  <td class="num ok">6.6%</td></tr>
+<tr><td>SWING fallback <code>0.85–1.00×ATR + 0.35 buffer</code></td><td class="num">1.20–1.35</td>
+  <td class="num ok">8.3% / 6.1%</td></tr>
+</tbody></table>
+<p><b>SCALP is the only materially broken one</b>: its cap puts the stop at 0.65×ATR, which more than
+a quarter of M5 bars take out on their own range before any directional information is used. Because
+the noise band is timeframe-invariant, the cap cannot be justified as "tighter because the horizon
+is shorter" — the ratio of bar range to ATR does not shrink with the timeframe. SWING is fine as
+shipped.</p>
+<p><b>The spec's "scale by ATR percentile" clause should not be implemented.</b> The correlation
+between a causal rolling k and the ATR percentile is positive in <b>20/20</b> symbols (median
++0.234), so the effect is real rather than noise — but it is worth +5.2%: rolling q90 k moves
+1.033 → 1.087 from the bottom ATR quintile to the top, which shifts the false-stop rate by about one
+percentage point. That is complexity bought for nothing.</p>
+<p class="note"><b>Method note.</b> The first version of this measurement took
+<code>max(up, down)</code> — the worst case for <i>any</i> stop. But a BUY stop sits below and a SELL
+stop above, so for a balanced book the honest figure is the <i>mean</i> of the two one-sided rates.
+The worst-case form inflated SCALP from 28.3% to 53.7%, a 1.9× overstatement. Both are now computed;
+only the directional one is quoted. Changing the SCALP cap still has to clear the payoff test in
+parts B–D — a lower false-stop rate is not by itself evidence of a better system.</p>
+<p class="measured"><b>Measured — the target, the clock and the cost gate</b>
+(<code>tools/p0_3_exit_geometry_measurement.py --parts B,C,D</code>, H1 365d, 20/20 symbols).
+Every sweep point carries an <b>always-long control</b>: the same entries, the same risk distance
+and the same target multiple, with only the direction fixed. Without that control a sweep measures
+drift, not the parameter — an uncontrolled tp sweep on XAUUSD reported "best tp=6, E=+0.33R",
+which is simply what a wider target with a fixed stop and a 200-bar clock does.</p>
+<table>
+<thead><tr><th>Test</th><th>Result</th><th>Reading</th></tr></thead>
+<tbody>
+<tr><td><b>B.</b> Does a different target help?</td>
+  <td>Mean edge over always-long at tp=1.5 is <b>−0.0068R</b>. <b>10/20</b> symbols never beat
+  always-long at <i>any</i> of the 8 tp levels; 7/20 beat it at all 8.</td>
+  <td>The target is not the constraint. The split is bimodal, not marginal — which is what noise
+  looks like when you force it into a threshold.</td></tr>
+<tr><td><b>B.</b> Is the best tp a real optimum?</td>
+  <td>The argmax tp is <b>tp1 for 8 symbols, tp6 for 4, tp2 for 3, tp2.5 for 3, tp1.25 for 1,
+  tp3 for 1</b> — the full width of the grid.</td>
+  <td>No clustering anywhere. "The optimum" is fitted noise, not a level the market recognises.</td></tr>
+<tr><td><b>C.</b> Does the 200-bar clock cut winners short?</td>
+  <td>Confirmed and reproduced: at tp=3.0, <code>avg_win/tp</code> is <b>0.913</b> at mb=200,
+  <b>0.969</b> at mb=400, <b>0.980</b> at mb=1000 (XAUUSD alone: 0.9285 → 0.9855).</td>
+  <td>The audit's specific claim is right, and the effect is real.</td></tr>
+<tr><td><b>C.</b> Does relaxing it create an edge?</td>
+  <td>Edge over always-long: <b>−0.0389R</b> at mb=200 → <b>−0.0388R</b> at mb=1000.</td>
+  <td>Removing the clock helps always-long exactly as much as it helps the gate. Not the binding
+  constraint either.</td></tr>
+<tr><td><b>D.</b> Does the setup clear its own cost?</td>
+  <td><b>6/20</b> symbols spend &gt;20% of a 1R target on round-trip cost; <b>5/20</b> spend
+  &gt;50%. Worst: SOLUSD 90.1%, NZDUSD 81.8%, USDCAD 61.5%, AUDUSD 51.5%, USDCHF 50.6%.</td>
+  <td>For those five the cost gate alone rules the setup out before any signal is consulted —
+  which is what the gate in this card is for.</td></tr>
+</tbody></table>
+<p class="note"><b>Method note (B–D).</b> The first run of these sweeps used a <i>biased</i> control:
+<code>forced_long_benchmark</code> entered the long at the candidate's stored <code>fill</code>,
+which is the ask for a BUY row but the bid for a SELL row — handing always-long a free half-spread
+and biasing the comparison against the gate. Corrected to <code>fill + 2 × spread</code> for SELL
+rows (worth +0.0988R on NZDUSD, the same order as the effects being measured), the survivor count
+moved from 1/20 to 3/20. Part D also overstated cost by exactly <b>10×</b> until it was pointed at
+the candidates' own <code>spread_pips</code> column: MT5's <code>spread</code> is in <i>points</i>,
+so multiplying the bars' raw column by <code>pip_size</code> reported AUDUSD at 1.91R per trade
+instead of 0.19R. <b>Consume the scanner's converted column; never re-derive it.</b></p>
+<p class="measured"><b>Measured — the stop multiple itself, priced</b> (<code>--parts E</code>).
+Part A measures what a given <code>k</code> <i>prevents</i>; this measures what it <i>costs</i>. The
+stop is forced to <code>k × ATR</code> with the entry and the target multiple held fixed, so the
+only thing varying across the sweep is the stop distance, and every point carries the always-long
+control at the same <code>k</code>.</p>
+<table>
+<thead><tr><th class="num">k</th>
+  <th class="num">H1 mean E</th><th class="num">H1 edge</th><th class="num">H1 t</th>
+  <th class="num">H1 %stop</th>
+  <th class="num">M15 mean E</th><th class="num">M15 edge</th><th class="num">M15 t</th>
+  <th class="num">M15 %stop</th></tr></thead>
+<tbody>
+<tr><td class="num">0.65</td><td class="num">−0.2612</td><td class="num">+0.0119</td>
+  <td class="num">+1.67</td><td class="num">69.4%</td>
+  <td class="num">−0.5068</td><td class="num">+0.0100</td><td class="num">+1.69</td>
+  <td class="num">77.6%</td></tr>
+<tr><td class="num">0.85</td><td class="num">−0.2081</td><td class="num">+0.0041</td>
+  <td class="num">+0.51</td><td class="num">67.5%</td>
+  <td class="num">−0.4129</td><td class="num">+0.0134</td><td class="num">+2.03</td>
+  <td class="num">74.5%</td></tr>
+<tr><td class="num">1.00</td><td class="num">−0.1784</td><td class="num">−0.0001</td>
+  <td class="num">−0.01</td><td class="num">66.5%</td>
+  <td class="num">−0.3621</td><td class="num">+0.0160</td><td class="num">+2.09</td>
+  <td class="num">72.8%</td></tr>
+<tr><td class="num"><b>1.11</b></td><td class="num">−0.1583</td><td class="num">−0.0009</td>
+  <td class="num">−0.10</td><td class="num">65.7%</td>
+  <td class="num">−0.3338</td><td class="num warn">+0.0171</td><td class="num">+1.91</td>
+  <td class="num">71.9%</td></tr>
+<tr><td class="num">1.25</td><td class="num">−0.1373</td><td class="num">+0.0010</td>
+  <td class="num">+0.11</td><td class="num">64.9%</td>
+  <td class="num">−0.3036</td><td class="num">+0.0160</td><td class="num">+1.64</td>
+  <td class="num">70.8%</td></tr>
+<tr><td class="num">1.50</td><td class="num">−0.1064</td><td class="num">+0.0008</td>
+  <td class="num">+0.08</td><td class="num">63.8%</td>
+  <td class="num">−0.2620</td><td class="num">+0.0132</td><td class="num">+1.21</td>
+  <td class="num">69.4%</td></tr>
+<tr><td class="num">2.00</td><td class="num">−0.0608</td><td class="num">+0.0072</td>
+  <td class="num">+0.47</td><td class="num">62.0%</td>
+  <td class="num">−0.2083</td><td class="num">+0.0003</td><td class="num">+0.03</td>
+  <td class="num">67.5%</td></tr>
+</tbody></table>
+<p><b>The stop multiple is not a lever, and this is the clearest statement of P0-3's result.</b>
+Mean expectancy is negative at <i>every</i> <code>k</code> on <i>every</i> timeframe, and the mean
+edge over always-long never leaves the band <b>−0.001R to +0.017R</b> — against median round-trip
+costs of 0.1–0.3R on the same symbols (part D). The raw expectancy does improve monotonically as the
+stop widens (H1: −0.2612R at k=0.65 → −0.0608R at k=2.00), but always-long improves in lockstep
+(−0.2732R → −0.0680R), so the gain is <b>beta, not skill</b>: a wider stop with a fixed target
+multiple is simply closer to buy-and-hold.</p>
+<p><b>H1 shows no interior optimum at all.</b> The argmax-edge <code>k</code> is <b>0.65 for 9
+symbols and 2.00 for 8</b> — the two ends of the grid, with only 3 symbols anywhere in between. When
+a parameter's optimum lands on the boundary in both directions, the grid is not bracketing an
+optimum; it is recording noise. M15 is more interesting: a broad interior peak at
+<code>k ≈ 1.00–1.11</code> (edge +0.016/+0.017R, t +2.09/+1.91, 13–15 of 20 symbols positive), which
+is exactly the universal noise band part A measured. But t ≈ 2 sits below the multiple-testing bar
+for 20 symbols (median max|t| 2.120 over null draws) and the mean expectancy there is still
+<b>−0.334R</b>.</p>
+<p><b>Consequence for the SCALP cap.</b> SCALP's <code>min(0.65 × ATR, …)</code> is a genuine
+defect — a 28.3% mechanical false-stop rate is the stop sitting inside the bar's own noise, which
+means it is not expressing a view. But part E says fixing it is <b>not a performance claim</b>: the
+edge does not move. Raising the cap should be justified on noise-band grounds alone (the stop should
+sit outside the range an ordinary bar covers), and it must be measured on M5 before it is made.
+<b>P0-3's own acceptance test — PF ≥ 1.3, DD ≤ 10% — is not met at any <code>k</code> on any
+timeframe.</b> The exit geometry cannot rescue a signal whose entry carries no edge.</p>
 </div>
 
 <div class="card">
@@ -636,6 +840,31 @@ sizing — a missing spec must raise, not silently return FX defaults.</p>
 parquets.</p>
 <p><b>Acceptance.</b> Every candidate parquet covers ≥ 95% of its bar range; no symbol priced from
 a fallback; no <code>SYNTHETIC_FALLBACK</code> tag in any backtest input.</p>
+<p class="measured"><b>Measured — the re-scan, and the calibration it feeds.</b> Every table was
+regenerated from real MT5 bars <i>after</i> the SELL-leg cost fix
+(<code>fdf8e58</code>), because that fix changes the price basis of half the rows in every
+candidate table — and therefore every calibration and every SCALP/DAY_TRADING number fitted on
+them.</p>
+<table>
+<thead><tr><th>Table</th><th class="num">Symbols</th><th class="num">Candidates</th>
+  <th>Status</th></tr></thead>
+<tbody>
+<tr><td>H1 365d</td><td class="num">20/20</td><td class="num">94,937</td><td class="ok">done</td></tr>
+<tr><td>H1 183d</td><td class="num">20/20</td><td class="num">46,939</td><td class="ok">done</td></tr>
+<tr><td>H1 95d</td><td class="num">16/16</td><td class="num">18,998</td><td class="ok">done</td></tr>
+<tr><td>M15 183d</td><td class="num">20/20</td><td class="num">182,508</td><td class="ok">done</td></tr>
+<tr><td>M5 183d</td><td class="num">20</td><td class="num">—</td><td class="warn">running</td></tr>
+</tbody></table>
+<p><b>The score calibration is refitted on the corrected cache and the verdict does not move:
+0/20 symbols show out-of-sample skill in either window</b> (AUC &gt; 0.55 <i>and</i> BSS &gt; 0.02).
+The extremes shrink as the sample doubles — the largest <code>|AUC − 0.5|</code> falls from
+<b>0.087</b> at 183d (GBPJPY 0.575, NZDUSD 0.413) to <b>0.055</b> at 365d (USDJPY 0.445) — which is
+the rate a pure-noise process would shrink at (0.087/√2 = 0.062). There is no signal for a larger
+sample to converge to, which is the honest reading of the earlier 0/20 rather than a shortage of
+data.</p>
+<p class="note">The 95d table covers 16 symbols, not 20: EURJPY, GBPJPY, US500 and WTI have no
+<code>H1_95d</code> bar cache, so <code>discover_symbols</code> excludes them by construction.
+Verified, not assumed.</p>
 </div>
 
 <div class="card">
@@ -646,6 +875,41 @@ number, keep purged k-fold with embargo (already present at
 <span class="path">winrate_targeting.py:663-666</span>) and add <b>sample-uniqueness weighting</b>,
 since <code>max_bars=200</code> makes labels overlap heavily.</p>
 <p><b>Acceptance.</b> DSR &gt; 0.95 before any parameter set is promoted to live.</p>
+<p class="measured"><b>Measured — the deflation, and the larger problem underneath it</b>
+(<code>tools/deflated_sharpe_report.py</code>, 20/20 symbols, 8-point tp grid).
+<code>n_trials</code> is the grid the search actually walked and <code>var(trial SR)</code> is the
+measured dispersion of the trial Sharpes, so the deflation is computed rather than assumed. The
+uniqueness half uses the bar span of every replayed trade, which is what turns a row count into an
+independent-bet count.</p>
+<table>
+<thead><tr><th>Quantity</th><th class="num">H1 365d</th><th class="num">H1 183d</th></tr></thead>
+<tbody>
+<tr><td>Symbols passing DSR &gt; 0.95 at their selected tp_r, on the raw row count</td>
+  <td class="num warn">5/20</td><td class="num">1/20</td></tr>
+<tr><td>Symbols passing on the <b>effective</b> sample size</td>
+  <td class="num bad">0/20</td><td class="num bad">0/20</td></tr>
+<tr><td>Symbols passing at the production tp_r = 1.5</td>
+  <td class="num bad">0/20</td><td class="num bad">0/20</td></tr>
+<tr><td>Portfolio: rows → independent bets</td>
+  <td class="num">94,937 → <b>327</b> (0.3%)</td><td class="num">46,939 → <b>163</b> (0.3%)</td></tr>
+<tr><td>Portfolio DSR</td><td class="num bad">0.000</td><td class="num bad">0.000</td></tr>
+</tbody></table>
+<p><b>The search was never the main problem.</b> Deflating for the tp grid alone still leaves five
+symbols looking acceptable at 365d — XAUUSD 1.000, XAGUSD 1.000, ETHUSD 0.996, BTCUSD 0.992,
+USDCAD 0.982. What removes them is the overlap. A candidate is emitted on nearly every bar and
+<code>max_bars=200</code> keeps hundreds of positions open at once, so <b>94,937 trades are worth
+327 independent bets</b>. On that basis the same five fall to 0.844, 0.754, 0.664, 0.675 and 0.621,
+and <b>nothing clears the bar</b>. Treating the row count as the sample size overstated the evidence
+by <b>290×</b>.</p>
+<p>The best case is WTI, which would need a track record of <b>4,985 trades</b> before its Sharpe
+could be told apart from the best of this search; it has 4,133. <code>min_track_record_length</code>
+is reported per symbol in <span class="path">reports/deflated_sharpe_365d.json</span> for exactly
+this reason — it says how long a promising result would have to run before it meant anything.</p>
+<p class="note"><b>Method note.</b> Substituting an effective sample size into the PSR is a
+practical approximation, not an exact derivation: the formula assumes i.i.d. observations and
+overlapping labels are not i.i.d. It is used here because it errs <i>conservative</i> — it can only
+lower the DSR — and because the alternative, quoting the raw count, errs by two orders of magnitude
+in the other direction. Both numbers are reported so the gap stays visible.</p>
 </div>
 
 <h2>5. Where profitability is unrealistic — and what to target instead</h2>

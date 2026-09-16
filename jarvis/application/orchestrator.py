@@ -288,11 +288,15 @@ class JarvisOrchestrator:
         return out
 
     @staticmethod
-    def _first_stale_frame(mtf_data) -> Tuple[Optional[str], float]:
-        """First role whose frame is STALE, with its age. ``(None, 0.0)`` if none."""
-        from jarvis.market.data_feed import first_stale_frame
+    def _first_untrusted_frame(mtf_data) -> Tuple[Optional[str], Optional[str], float]:
+        """First role we must not reason on, with the reason and age.
 
-        return first_stale_frame(mtf_data)
+        Returns ``(role, reason, age_sec)`` where ``reason`` is ``"stale"`` or
+        ``"unverifiable_age"``; ``(None, None, 0.0)`` when every frame is usable.
+        """
+        from jarvis.market.data_feed import first_untrusted_frame
+
+        return first_untrusted_frame(mtf_data)
 
     @staticmethod
     def _first_unusable_frame(mtf_data) -> Tuple[Optional[str], Optional[str]]:
@@ -315,26 +319,37 @@ class JarvisOrchestrator:
         # 1. Fetch Multi-Timeframe Data based on trade_style
         mtf_data = self.data_feed.fetch_multi_timeframe(symbol, trade_style=active_trade_style)
 
-        # 1b. A frame that claims to be LIVE_MT5 but has stopped updating must not
-        # be reasoned on: a stalled feed yields a decision that looks entirely
-        # valid, which is the worst kind. Only STALE blocks. UNKNOWN is a
-        # synthetic/fallback frame (already labelled as such and surfaced in the
-        # UI), and MARKET_CLOSED is a shut market rather than a broken feed - the
-        # session logic already governs that case.
-        stale_role, stale_age = self._first_stale_frame(mtf_data)
-        if stale_role:
-            logger.warning(
-                "Refusing to decide on %s (%s): the %s timeframe frame is STALE "
-                "(%.0fs old) while the market is open.",
-                symbol, active_trade_style, stale_role, stale_age,
-            )
+        # 1b. A frame that claims to be LIVE_MT5 but cannot be shown to be
+        # current must not be reasoned on: a stalled feed yields a decision that
+        # looks entirely valid, which is the worst kind. Two cases block --
+        # STALE (we know it is old) and UNKNOWN-on-a-live-frame (we cannot tell
+        # how old it is, which is not the same statement as "these bars are
+        # synthetic"). MARKET_CLOSED never blocks: a shut market is not a broken
+        # feed, and the session logic already governs that case.
+        bad_role, bad_reason, bad_age = self._first_untrusted_frame(mtf_data)
+        if bad_role:
+            if bad_reason == "stale":
+                detail = f"stale {bad_role} candles ({bad_age:.0f}s old)"
+                logger.warning(
+                    "Refusing to decide on %s (%s): the %s timeframe frame is STALE "
+                    "(%.0fs old) while the market is open.",
+                    symbol, active_trade_style, bad_role, bad_age,
+                )
+            else:
+                detail = f"unverifiable {bad_role} candle age"
+                logger.warning(
+                    "Refusing to decide on %s (%s): the %s timeframe frame is stamped "
+                    "LIVE_MT5 but its age cannot be verified, so it cannot be shown to "
+                    "be current.",
+                    symbol, active_trade_style, bad_role,
+                )
             return {
                 "symbol": symbol,
                 "trade_style": active_trade_style,
                 "decision": None,
                 "context": None,
                 "authorized": False,
-                "auth_reason": f"stale {stale_role} candles ({stale_age:.0f}s old)",
+                "auth_reason": detail,
                 "dry_run": bool(dry_run),
                 "execution": None,
                 "stale": True,

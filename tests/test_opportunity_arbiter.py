@@ -7,6 +7,7 @@ Covers:
 - Orchestrator multi-style arbitration integration and closed-trade learning feedback
 """
 import unittest
+from unittest.mock import patch
 import numpy as np
 import tempfile
 import os
@@ -396,6 +397,17 @@ class TestStrategyBandit(unittest.TestCase):
 class TestOrchestratorMultiStyleRadar(unittest.TestCase):
 
     def setUp(self):
+        # See tests/test_multi_style_radar.py: this asserts radar/arbiter plumbing,
+        # not feed freshness, but the orchestrator reads live MT5 bars. Without
+        # neutralising the stale-feed gate the result depends on the wall clock and
+        # the broker connection. Only that gate is patched.
+        self._freshness = patch(
+            "jarvis.market.data_feed.first_untrusted_frame",
+            return_value=(None, None, 0.0),
+        )
+        self._freshness.start()
+        self.addCleanup(self._freshness.stop)
+
         self.orchestrator = JarvisOrchestrator(
             symbols=["XAUUSD", "EURUSD"],
             mode="paper",

@@ -49,6 +49,16 @@ _MAX_OFFSET_SEC = 14 * 3600
 # every position sync - and each derivation costs an MT5 round-trip per symbol.
 _CACHE_TTL_SEC = 600
 
+# The offset is a property of the SERVER, so any symbol's fresh tick yields the
+# same answer. That matters because the natural caller passes exactly one symbol
+# (the position's), and a single slowly-updating symbol breaks the derivation:
+# gold's tick runs ~17 minutes behind EURUSD's, which lands 799s away from the
+# nearest 30-minute boundary and trips the 300s staleness tolerance. The result
+# was a silent offset of 0 - the exact bug this module exists to prevent - for
+# every caller that happened to hold gold. Retrying across liquid majors costs
+# one extra round-trip only when the first attempt already failed.
+_FALLBACK_OFFSET_SYMBOLS = ("EURUSD", "GBPUSD", "USDJPY", "US500", "US30", "AUDUSD")
+
 _cache: dict = {"offset": None, "at": 0.0, "warned": False}
 
 
@@ -57,11 +67,46 @@ def _derive_offset(mt5_module, symbols: Iterable[str], clock: float) -> Optional
 
     Uses the FRESHEST tick across the given symbols: ticks are server-stamped, so
     the newest one is the closest thing to "now" on the broker's clock.
+
+    Two things have to be true before a tick is readable at all, and each was
+    independently fatal here:
+
+    1. **The terminal must be initialized in THIS process.** `symbol_info_tick`
+       returns ``None`` for every symbol otherwise, which looks exactly like "no
+       trustworthy reading" and silently degrades the offset to 0. The execution
+       client only initializes the terminal for modes that place orders, so a
+       paper/backtest process that merely *reads* data never had it. Same defect
+       as the market-data path — see `broker_symbols.ensure_mt5_terminal`.
+    2. **The symbol must be the BROKER's, not the canonical one.** MT5 knows gold
+       as ``GOLD.i#``; ``symbol_info_tick("XAUUSD")`` is ``None``. Passing
+       canonical names therefore dropped every symbol and returned 0 even with a
+       healthy terminal. Callers that already hold broker symbols are unaffected;
+       resolution is idempotent and cached.
     """
+    # 1. Make sure the terminal exists in this process before asking it anything.
+    try:
+        from jarvis.data.broker_symbols import ensure_mt5_terminal  # local: avoid import cycle
+
+        ensure_mt5_terminal()
+    except Exception:
+        pass
+
+    # 2. Ask about the symbol the broker actually knows.
+    try:
+        from jarvis.data.broker_symbols import resolve_broker_symbol
+
+        resolve = resolve_broker_symbol
+    except Exception:
+        resolve = lambda s: s  # noqa: E731 - degrade to the previous behaviour
+
     newest = 0
     for sym in symbols:
         try:
-            tick = mt5_module.symbol_info_tick(sym)
+            broker_sym = resolve(sym) or sym
+        except Exception:
+            broker_sym = sym
+        try:
+            tick = mt5_module.symbol_info_tick(broker_sym)
         except Exception:
             continue
         if tick is None:
@@ -104,6 +149,13 @@ def broker_utc_offset(mt5_module=None, symbols: Iterable[str] = (), now: Optiona
             return _cache["offset"] or 0
 
     offset = _derive_offset(mt5_module, list(symbols), clock)
+    if offset is None:
+        # Retry across liquid majors. The offset is server-wide, so a fresh tick
+        # from any instrument answers the same question, and a single slow symbol
+        # should not be able to degrade the whole platform to offset 0.
+        extra = [s for s in _FALLBACK_OFFSET_SYMBOLS if s not in set(symbols)]
+        if extra:
+            offset = _derive_offset(mt5_module, extra, clock)
 
     if offset is None:
         if not _cache["warned"]:

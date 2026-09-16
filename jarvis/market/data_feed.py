@@ -157,12 +157,51 @@ def first_stale_frame(mtf_data) -> tuple:
     second age calculation would be a second thing to keep in step with the
     broker's clock. Used by every decision path so "do not act on a stalled
     feed" cannot be enforced in one entry point and forgotten in another.
+
+    Narrower than :func:`first_untrusted_frame`, which is what the decision paths
+    use. Kept because "is any frame stale" is still a question worth being able
+    to ask on its own.
     """
     for role, frame in (mtf_data or {}).items():
         attrs = getattr(frame, "attrs", None) or {}
         if attrs.get("freshness") == STALE:
             return role, float(attrs.get("bar_age_sec") or 0.0)
     return None, 0.0
+
+
+LIVE_SOURCE = "LIVE_MT5"
+
+
+def first_untrusted_frame(mtf_data) -> tuple:
+    """First ``(role, reason, age_sec)`` we must not reason on, else ``(None, None, 0.0)``.
+
+    Broader than :func:`first_stale_frame` in exactly one way, and that way is
+    the one that matters: a frame stamped ``LIVE_MT5`` whose freshness is
+    ``UNKNOWN`` is refused, because we cannot say how old it is.
+
+    This closes a fail-open. ``classify_bar_freshness`` returns ``UNKNOWN`` not
+    only for an unrecognised timeframe but also when ``last_bar_epoch`` is absent
+    or the age is more negative than one bar. The gate used to block on ``STALE``
+    alone, on the assumption that ``UNKNOWN`` meant "synthetic/fallback frame".
+    It does not. When ``broker_utc_offset`` returned 0 every age came out
+    negative, every frame became ``UNKNOWN``, and the stale-feed gate silently
+    stopped blocking anything - two independent safety mechanisms sharing one
+    failure mode, with the check reporting success throughout.
+
+    ``UNKNOWN`` on a frame that does **not** claim to be live is still tolerated:
+    a synthetic frame is already labelled and surfaced, and refusing it would
+    break the dev paths rather than protect anything. ``MARKET_CLOSED`` never
+    blocks - a shut market is not a broken feed.
+    """
+    for role, frame in (mtf_data or {}).items():
+        attrs = getattr(frame, "attrs", None) or {}
+        verdict = attrs.get("freshness")
+        age = float(attrs.get("bar_age_sec") or 0.0)
+        if verdict == STALE:
+            return role, "stale", age
+        if verdict == FRESHNESS_UNKNOWN and attrs.get("data_source") == LIVE_SOURCE:
+            return role, "unverifiable_age", age
+    return None, None, 0.0
 
 
 # Sources that are NOT real broker data. A frame stamped with one of these must
