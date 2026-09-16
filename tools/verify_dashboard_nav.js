@@ -74,16 +74,27 @@ async function probe(page, ms) {
 }
 
 function loadPuppeteer() {
+  /* puppeteer-core is not vendored in this repo (there is no package.json). On
+     this box it lives in the managed node workspace, so try that before giving
+     up - otherwise every run needs PUPPETEER_ROOT exported by hand, and a tool
+     that only works when you remember an env var is a tool that stops being
+     run. Keep this list in step with tools/verify_ui_layout.js. */
   const candidates = ['puppeteer-core'];
   const managed = process.env.PUPPETEER_ROOT;
   if (managed) candidates.push(path.join(managed, 'puppeteer-core'));
+  if (process.env.WORKBUDDY_NODE_WORKSPACE) {
+    candidates.push(path.join(process.env.WORKBUDDY_NODE_WORKSPACE,
+      'node_modules', 'puppeteer-core'));
+  }
+  candidates.push('C:/Users/Itrai/.workbuddy-ai/binaries/node/workspace/node_modules/puppeteer-core');
   for (const c of candidates) {
     try { return require(c); } catch (e) { /* try the next one */ }
   }
   console.error(
     '\nCannot load puppeteer-core.\n' +
     '  Install it, or point PUPPETEER_ROOT at the node_modules that holds it:\n' +
-    '    PUPPETEER_ROOT=/path/to/node_modules node tools/verify_dashboard_nav.js\n'
+    '    PUPPETEER_ROOT=/path/to/node_modules node tools/verify_dashboard_nav.js\n' +
+    '  Tried:\n' + candidates.map(c => '    ' + c).join('\n') + '\n'
   );
   process.exit(2);
 }

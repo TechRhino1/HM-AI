@@ -187,7 +187,7 @@
         <span class="tt-panel__spacer"></span>
         <span class="tt-chip tt-chip--none" id="selection-tier">—</span>
       </div>
-      <div class="tt-panel__body" id="selection-body" data-state="loading" style="max-height:40%"></div>
+      <div class="tt-panel__body" id="selection-body" data-state="loading"></div>
 
       <!-- Scanner radar. Rows come from the orchestrator's ranked candidate
            list (telemetry radar_opportunities) — the same source the legacy
@@ -204,7 +204,7 @@
           <option value="SCALP">Scalp</option>
         </select>
       </div>
-      <div class="tt-panel__body" id="radar-body" data-state="loading" style="max-height:46%"></div>
+      <div class="tt-panel__body" id="radar-body" data-state="loading"></div>
     </div>
 
     <!-- Chart + positions. The chart carries the instrument's support and
@@ -255,7 +255,7 @@
         <span class="tt-panel__spacer"></span>
         <span class="tt-num tt-muted" id="pos-total">—</span>
       </div>
-      <div class="tt-panel__body tt-panel__body--flush" style="flex:0 0 auto;max-height:38%">
+      <div class="tt-panel__body tt-panel__body--flush">
         <table class="tt-table">
           <thead>
             <tr>
@@ -335,7 +335,7 @@
         <span class="tt-panel__spacer"></span>
         <button class="tt-btn tt-btn--sm" id="pending-refresh" title="Refresh pending orders">Refresh</button>
       </div>
-      <div class="tt-panel__body tt-panel__body--flush" style="flex:0 0 auto;max-height:32%">
+      <div class="tt-panel__body tt-panel__body--flush">
         <table class="tt-table">
           <thead>
             <tr>
@@ -367,7 +367,7 @@
   <section class="tt-view" id="view-news" data-view-panel="news"
            data-active="false" role="tabpanel" aria-label="News" hidden>
 
-    <div class="tt-panel">
+    <div class="tt-panel tt-slot tt-slot--cal">
       <div class="tt-panel__head">
         <h2 class="tt-panel__title">Economic calendar</h2>
         <span class="tt-panel__count" id="news-count">0</span>
@@ -389,7 +389,7 @@
       <div class="tt-panel__body" id="news-body" data-state="loading"></div>
     </div>
 
-    <div class="tt-panel">
+    <div class="tt-panel tt-slot tt-slot--next">
       <div class="tt-panel__head">
         <h2 class="tt-panel__title">Next release</h2>
         <span class="tt-panel__spacer"></span>
@@ -397,12 +397,16 @@
       </div>
       <div class="tt-panel__body">
         <div id="news-hero" data-state="loading"></div>
+      </div>
+    </div>
 
-        <div class="tt-panel__head">
-          <h2 class="tt-panel__title">Event detail</h2>
-          <span class="tt-panel__spacer"></span>
-          <span class="tt-chip tt-chip--none" id="news-detail-impact">—</span>
-        </div>
+    <div class="tt-panel tt-slot tt-slot--detail">
+      <div class="tt-panel__head">
+        <h2 class="tt-panel__title">Event detail</h2>
+        <span class="tt-panel__spacer"></span>
+        <span class="tt-chip tt-chip--none" id="news-detail-impact">—</span>
+      </div>
+      <div class="tt-panel__body">
         <div id="news-detail" data-state="empty">
           <div class="tt-state">
             <span class="tt-state__title">No event selected</span>
@@ -420,7 +424,7 @@
   <section class="tt-view" id="view-analyst" data-view-panel="analyst"
            data-active="false" role="tabpanel" aria-label="Analyst" hidden>
 
-    <div class="tt-panel">
+    <div class="tt-panel tt-slot tt-slot--da">
       <div class="tt-panel__head">
         <h2 class="tt-panel__title">Devil's advocate</h2>
         <span class="tt-panel__spacer"></span>
@@ -453,7 +457,7 @@
       </div>
     </div>
 
-    <div class="tt-panel">
+    <div class="tt-panel tt-slot tt-slot--gate">
       <div class="tt-panel__head">
         <h2 class="tt-panel__title">Quality gate</h2>
         <span class="tt-panel__count" id="gate-count">0</span>
@@ -461,7 +465,9 @@
         <span class="tt-chip tt-chip--none" id="gate-verdict">—</span>
       </div>
       <div class="tt-panel__body" id="gate-body" data-state="loading"></div>
+    </div>
 
+    <div class="tt-panel tt-slot tt-slot--obj">
       <div class="tt-panel__head">
         <h2 class="tt-panel__title">Objections</h2>
       </div>
@@ -479,7 +485,7 @@
   <section class="tt-view" id="view-markets" data-view-panel="markets"
            data-active="false" role="tabpanel" aria-label="Markets" hidden>
 
-    <div class="tt-panel">
+    <div class="tt-panel tt-slot tt-slot--equities">
       <div class="tt-panel__head">
         <h2 class="tt-panel__title">Global equities</h2>
         <span class="tt-panel__count" id="eq-count">0</span>
@@ -488,7 +494,9 @@
         <button class="tt-btn tt-btn--sm" id="eq-refresh" type="button">Refresh</button>
       </div>
       <div class="tt-panel__body tt-panel__body--flush" id="eq-body" data-state="loading"></div>
+    </div>
 
+    <div class="tt-panel tt-slot tt-slot--sector">
       <div class="tt-panel__head">
         <h2 class="tt-panel__title">Sector rotation</h2>
         <span class="tt-panel__spacer"></span>
@@ -497,7 +505,7 @@
       <div class="tt-panel__body" id="eq-heatmap" data-state="loading"></div>
     </div>
 
-    <div class="tt-panel">
+    <div class="tt-panel tt-slot tt-slot--india">
       <div class="tt-panel__head">
         <h2 class="tt-panel__title">India</h2>
         <span class="tt-panel__spacer"></span>
@@ -544,7 +552,7 @@
   <section class="tt-view" id="view-analytics" data-view-panel="analytics"
            data-active="false" role="tabpanel" aria-label="Analytics" hidden>
 
-    <div class="tt-panel">
+    <div class="tt-panel tt-slot tt-slot--perf">
       <div class="tt-panel__head">
         <h2 class="tt-panel__title">Performance</h2>
         <span class="tt-panel__spacer"></span>
@@ -552,18 +560,24 @@
       </div>
       <div class="tt-panel__body">
         <div class="tt-metrics" id="analytics-metrics" data-state="loading"></div>
+      </div>
+    </div>
 
-        <div class="tt-panel__head">
-          <h2 class="tt-panel__title">Mode reliability</h2>
-          <span class="tt-panel__spacer"></span>
-          <span class="tt-hint" id="reliability-source">—</span>
-        </div>
-        <div id="reliability-body" data-state="loading"></div>
+    <div class="tt-panel tt-slot tt-slot--reliab">
+      <div class="tt-panel__head">
+        <h2 class="tt-panel__title">Mode reliability</h2>
+        <span class="tt-panel__spacer"></span>
+        <span class="tt-hint" id="reliability-source">—</span>
+      </div>
+      <div class="tt-panel__body" id="reliability-body" data-state="loading"></div>
+    </div>
 
-        <div class="tt-panel__head">
-          <h2 class="tt-panel__title">Trade history</h2>
-          <span class="tt-panel__count" id="hist-count">0</span>
-        </div>
+    <div class="tt-panel tt-slot tt-slot--hist">
+      <div class="tt-panel__head">
+        <h2 class="tt-panel__title">Trade history</h2>
+        <span class="tt-panel__count" id="hist-count">0</span>
+      </div>
+      <div class="tt-panel__body tt-panel__body--flush">
         <table class="tt-table">
           <thead>
             <tr>
@@ -579,7 +593,7 @@
       </div>
     </div>
 
-    <div class="tt-panel">
+    <div class="tt-panel tt-slot tt-slot--risk">
       <div class="tt-panel__head">
         <h2 class="tt-panel__title">Risk &amp; exposure</h2>
       </div>
@@ -594,7 +608,7 @@
          from /api/backtest/regime-policy at runtime; the empty state says the
          optimiser has not been run rather than implying there is nothing to
          trade, because those are different facts. -->
-    <div class="tt-panel">
+    <div class="tt-panel tt-slot tt-slot--regime">
       <div class="tt-panel__head">
         <h2 class="tt-panel__title">Regime policy</h2>
         <span class="tt-panel__spacer"></span>
@@ -625,7 +639,7 @@
   <section class="tt-view" id="view-backtest" data-view-panel="backtest"
            data-active="false" role="tabpanel" aria-label="Backtest" hidden>
 
-    <div class="tt-panel">
+    <div class="tt-panel tt-slot tt-slot--req">
       <div class="tt-panel__head">
         <h2 class="tt-panel__title">Requirements</h2>
         <span class="tt-panel__spacer"></span>
@@ -690,7 +704,7 @@
       </div>
     </div>
 
-    <div class="tt-panel">
+    <div class="tt-panel tt-slot tt-slot--prog">
       <div class="tt-panel__head">
         <h2 class="tt-panel__title">Progress</h2>
         <span class="tt-panel__spacer"></span>
@@ -704,22 +718,30 @@
           </div>
           <div class="tt-log" id="bt-log" aria-live="polite"></div>
         </div>
+      </div>
+    </div>
 
-        <div class="tt-panel__head">
-          <h2 class="tt-panel__title">Results</h2>
-          <span class="tt-panel__spacer"></span>
-          <span class="tt-hint" id="bt-result-meta">—</span>
-        </div>
+    <div class="tt-panel tt-slot tt-slot--results">
+      <div class="tt-panel__head">
+        <h2 class="tt-panel__title">Results</h2>
+        <span class="tt-panel__spacer"></span>
+        <span class="tt-hint" id="bt-result-meta">—</span>
+      </div>
+      <div class="tt-panel__body">
         <div id="bt-results" data-state="empty">
           <div class="tt-state">
             <span class="tt-state__title">No results yet</span>
             <span>Configure the requirements and run a backtest.</span>
           </div>
         </div>
+      </div>
+    </div>
 
-        <div class="tt-panel__head">
-          <h2 class="tt-panel__title">Recent jobs</h2>
-        </div>
+    <div class="tt-panel tt-slot tt-slot--jobs">
+      <div class="tt-panel__head">
+        <h2 class="tt-panel__title">Recent jobs</h2>
+      </div>
+      <div class="tt-panel__body tt-panel__body--flush">
         <table class="tt-table">
           <thead>
             <tr>

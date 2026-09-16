@@ -94,7 +94,16 @@
 
 .tt-app {
   margin: 0;
-  min-height: 100vh;
+  /* A DEFINITE height, not `min-height`. With `min-height: 100vh` the grid
+     container's height is content-driven, so the `1fr` main row resolves
+     against CONTENT rather than against the viewport. The result was that a
+     view grew to its own height (Trade measured 1263px on a 900px screen),
+     the document scrolled, and every panel that was supposed to fill the
+     screen was cut off at the fold instead. Pinning the shell height is what
+     makes `1fr` mean "the space left over", which is the whole point of an
+     app shell: the rail and status bar stay put and the view scrolls. */
+  height: 100vh;
+  height: 100dvh; /* mobile: excludes the retracting URL bar, so no dead band */
   background: var(--hm-bg-base);
   color: var(--hm-text-primary);
   font-family: var(--hm-font-sans);
@@ -216,31 +225,42 @@
   gap: 1px;
   background: var(--tt-grid-line);
   min-height: 0;
+  /* Main is exactly the leftover strip between the rail and the status bar and
+     must never scroll itself - the ACTIVE VIEW owns the scroll. Two nested
+     scroll containers produce a scrollbar on the wrong one and a chart that
+     cannot size against anything. */
+  overflow: hidden;
 }
 .tt-view { display: none; min-height: 0; }
 .tt-view[data-active="true"] { display: grid; }
 
-/* Trade view: watchlist | chart | order ticket. */
+/* Default: ONE column, panels stacked in source order and sized to content.
+   Every multi-column template below is opt-in above 900px, so a narrow screen
+   can never inherit a two-column layout it has no room for. The previous code
+   declared per-view columns unconditionally and then tried to undo them in a
+   max-width block, which is why the tablet breakpoints disagreed with each
+   other about how many columns a view had. */
+.tt-view[data-active="true"] {
+  grid-template-columns: minmax(0, 1fr);
+  grid-auto-rows: minmax(0, auto);
+  align-content: start;
+  min-height: 0;
+  /* Rows size to their content; if the stack is taller than the shell the VIEW
+     scrolls, so no panel can be pushed past the fold and lost. Trade opts out
+     below - its panes manage their own scroll instead. */
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Trade is the one exception at every width: the chart has no intrinsic
+   height, so the visible pane must FILL its row rather than size to content.
+   Without this the chart collapses to nothing on a phone. The panes scroll
+   internally, so the view itself must not - two scrollbars would fight. */
 #view-trade.tt-view[data-active="true"] {
-  grid-template-columns: minmax(260px, 320px) minmax(0, 1fr) minmax(280px, 340px);
-}
-#view-analytics.tt-view[data-active="true"] {
-  grid-template-columns: minmax(0, 1fr) minmax(300px, 420px);
-}
-#view-backtest.tt-view[data-active="true"] {
-  grid-template-columns: minmax(300px, 380px) minmax(0, 1fr);
-}
-/* News: the calendar is the reading surface, the detail panel is a sidebar. */
-#view-news.tt-view[data-active="true"] {
-  grid-template-columns: minmax(0, 1fr) minmax(320px, 420px);
-}
-/* Analyst: the adversarial case, with the gate alongside it. */
-#view-analyst.tt-view[data-active="true"] {
-  grid-template-columns: minmax(0, 1fr) minmax(320px, 440px);
-}
-/* Markets: global equities, with India alongside. */
-#view-markets.tt-view[data-active="true"] {
-  grid-template-columns: minmax(0, 1fr) minmax(340px, 460px);
+  grid-template-rows: minmax(0, 1fr);
+  align-content: stretch;
+  overflow: hidden;
 }
 
 /* ── Panel ──────────────────────────────────────────────────────────────── */
@@ -254,8 +274,19 @@
 }
 .tt-panel__head {
   display: flex; align-items: center; gap: var(--hm-space-2);
-  height: var(--tt-head-h);
-  padding: 0 var(--hm-space-3);
+  /* Height is a MINIMUM, not a fixed value, and the row is allowed to wrap.
+     A head is a single nowrap row, so on a narrow screen its controls can
+     demand more width than the panel has - the Economic calendar head needs
+     626px and gets 372px on a phone. Because `.tt-panel` is `overflow: hidden`
+     the surplus was clipped with no scrollbar and the last controls simply
+     vanished. `flex-wrap` is "wrap only if it does not fit", so a head with
+     room is pixel-identical to before and a head without room grows to two
+     rows instead of losing controls. No breakpoint needed, and therefore no
+     breakpoint to get wrong. */
+  height: auto;
+  min-height: var(--tt-head-h);
+  flex-wrap: wrap;
+  padding: var(--hm-space-1) var(--hm-space-3);
   background: var(--tt-panel-head-bg);
   border-bottom: 1px solid var(--hm-border-subtle);
   flex: 0 0 auto;
@@ -963,39 +994,150 @@
 }
 
 /* ── Responsive ─────────────────────────────────────────────────────────── */
-/* Tablet: drop to two panes, the ticket moves below the chart. */
-@media (max-width: 1279px) {
+/* ── Layout above 900px: named areas ────────────────────────────────────── */
+/* Each view declares its template by NAME and each panel carries the matching
+   slot class, so placement is stated once instead of being inferred from
+   source order and then patched by breakpoint overrides.
+
+   This also fixes the worst space-management fault on the page. In Analytics
+   the 8-column regime table used to sit in the NARROW column (300-420px) while
+   a nearly-empty Risk panel held `1fr`. The widest content now gets the widest
+   column, and the short panels share the other one. */
+@media (min-width: 900px) {
+  .tt-slot--perf     { grid-area: perf; }
+  .tt-slot--reliab   { grid-area: reliab; }
+  .tt-slot--hist     { grid-area: hist; }
+  .tt-slot--risk     { grid-area: risk; }
+  .tt-slot--regime   { grid-area: regime; }
+  .tt-slot--cal      { grid-area: cal; }
+  .tt-slot--next     { grid-area: next; }
+  .tt-slot--detail   { grid-area: detail; }
+  .tt-slot--da       { grid-area: da; }
+  .tt-slot--gate     { grid-area: gate; }
+  .tt-slot--obj      { grid-area: obj; }
+  .tt-slot--equities { grid-area: equities; }
+  .tt-slot--sector   { grid-area: sector; }
+  .tt-slot--india    { grid-area: india; }
+  .tt-slot--req      { grid-area: req; }
+  .tt-slot--prog     { grid-area: prog; }
+  .tt-slot--results  { grid-area: results; }
+  .tt-slot--jobs     { grid-area: jobs; }
+
+  /* Trade: watchlist | chart | ticket. */
   #view-trade.tt-view[data-active="true"] {
-    grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
-    grid-template-rows: minmax(0, 1fr) auto;
+    grid-template-columns: minmax(250px, 310px) minmax(0, 1fr) minmax(270px, 330px);
+    grid-template-rows: minmax(0, 1fr);
+    align-content: stretch;
+  }
+
+  /* Analytics: the four short account panels form a 2x2 block, and the
+     regime table - by far the densest content on the page, eight columns of
+     text - takes the FULL width beneath them. Giving it a column of its own
+     left it scrolling sideways through a mid-word cut while the panel beside
+     it sat half empty; a full-width row removes the horizontal scroll
+     entirely. Overview metrics above, dense detail below: that is the
+     hierarchy, and it is stated once here rather than inferred. */
+  #view-analytics.tt-view[data-active="true"] {
+    grid-template-columns: minmax(0, 1fr) minmax(300px, 1fr);
+    grid-template-rows: auto auto minmax(0, 1fr);
+    grid-template-areas:
+      "perf   risk"
+      "reliab hist"
+      "regime regime";
+  }
+
+  /* News: the calendar is the reading surface and spans the full height; the
+     right column is the summary above and the analysis below. */
+  #view-news.tt-view[data-active="true"] {
+    grid-template-columns: minmax(0, 1fr) minmax(300px, 400px);
+    grid-template-rows: auto minmax(0, 1fr);
+    grid-template-areas:
+      "cal next"
+      "cal detail";
+  }
+
+  /* Analyst: the adversarial case IS the argument, so it takes the height. */
+  #view-analyst.tt-view[data-active="true"] {
+    grid-template-columns: minmax(0, 1fr) minmax(300px, 420px);
+    grid-template-rows: auto minmax(0, 1fr);
+    grid-template-areas:
+      "da gate"
+      "da obj";
+  }
+
+  /* Markets: the equity table and the sector grid share the left column; the
+     India stack runs the full height on the right. */
+  #view-markets.tt-view[data-active="true"] {
+    grid-template-columns: minmax(0, 1.15fr) minmax(320px, 440px);
+    grid-template-rows: minmax(0, 1.25fr) minmax(0, 1fr);
+    grid-template-areas:
+      "equities india"
+      "sector   india";
+  }
+
+  /* Backtest: the form is a fixed sidebar; progress, results and jobs read as
+     one column of output beside it. */
+  #view-backtest.tt-view[data-active="true"] {
+    grid-template-columns: minmax(300px, 370px) minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1.15fr) minmax(0, 1fr);
+    grid-template-areas:
+      "req prog"
+      "req results"
+      "req jobs";
+  }
+}
+
+/* Tablet: a 3-pane Trade will not fit in 900-1279px, so the ticket drops
+   beneath the chart. Both rows are FRACTIONS rather than `auto`: with
+   `auto` the ticket's own content height (measured at 1246px) would exceed
+   the shell, the 1fr row would collapse to 0 and the chart would vanish
+   entirely. Fractions guarantee each row a share and each pane scrolls
+   inside it, so nothing is cut off and nothing is starved.
+   Every other view keeps its template - the columns simply get narrower,
+   which is the point of naming the areas. */
+@media (min-width: 900px) and (max-width: 1279px) {
+  #view-trade.tt-view[data-active="true"] {
+    grid-template-columns: minmax(210px, 260px) minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1.7fr) minmax(0, 1fr);
   }
   #view-trade .tt-panel--ticket { grid-column: 1 / -1; }
-  #view-analytics.tt-view[data-active="true"],
-  #view-backtest.tt-view[data-active="true"] {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: auto minmax(0, 1fr);
-  }
-  #view-news.tt-view[data-active="true"],
-  #view-analyst.tt-view[data-active="true"],
-  #view-markets.tt-view[data-active="true"] {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: minmax(0, 1fr) auto;
-  }
   .tt-da__cols { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* Wide desktop: hand the wide tables the extra room they can actually use. */
+@media (min-width: 1440px) {
+  #view-markets.tt-view[data-active="true"] {
+    grid-template-columns: minmax(0, 1.25fr) minmax(340px, 460px);
+  }
 }
 
 /* Phone: one pane at a time, chosen by the pane bar. */
 @media (max-width: 767px) {
   .tt-app { grid-template-rows: auto auto 1fr auto; grid-template-areas: "rail" "panebar" "main" "status"; }
-  #view-trade.tt-view[data-active="true"],
-  #view-analytics.tt-view[data-active="true"],
-  #view-backtest.tt-view[data-active="true"],
-  #view-news.tt-view[data-active="true"],
-  #view-analyst.tt-view[data-active="true"],
-  #view-markets.tt-view[data-active="true"] {
+
+  /* Trade keeps the fill behaviour: one pane at a time and the chart needs the
+     whole height. */
+  #view-trade.tt-view[data-active="true"] {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: minmax(0, 1fr);
   }
+
+  /* Every other view stacks its panels and scrolls as ONE column. Each panel
+     sizes to its own content, which is the correct phone behaviour: a table of
+     twenty rows should scroll the page, not sit inside a 200px letterbox. */
+  #view-news.tt-view[data-active="true"],
+  #view-analyst.tt-view[data-active="true"],
+  #view-markets.tt-view[data-active="true"],
+  #view-analytics.tt-view[data-active="true"],
+  #view-backtest.tt-view[data-active="true"] {
+    grid-template-columns: minmax(0, 1fr);
+    grid-auto-rows: minmax(0, auto);
+    align-content: start;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
   .tt-app[data-pane="chart"] .tt-panel--watchlist,
   .tt-app[data-pane="chart"] .tt-panel--ticket,
   .tt-app[data-pane="watchlist"] .tt-panel--chart,
@@ -1511,6 +1653,80 @@
   letter-spacing: var(--hm-tracking-caps);
   color: var(--hm-text-dim);
 }
+
+/* ── Panel internals: space sharing, not percentage caps ─────────────────── */
+/* Four bodies used to carry inline `max-height: 32-46%` attributes. A cap with
+   no matching flex-grow is the worst of both worlds: on a tall screen the panel
+   leaves a dead band under its content, and on a short one the body collapses
+   to almost nothing. Sizing is now stated once, here, as grow/shrink rules. */
+
+/* Watchlist: the table takes what its rows need; the two lists beneath split
+   whatever height is left, so neither can starve the other. */
+.tt-panel--watchlist > .tt-panel__body--flush { flex: 0 1 auto; min-height: 0; }
+#selection-body,
+#radar-body { flex: 1 1 0; min-height: 0; }
+
+/* Chart: the plot fills, and the positions table is capped so it can never
+   push the chart itself out of existence. */
+.tt-panel--chart > .tt-chart__body { flex: 1 1 auto; min-height: 0; }
+.tt-panel--chart > .tt-panel__body--flush { flex: 0 0 auto; max-height: 34%; }
+
+/* Order ticket: the form takes what it needs, pending orders are capped, and
+   the reasoning fills whatever is left. */
+.tt-panel--ticket > .tt-panel__body { flex: 0 1 auto; }
+.tt-panel--ticket > .tt-panel__body--flush { flex: 0 0 auto; max-height: 32%; }
+.tt-panel--ticket > #reason-body { flex: 1 1 auto; min-height: 0; }
+
+
+/* ── Heading hierarchy ───────────────────────────────────────────────────── */
+/* Panels that genuinely hold sub-sections (the order ticket, the India stack)
+   nest a `.tt-panel__head` inside a `.tt-panel__body`. Drawn with the same
+   weight and band as a real panel header, a sub-section is indistinguishable
+   from a peer panel - the hierarchy reads flat and the eye has no entry point.
+   Demote it to a divider: no band, tighter, ruled off from the section above.
+   This is pure CSS, so no markup had to change to fix it. */
+.tt-panel__body .tt-panel__head {
+  height: auto;
+  padding: var(--hm-space-3) 0 var(--hm-space-2);
+  background: transparent;
+  border-bottom: 0;
+  border-top: 1px solid var(--hm-border-subtle);
+}
+.tt-panel__body .tt-panel__head:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
+
+/* ── Consistent internal rhythm ──────────────────────────────────────────── */
+/* Bodies had no padding of their own, so every panel depended on its content
+   happening to carry a `.tt-pad` wrapper - which is why some panels sat inset
+   from the glass edge and others ran flush against it. Padding is now the
+   body's job, and an inner `.tt-pad` is neutralised so it cannot double up.
+   `--flush` bodies (tables, the chart, the equities card list) stay
+   full-bleed, which is what makes a table read as attached to its header. */
+.tt-panel__body {
+  padding: var(--hm-space-4);
+}
+.tt-panel__body--flush,
+.tt-chart__body {
+  padding: 0;
+}
+.tt-panel__body > .tt-pad {
+  padding: 0;
+}
+
+
+/* ── Touch target ────────────────────────────────────────────────────────── */
+/* The Markets trigger measured 34px on a coarse pointer - under the 44px
+   minimum, and the only control in the rail that failed. Caught by
+   tools/verify_ui_layout.js, not by eye. */
+@media (pointer: coarse) {
+  .tt-nav-trigger {
+    min-height: var(--hm-touch-target);
+  }
+}
+
 
 /* ═══════════════════════════════════════════════════════════════════════════
    LIQUID GLASS  +  MOBILE APP SHELL

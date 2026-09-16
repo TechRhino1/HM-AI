@@ -78,6 +78,12 @@ data/*.db-wal
 # Derived signal-scan cache (regenerate with tools/scan_signals.py)
 data/signals/
 
+# Trained model binaries. Regenerate with tools/train_meta_labeler.py; the
+# numbers that matter are committed as data/models/meta_labeler_report.json, and
+# jarvis/intelligence/meta_labeler.py self-trains when the .joblib is absent.
+# A 121 KB opaque blob in git buys nothing that the report does not already say.
+data/models/*.joblib
+
 # Per-candidate replay frames from tools/verify_prioritization.py.
 # Regenerable (~29 MB) evidence; the distilled results are committed as
 # reports/prioritization_verification.json instead.
