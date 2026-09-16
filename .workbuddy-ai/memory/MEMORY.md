@@ -6,13 +6,11 @@ Injected every session and **silently truncated at the tail**, so keep it small.
 
 ## Git
 
-* **Push** stalls ~40s because `helper-selector` is first in the credential chain. Redirect to a file
-  (piping masks `$?`) and verify with `git ls-remote` — never the local push message:
-  `GCM="C:/Users/Itrai/.workbuddy-ai/binaries/PortableGit/versions/1.2.0/mingw64/bin/git-credential-manager.exe"`
-  then `env http_proxy= https_proxy= timeout 200 git -c credential.helper= -c credential.helper="!$GCM" push origin main:refs/heads/main`.
-  **The `env http_proxy=` prefix is required for push too** — without it the local proxy returns
-  `CONNECT tunnel failed, response 502`.
-* `git ls-remote` also returns a bogus **502** through the proxy — same bypass.
+* **Push** stalls ~40s (`helper-selector` is first in the credential chain) and the local proxy answers a
+  bogus `CONNECT tunnel failed, response 502`. Both are bypassed by prefixing `env http_proxy=
+  https_proxy= HTTP_PROXY= HTTPS_PROXY=` and pointing `credential.helper` at the PortableGit
+  `git-credential-manager.exe` — full recipe in the **`diagnose-git-push-auth`** skill. Redirect to a
+  file (piping masks `$?`) and verify with `git ls-remote`, never the local push message.
 * Remote `https://github.com/TechRhino1/HM-AI.git`. Backticks in `-m` are eaten by bash — use
   `git commit -F <file>`. `/tmp` does not exist; use `.scratch/`.
 * **`.git/refs/remotes/*` is wiped immediately after being written.** `fetch`/`update-ref` exit 0 and
@@ -24,14 +22,12 @@ Injected every session and **silently truncated at the tail**, so keep it small.
 
 Four incidents, all in the small hours; the last two followed `git rm` and `git stash push`. Cause
 unknown (AV/EDR and cloud-sync lead). **`.git/` is not safe.** Procedure: the
-`recover-vanished-working-tree` skill. Worst signature: **`stat` says FILE_NOT_FOUND while
-`CreateFile(CREATE_ALWAYS)` says ACCESS_DENIED** = delete-pending, so an ACL is ruled out; recover by
-hardlinking through an alias. Commit and push early; **never `git stash`**; refresh
+`recover-vanished-working-tree` skill. Commit and push early; **never `git stash`**; refresh
 `git bundle create .git/backup/repo-<ts>.bundle --all` (survived all four).
 
 Some paths are permanently **readable but not writable** (path-based security filter, normal ACLs):
 `HM_dashboard.bat`, `HM_start.py`, `jarvis/intelligence/decision_engine.py`. Write via a hardlink alias
-in `.scratch/_restore/`. **`open(alias,'w')` and `CREATE_ALWAYS` TRUNCATE the shared object.**
+in `.scratch/_restore/` — and note **`open(alias,'w')` TRUNCATES the shared object.**
 
 ## The live server does not hot-reload
 
@@ -50,6 +46,15 @@ Full evidence and the P0/P1/P2 backlog: **`AUDIT-2026-09.md`**.
 
 ## Conventions
 
+* **CSS architecture:** `hm_ui.css` is the design system and is loaded **last** on all six pages, so a
+  `:root` token bridge there wins on source order — that is how the four legacy page sheets
+  (`stocks/india/india_options/terminal.css`) were unified without editing their 5k lines. Cards stay
+  **solid** (`--hm-bg-surface`/`--hm-bg-raised`), matching the dashboard's `.tt-panel`; glass is for the
+  shared chrome (HUD, nav, `.hm-card`, dropdowns, modals) over the ambient wash on `body`. Beware
+  `!important` in a page sheet: it beats source order and silently discards the shared glass.
+* **The UI has no request timeout** (no `AbortController`, no `setTimeout` around a fetch), so a
+  non-settling request leaves a template `Loading…` placeholder up forever. Any panel that can be empty
+  must repaint on an empty result, and a first-paint watchdog must state a stall. See `TRAPS.md`.
 * Backtest statuses `QUEUED | RUNNING | DONE | FAILED | CANCELLED` — **`DONE`**. `POST /api/backtest/run`
   answers **202** with a `job_id`. Localhost authenticates as admin (`_is_local_request()`).
 * `normalise_style()` maps anything unrecognised to `SWING`. SWING→H1, DAY_TRADING→M15, SCALP→M5.
@@ -72,16 +77,16 @@ Full evidence and the P0/P1/P2 backlog: **`AUDIT-2026-09.md`**.
   unbounded and silent because `hydrate_batch` swallows exceptions. Read `INDIA_UNIVERSE`/
   `STOCK_UNIVERSE` directly. Guarded by `tests/test_provider_recursion.py`.
 * **Never seed a modelled value from `hash()`** — CPython salts it per process. Use
-  `jarvis.data.determinism.stable_seed`.
+  `jarvis.data.determinism.stable_seed`. (A discriminating test must spawn a subprocess under a
+  different `PYTHONHASHSEED` — see `TRAPS.md`.)
 * **MT5 times are BROKER-SERVER time, not UTC** (XM = GMT+2/+3). Read as UTC they land 2-3h in the
   *future*, so `now_utc - open_time` came out short and `max(0, …)` zeroed it — silently disabling
   `position_monitor`'s stagnation exits for the first 3h of every position. Use
   `jarvis/data/broker_time.py`; never hardcode the offset (broker DST moves it).
   `tests/test_broker_time.py`, 3 of 13 fail pre-fix.
-* **India latency = one hydration call, not the scan.** Real cost is one batched `fetch_quotes()` per
-  **60s hydrator TTL** (not the 15s scan TTL).
-* **A spot-check right after another call measures the cache, not the endpoint.** Sample with gaps
-  longer than the TTL.
+* **India latency = one batched `fetch_quotes()` per 60s hydrator TTL**, not the 42-symbol scan (which
+  re-runs in 0.14s once cached). And **a spot-check right after another call measures the cache, not the
+  endpoint** — sample with gaps longer than the TTL.
 * **`docs/MARKETS_DATA_CONTRACTS.md`** — shapes for the ten stocks/India endpoints plus the timeout
   token (`fast` 8s/`normal` 15s/`provider` 30s/`slow` 60s, `dashboard.js:46`). Traps: screener `count`
   is the **matching total**, not `len(stocks)`; `/api/stocks/news` + `recommended_buys` have **no UI
@@ -90,31 +95,28 @@ Full evidence and the P0/P1/P2 backlog: **`AUDIT-2026-09.md`**.
 ## Verification
 
 `tools/`: `verify_ui_live.py` (44) · `verify_dashboard_render.js` (88, pure-Node VM) ·
-`verify_dashboard_nav.js` (31, live) · `verify_ui_layout.js` (238, puppeteer, ~2m46s) ·
+`verify_dashboard_nav.js` (31, live) · `verify_ui_layout.js` (238, puppeteer, ~1m40s) ·
 `audit_endpoints.py` (44) · `audit_wiring.py`. pytest baseline **802 passed / 20 deselected**.
-`verify_ui_layout.js` checks overflow, tap targets ≥44px, glass applied, document must not scroll, view
-must fit inside main, and no silently clipped content.
-
-Screenshots: `puppeteer-core` from the managed node workspace driving
-`C:/Program Files/Google/Chrome/Application/chrome.exe`; `.scratch/shots.js <tag>` captures 6 pages ×
-3 viewports. **`agent-browser` does not support Windows.**
+`verify_ui_layout.js` checks overflow, tap targets ≥44px, **glass application**, document must not
+scroll, view must fit inside main, no silently clipped content. Screenshots: `puppeteer-core` from the
+managed node workspace driving `C:/Program Files/Google/Chrome/Application/chrome.exe`;
+`.scratch/shot_one.js <tag> <page>` captures one page (**`agent-browser` does not support Windows**).
 
 ## Environment
 
 * Sandbox refuses writes outside the project dir. Use Bash, not PowerShell (no output;
-  `tasklist`/`Get-Process` blocked). `taskkill` needs `MSYS_NO_PATHCONV=1`. Invoking `cmd.exe` from Bash
-  is blocked outright.
-* Python 3.13.12 managed, no venv; `pytest`/`pandas`/`numpy`/`psutil`/`py-spy` available. `wmic` is
-  gone — use `psutil`.
+  `tasklist`/`Get-Process` blocked). `taskkill` needs `MSYS_NO_PATHCONV=1`; invoking `cmd.exe` is blocked.
+* Python 3.13.12 managed, no venv; `pytest`/`pandas`/`numpy`/`psutil`/`py-spy` available. `wmic` is gone
+  — use `psutil`.
 * `rm -rf X && cmd` swallows the command's stdout — run the `rm` separately.
 * Running a script *by path* puts the **script's** dir on `sys.path` — `.scratch/*.py` needs
   `sys.path.insert(0, <repo root>)`.
-* **Access:** the server binds **127.0.0.1 only**, so `http://<LAN-IP>:8501` never works.
-* `http_proxy=127.0.0.1:16119` with empty `no_proxy` — curl to any public host needs `--noproxy '*'`.
-  A "public URL is down" report is usually the tunnel, but **check `127.0.0.1:8501` first**.
-* **Public tunnels:** serveo.net kills the SSH session every **~12m09s** and its edge returns **502 with
-  an empty body while still reporting CONNECTED**. Cloudflare is primary in `HM_start.py`; quick-tunnel
-  subdomains are **random per launch** — re-read `hm_cloudflared.log`.
+* The server binds **127.0.0.1 only**, so `http://<LAN-IP>:8501` never works. `http_proxy=127.0.0.1:16119`
+  with empty `no_proxy` — curl to any public host needs `--noproxy '*'`. A "public URL is down" report is
+  usually the tunnel, but **check `127.0.0.1:8501` first**.
+* **Public tunnels:** serveo.net kills the SSH session every **~12m09s** and returns **502 with an empty
+  body while still reporting CONNECTED**. Cloudflare is primary in `HM_start.py`; quick-tunnel subdomains
+  are **random per launch** — re-read `hm_cloudflared.log`.
 
 ## Running the dashboard
 
