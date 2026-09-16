@@ -75,3 +75,45 @@ in a way that no error message explains.
   clamp, warn.
 * **A check that can pass on broken input is not a check.** `audit_endpoints.py` tolerated a timeout as
   "needs a live provider", which is how three broken India routes stayed invisible for weeks.
+* **A test can pass on the broken code because the environment masks the bug.** The paper-book leak
+  test passed pre-fix on this machine: with the MetaTrader5 package absent, *both* `MT5Client.__init__`
+  ("Falling back to PAPER mode") *and* `init_connection()` (called from `_reconnect_if_needed()` on the
+  way into `get_open_positions()`) downgrade `mode` to `"paper"`, so the paper book was returned
+  legitimately. Fix: `monkeypatch.setattr(client, "_reconnect_if_needed", lambda: None)` **and** pin
+  `client.mode = "live"` after construction. Ask "would this fail for the right reason here?" — a
+  signature change alone makes a test fail, which proves nothing about the behaviour.
+* **A pre-existing test can depend on the absence of a validation you are adding.**
+  `test_a2_paper_modify_and_close_status` passed incoherent SL/TP and a positional `1.0950` that landed
+  in `comment` instead of `tp_price`; it only "worked" because nothing checked. When adding a guard,
+  grep the suite for callers that relied on it not existing.
+
+## Data integrity
+
+* **A class-level mutable default is a process-global cache.** `MT5Client._shared_paper_positions` is
+  aliased into every instance and never cleared, and `get_open_positions()` returned it whenever
+  `is_connected` was False — so a simulated position from an earlier paper run was reported as a live
+  one in a live/demo session. It surfaced as "Positions 1" beside "broker offline", with a real cached
+  XM account next to a position the broker never had. Guard the *mode*, not just the connection.
+* **A fabricated number with a live source label is worse than a missing one.** `fetch_quotes`
+  synthesised a baseline for every unresolved symbol and stamped it `"source": "tradingview"`, complete
+  with a made-up RSI of 55.0. Gold hit that branch because `"XAUUSD"` is six characters ending in
+  `"USD"`, so it matched the FOREX heuristic and was queried as the non-existent `FX:XAUUSD` — a primary
+  instrument returning 150.0. Synthetic values now carry `source: "profile_reference"` +
+  `is_fallback: True`. **Before consuming a provider value, check its provenance.**
+* **A hardcoded price table is a fabricated fill.** `send_market_order` filled paper orders from
+  `2400.0 if "XAU" in symbol else …`, and set `current_price` to the same constant, so `profit` was
+  structurally `0.0` forever ("OPEN P&L 0.00" on a position in profit) while SL/TP — computed by the
+  caller from the *real* price — sat on the wrong side of the recorded entry. Callers must pass
+  `reference_price`; with none available, refuse the order.
+* **`resolve()` falls back to a generic FX spec for unregistered symbols**, whose `contract_size` is
+  1000× too big for gold. Check `is_registered()` before computing money from a spec; a wrong P&L is
+  worse than none.
+* **A three-character tag needs word boundaries; a long one does not.** `"ai" in comment_lower` matched
+  "trailing", "pair", "main", "wait", "chair", so a manual trade filed as BOT (AI). But the fix must not
+  over-apply: our own tag is the compound `ManualDesk`, which lowercases to `manualdesk` — word
+  boundaries would never match it, so the manual side stays a substring test.
+* **`open(alias, 'w')` on a hardlink truncates the shared object** — as does `CreateFile(CREATE_ALWAYS)`.
+  `HM_dashboard.bat` was emptied this way while probing. It is also **readable but not writable**
+  (normal inherited ACLs, no deny ACE; the same file object writes fine under `.scratch/`), so writes
+  must go through a hardlink alias — `HM_start.py` and `jarvis/intelligence/decision_engine.py` are
+  blocked the same way. `st_nlink == 2` is the tell.

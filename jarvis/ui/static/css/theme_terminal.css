@@ -1754,19 +1754,14 @@
 
 
 /* ── A. Ambient background ──────────────────────────────────────────────────
-   A blur over a flat colour is invisible - there is nothing to refract. These
-   three low-alpha radial washes give every glass surface something to pull
-   colour out of, which is what makes the effect read as glass rather than as
-   a slightly lighter grey box. Kept at 5-11% alpha so the data stays the
-   brightest thing on screen. */
+   The washes now live in hm_ui.css on `body`, so all six pages share one source
+   instead of the dashboard having its own and the rest having none. `.tt-app`
+   must therefore paint NOTHING opaque here: it used to set
+   `background-color: var(--hm-bg-base)`, which covered the body wash and left
+   the panels with a flat near-black to refract - the blur was running and had
+   nothing to show. */
 .tt-app {
-  background-color: var(--hm-bg-base);
-  background-image:
-    radial-gradient(1200px 620px at 12% -10%, rgba(56, 189, 248, 0.11), transparent 62%),
-    radial-gradient(900px 520px at 90% 2%, rgba(129, 140, 248, 0.10), transparent 64%),
-    radial-gradient(820px 700px at 50% 112%, rgba(0, 245, 155, 0.055), transparent 62%);
-  background-attachment: fixed;
-  background-repeat: no-repeat;
+  background-color: transparent;
 }
 
 
@@ -1782,19 +1777,28 @@
   box-shadow: var(--hm-glass-lift);
 }
 
-/* Panels carry the tint at ~0.78 alpha rather than the shared 0.88: enough
-   translucency for the ambient wash to show through, while keeping the base
-   under the dense numeric tables at roughly #0b1220 - so --hm-text-primary
-   still clears 16:1. Readability first, effect second. */
+/* Panels carry the tint at ~0.62-0.68 alpha rather than the shared 0.88 or the
+   earlier 0.76-0.80. At 0.80 the ambient wash was attenuated to nothing and the
+   panel read as solid; at 0.62-0.68 the wash is visible through the pane while
+   the base under the dense numeric tables still lands near #1a2a40, where
+   --hm-text-primary clears 13:1. Readability first, effect second - but an
+   effect that is invisible is not an effect. */
 .tt-panel {
   background-image:
     var(--hm-glass-sheen),
-    linear-gradient(160deg, rgba(30, 43, 66, 0.80) 0%, rgba(10, 16, 26, 0.76) 100%);
+    linear-gradient(160deg, rgba(30, 43, 66, 0.68) 0%, rgba(10, 16, 26, 0.62) 100%);
   backdrop-filter: var(--hm-glass-blur);
   -webkit-backdrop-filter: var(--hm-glass-blur);
   border: 1px solid var(--hm-glass-edge);
   border-radius: var(--hm-radius-xl);
-  box-shadow: var(--hm-glass-lift), var(--hm-glass-drop);
+  /* The lit rim: an inset highlight on the top edge only, which is what reads
+     as the specular edge on an iOS pane. Kept as a box-shadow rather than a
+     pseudo-element so it cannot paint over the panel's own content. */
+  box-shadow:
+    inset 0 1px 0 var(--hm-glass-edge-lit),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.03),
+    var(--hm-glass-lift),
+    var(--hm-glass-drop);
 }
 
 /* Panel headers read as a lit band on the pane rather than a second surface. */

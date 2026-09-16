@@ -40,9 +40,18 @@
     --hm-bg-hover: #1e2a41;         /* hover state for raised surfaces      */
     --hm-bg-active: #24314c;        /* pressed / selected surface           */
 
-    /* Glass layers. Kept as explicit rgba so they composite predictably.    */
-    --hm-glass-panel: rgba(13, 20, 32, 0.92);
-    --hm-glass-card: rgba(19, 28, 44, 0.86);
+    /* Glass layers. Kept as explicit rgba so they composite predictably.
+
+       These are the BASE colour under the `--hm-glass-*` image layers, so their
+       alpha multiplies with the image alpha rather than replacing it. At the old
+       0.92/0.86 a card stacked a 0.86 colour under a ~0.55 tint image and came out
+       ~92% opaque - which is why the pages read as flat dark panels no matter how
+       much backdrop-filter was applied. Lowered so the two layers together land
+       near 70%, which is glass, while text still clears 13:1 over the ambient
+       wash. `--hm-glass-scrim` is deliberately untouched: a modal backdrop SHOULD
+       be opaque. */
+    --hm-glass-panel: rgba(13, 20, 32, 0.74);
+    --hm-glass-card: rgba(19, 28, 44, 0.30);
     --hm-glass-scrim: rgba(3, 5, 10, 0.72);
     --hm-blur: blur(16px);
 
@@ -1076,22 +1085,53 @@ body.hm-modal-open {
    ========================================================================== */
 
 :root {
+    /* Brightened from 0.075/0.022. The specular sheen is the single strongest
+       "this is glass" cue after the blur, and at 7.5% it was invisible against
+       the dark tint - the pane just looked like a slightly lighter box. */
     --hm-glass-sheen: linear-gradient(160deg,
-        rgba(255, 255, 255, 0.075) 0%,
-        rgba(255, 255, 255, 0.022) 32%,
-        rgba(255, 255, 255, 0) 62%);
+        rgba(255, 255, 255, 0.115) 0%,
+        rgba(255, 255, 255, 0.038) 34%,
+        rgba(255, 255, 255, 0) 64%);
     --hm-glass-tint: linear-gradient(160deg,
-        rgba(32, 45, 70, 0.62) 0%,
-        rgba(13, 20, 32, 0.58) 100%);
+        rgba(32, 45, 70, 0.58) 0%,
+        rgba(13, 20, 32, 0.52) 100%);
+    /* `.hm-glass--strong` is for surfaces that must stay readable over busy or
+       moving content - dropdowns, modals, sticky headers. Deliberately NOT
+       lowered with the rest: these sit over charts and tables, not over the
+       ambient wash. */
     --hm-glass-tint-strong: linear-gradient(160deg,
         rgba(38, 52, 80, 0.88) 0%,
         rgba(13, 20, 32, 0.84) 100%);
-    --hm-glass-blur: blur(22px) saturate(170%);
-    --hm-glass-blur-sm: blur(12px) saturate(150%);
-    --hm-glass-edge: rgba(255, 255, 255, 0.11);
-    --hm-glass-edge-lit: rgba(255, 255, 255, 0.20);
-    --hm-glass-lift: inset 0 1px 0 rgba(255, 255, 255, 0.09);
+    --hm-glass-blur: blur(26px) saturate(185%);
+    --hm-glass-blur-sm: blur(14px) saturate(160%);
+    --hm-glass-edge: rgba(255, 255, 255, 0.14);
+    --hm-glass-edge-lit: rgba(255, 255, 255, 0.28);
+    --hm-glass-lift: inset 0 1px 0 rgba(255, 255, 255, 0.14);
     --hm-glass-drop: 0 10px 34px rgba(0, 0, 0, 0.50);
+}
+
+/* ── Ambient background (all six pages) ─────────────────────────────────────
+   A blur over a flat colour is invisible - there is nothing to refract. The
+   dashboard had these washes in theme_terminal.css and the other five pages had
+   none, so the same glass tokens produced glass on one page and flat panels on
+   the rest. This is the unified source.
+
+   Declared on `body`, which is the one element all six templates share, and
+   hm_ui.css is loaded LAST on every page - so it wins over stocks.css's
+   `body { background-color: var(--bg-dark) }` on source order alone.
+
+   Alpha is a deliberate trade: high enough that the panels visibly transmit
+   colour, low enough that --hm-text-primary still clears 13:1 through a
+   translucent panel over the brightest wash. */
+body {
+    background-color: var(--hm-bg-base);
+    background-image:
+        radial-gradient(1200px 620px at 12% -10%, rgba(56, 189, 248, 0.22), transparent 62%),
+        radial-gradient(900px 520px at 90% 2%, rgba(129, 140, 248, 0.20), transparent 64%),
+        radial-gradient(820px 700px at 50% 112%, rgba(0, 245, 155, 0.13), transparent 62%),
+        radial-gradient(700px 420px at 78% 68%, rgba(217, 70, 239, 0.10), transparent 66%);
+    background-attachment: fixed;
+    background-repeat: no-repeat;
 }
 
 /* Reusable glass surface. `.hm-glass--strong` is for surfaces that must stay
