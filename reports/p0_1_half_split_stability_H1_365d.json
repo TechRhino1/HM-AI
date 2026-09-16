@@ -1,0 +1,412 @@
+{
+  "tp_r": 1.5,
+  "slip_pips": 0.5,
+  "split": "365d -> two disjoint halves",
+  "H1": {
+    "symbols": {
+      "AUDUSD": {
+        "full": {
+          "n": 4636,
+          "gate_mean_r": -0.23794752415875756,
+          "always_long_mean_r": -0.12622704357204487,
+          "edge_over_always_long": -0.11172048058671269
+        },
+        "H1": {
+          "n": 2313,
+          "gate_mean_r": -0.09881070211846087,
+          "always_long_mean_r": -0.021636215304798975,
+          "edge_over_always_long": -0.07717448681366189
+        },
+        "H2": {
+          "n": 2322,
+          "gate_mean_r": -0.3635201072351421,
+          "always_long_mean_r": -0.21678205857019808,
+          "edge_over_always_long": -0.14673804866494403
+        }
+      },
+      "BTCUSD": {
+        "full": {
+          "n": 6416,
+          "gate_mean_r": 0.015158760130922709,
+          "always_long_mean_r": -0.040889028366583514,
+          "edge_over_always_long": 0.056047788497506225
+        },
+        "H1": {
+          "n": 3176,
+          "gate_mean_r": 0.12251911177581866,
+          "always_long_mean_r": -0.06875959351385387,
+          "edge_over_always_long": 0.19127870528967253
+        },
+        "H2": {
+          "n": 3239,
+          "gate_mean_r": -0.08744424544612533,
+          "always_long_mean_r": -0.010908723062673643,
+          "edge_over_always_long": -0.0765355223834517
+        }
+      },
+      "ETHUSD": {
+        "full": {
+          "n": 6245,
+          "gate_mean_r": 0.03995430728582865,
+          "always_long_mean_r": -0.06976094011208966,
+          "edge_over_always_long": 0.10971524739791831
+        },
+        "H1": {
+          "n": 3220,
+          "gate_mean_r": 0.16855657826086956,
+          "always_long_mean_r": -0.10243474627329192,
+          "edge_over_always_long": 0.27099132453416147
+        },
+        "H2": {
+          "n": 3024,
+          "gate_mean_r": -0.08786121031746032,
+          "always_long_mean_r": -0.025883583002645517,
+          "edge_over_always_long": -0.0619776273148148
+        }
+      },
+      "EURJPY": {
+        "full": {
+          "n": 4623,
+          "gate_mean_r": -0.12654511507678995,
+          "always_long_mean_r": -0.006429971447112262,
+          "edge_over_always_long": -0.12011514362967769
+        },
+        "H1": {
+          "n": 2333,
+          "gate_mean_r": -0.06433718002571795,
+          "always_long_mean_r": 0.03863573681954562,
+          "edge_over_always_long": -0.10297291684526358
+        },
+        "H2": {
+          "n": 2289,
+          "gate_mean_r": -0.18208968414154655,
+          "always_long_mean_r": -0.04445032459589342,
+          "edge_over_always_long": -0.13763935954565315
+        }
+      },
+      "EURUSD": {
+        "full": {
+          "n": 4419,
+          "gate_mean_r": -0.07108402647657841,
+          "always_long_mean_r": -0.1606317660104096,
+          "edge_over_always_long": 0.08954773953383119
+        },
+        "H1": {
+          "n": 2238,
+          "gate_mean_r": 0.046114676943699716,
+          "always_long_mean_r": -0.1353252770330652,
+          "edge_over_always_long": 0.18143995397676493
+        },
+        "H2": {
+          "n": 2180,
+          "gate_mean_r": -0.19120044724770643,
+          "always_long_mean_r": -0.1864522105504587,
+          "edge_over_always_long": -0.004748236697247721
+        }
+      },
+      "GBPJPY": {
+        "full": {
+          "n": 4575,
+          "gate_mean_r": -0.07072828306010928,
+          "always_long_mean_r": 0.010984901202185784,
+          "edge_over_always_long": -0.08171318426229507
+        },
+        "H1": {
+          "n": 2349,
+          "gate_mean_r": -0.05220937845891868,
+          "always_long_mean_r": 0.04946308386547467,
+          "edge_over_always_long": -0.10167246232439335
+        },
+        "H2": {
+          "n": 2225,
+          "gate_mean_r": -0.07691458651685393,
+          "always_long_mean_r": -0.01623629258426966,
+          "edge_over_always_long": -0.06067829393258427
+        }
+      },
+      "GBPUSD": {
+        "full": {
+          "n": 4559,
+          "gate_mean_r": -0.08717586137310813,
+          "always_long_mean_r": -0.1481426815091029,
+          "edge_over_always_long": 0.06096682013599476
+        },
+        "H1": {
+          "n": 2341,
+          "gate_mean_r": -0.0034344139256727926,
+          "always_long_mean_r": -0.18050141093549765,
+          "edge_over_always_long": 0.17706699700982487
+        },
+        "H2": {
+          "n": 2217,
+          "gate_mean_r": -0.1760954100135318,
+          "always_long_mean_r": -0.11449590302210194,
+          "edge_over_always_long": -0.06159950699142985
+        }
+      },
+      "GER40": {
+        "full": {
+          "n": 4430,
+          "gate_mean_r": 0.011086543566591438,
+          "always_long_mean_r": -0.007243368623024828,
+          "edge_over_always_long": 0.018329912189616264
+        },
+        "H1": {
+          "n": 2144,
+          "gate_mean_r": -0.01522329757462688,
+          "always_long_mean_r": 0.0341231875,
+          "edge_over_always_long": -0.04934648507462688
+        },
+        "H2": {
+          "n": 2285,
+          "gate_mean_r": 0.04990177636761488,
+          "always_long_mean_r": -0.018498232822757095,
+          "edge_over_always_long": 0.06840000919037198
+        }
+      },
+      "NAS100": {
+        "full": {
+          "n": 4497,
+          "gate_mean_r": -0.07377467889704245,
+          "always_long_mean_r": -0.07950928063153212,
+          "edge_over_always_long": 0.005734601734489669
+        },
+        "H1": {
+          "n": 2281,
+          "gate_mean_r": -0.16679883866725123,
+          "always_long_mean_r": -0.1312053033757124,
+          "edge_over_always_long": -0.03559353529153883
+        },
+        "H2": {
+          "n": 2215,
+          "gate_mean_r": 0.02120828487584651,
+          "always_long_mean_r": -0.024917720541760703,
+          "edge_over_always_long": 0.04612600541760721
+        }
+      },
+      "NZDUSD": {
+        "full": {
+          "n": 4693,
+          "gate_mean_r": -0.09872966311527809,
+          "always_long_mean_r": -0.2648291216705732,
+          "edge_over_always_long": 0.16609945855529512
+        },
+        "H1": {
+          "n": 2390,
+          "gate_mean_r": -0.018432417154811722,
+          "always_long_mean_r": -0.25995494476987446,
+          "edge_over_always_long": 0.24152252761506274
+        },
+        "H2": {
+          "n": 2303,
+          "gate_mean_r": -0.18175501780286585,
+          "always_long_mean_r": -0.2704914759009987,
+          "edge_over_always_long": 0.08873645809813285
+        }
+      },
+      "SOLUSD": {
+        "full": {
+          "n": 6292,
+          "gate_mean_r": -0.15884509821996187,
+          "always_long_mean_r": -0.2361092096312778,
+          "edge_over_always_long": 0.07726411141131592
+        },
+        "H1": {
+          "n": 3126,
+          "gate_mean_r": -0.031659457453614835,
+          "always_long_mean_r": -0.24241926039667305,
+          "edge_over_always_long": 0.2107598029430582
+        },
+        "H2": {
+          "n": 3165,
+          "gate_mean_r": -0.27615529320695104,
+          "always_long_mean_r": -0.22159309573459715,
+          "edge_over_always_long": -0.054562197472353885
+        }
+      },
+      "UK100": {
+        "full": {
+          "n": 4009,
+          "gate_mean_r": -0.0403799134447493,
+          "always_long_mean_r": -0.010017672237465684,
+          "edge_over_always_long": -0.03036224120728362
+        },
+        "H1": {
+          "n": 2038,
+          "gate_mean_r": 0.09985651717369969,
+          "always_long_mean_r": 0.1429137419038273,
+          "edge_over_always_long": -0.043057224730127616
+        },
+        "H2": {
+          "n": 1970,
+          "gate_mean_r": -0.17367754365482235,
+          "always_long_mean_r": -0.1642627868020305,
+          "edge_over_always_long": -0.009414756852791861
+        }
+      },
+      "US30": {
+        "full": {
+          "n": 4200,
+          "gate_mean_r": -0.023186646666666675,
+          "always_long_mean_r": 0.025199771190476193,
+          "edge_over_always_long": -0.04838641785714287
+        },
+        "H1": {
+          "n": 2082,
+          "gate_mean_r": -0.022711198366954864,
+          "always_long_mean_r": -0.04285202977905859,
+          "edge_over_always_long": 0.020140831412103724
+        },
+        "H2": {
+          "n": 2117,
+          "gate_mean_r": -0.0266901648559282,
+          "always_long_mean_r": 0.09295747000472367,
+          "edge_over_always_long": -0.11964763486065186
+        }
+      },
+      "US500": {
+        "full": {
+          "n": 4416,
+          "gate_mean_r": -0.06346575317028984,
+          "always_long_mean_r": -0.05512718500905798,
+          "edge_over_always_long": -0.008338568161231859
+        },
+        "H1": {
+          "n": 2160,
+          "gate_mean_r": -0.10725807916666663,
+          "always_long_mean_r": -0.12654777083333332,
+          "edge_over_always_long": 0.019289691666666692
+        },
+        "H2": {
+          "n": 2255,
+          "gate_mean_r": -0.023683611973392433,
+          "always_long_mean_r": 0.014517164079822634,
+          "edge_over_always_long": -0.03820077605321506
+        }
+      },
+      "USDCAD": {
+        "full": {
+          "n": 4492,
+          "gate_mean_r": -0.017257589269813002,
+          "always_long_mean_r": -0.05099522039180766,
+          "edge_over_always_long": 0.033737631121994655
+        },
+        "H1": {
+          "n": 2131,
+          "gate_mean_r": -0.015138838104176428,
+          "always_long_mean_r": -0.1159249516658846,
+          "edge_over_always_long": 0.10078611356170816
+        },
+        "H2": {
+          "n": 2360,
+          "gate_mean_r": -0.018947572457627116,
+          "always_long_mean_r": 0.007843007627118648,
+          "edge_over_always_long": -0.026790580084745764
+        }
+      },
+      "USDCHF": {
+        "full": {
+          "n": 4567,
+          "gate_mean_r": -0.06501739982483032,
+          "always_long_mean_r": 0.010771577841033502,
+          "edge_over_always_long": -0.07578897766586382
+        },
+        "H1": {
+          "n": 2281,
+          "gate_mean_r": 0.07000029373081983,
+          "always_long_mean_r": -0.0364856256028058,
+          "edge_over_always_long": 0.10648591933362563
+        },
+        "H2": {
+          "n": 2285,
+          "gate_mean_r": -0.1993125142231948,
+          "always_long_mean_r": 0.05826369277899343,
+          "edge_over_always_long": -0.2575762070021882
+        }
+      },
+      "USDJPY": {
+        "full": {
+          "n": 4687,
+          "gate_mean_r": -0.08052510134414338,
+          "always_long_mean_r": 0.07685556966076382,
+          "edge_over_always_long": -0.1573806710049072
+        },
+        "H1": {
+          "n": 2309,
+          "gate_mean_r": 0.05797308661758337,
+          "always_long_mean_r": 0.12473079731485492,
+          "edge_over_always_long": -0.06675771069727154
+        },
+        "H2": {
+          "n": 2377,
+          "gate_mean_r": -0.2107917303323517,
+          "always_long_mean_r": 0.03818302145561633,
+          "edge_over_always_long": -0.24897475178796805
+        }
+      },
+      "WTI": {
+        "full": {
+          "n": 4133,
+          "gate_mean_r": 0.008938889910476666,
+          "always_long_mean_r": 0.07308154076941686,
+          "edge_over_always_long": -0.06414265085894019
+        },
+        "H1": {
+          "n": 1943,
+          "gate_mean_r": -0.08703699845599586,
+          "always_long_mean_r": -0.03009877920741121,
+          "edge_over_always_long": -0.05693821924858465
+        },
+        "H2": {
+          "n": 2190,
+          "gate_mean_r": 0.11101831917808218,
+          "always_long_mean_r": 0.15999435114155253,
+          "edge_over_always_long": -0.04897603196347035
+        }
+      },
+      "XAGUSD": {
+        "full": {
+          "n": 4509,
+          "gate_mean_r": 0.03028632313151474,
+          "always_long_mean_r": 0.06265937924151695,
+          "edge_over_always_long": -0.032373056110002206
+        },
+        "H1": {
+          "n": 2236,
+          "gate_mean_r": 0.0736257643112701,
+          "always_long_mean_r": 0.2521449655635063,
+          "edge_over_always_long": -0.1785192012522362
+        },
+        "H2": {
+          "n": 2272,
+          "gate_mean_r": -0.03201611663732395,
+          "always_long_mean_r": -0.11090705589788728,
+          "edge_over_always_long": 0.07889093926056334
+        }
+      },
+      "XAUUSD": {
+        "full": {
+          "n": 4539,
+          "gate_mean_r": 0.08891524366600574,
+          "always_long_mean_r": 0.11108486472791365,
+          "edge_over_always_long": -0.02216962106190791
+        },
+        "H1": {
+          "n": 2272,
+          "gate_mean_r": 0.11549980589788733,
+          "always_long_mean_r": 0.3278570501760563,
+          "edge_over_always_long": -0.212357244278169
+        },
+        "H2": {
+          "n": 2266,
+          "gate_mean_r": 0.050533310238305366,
+          "always_long_mean_r": -0.08857440467784641,
+          "edge_over_always_long": 0.1391077149161518
+        }
+      }
+    },
+    "flips_edge": 13,
+    "flips_profitable": 10,
+    "considered": 20
+  }
+}

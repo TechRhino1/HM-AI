@@ -61,17 +61,29 @@ def halves(df: pd.DataFrame, cands: pd.DataFrame):
 
 
 def main() -> int:
+    import argparse
+
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--tf", default="M15,M5", help="comma-separated timeframes")
+    ap.add_argument("--window", type=int, default=183, help="candidate-cache window in days")
+    ap.add_argument("--out", default=None)
+    args = ap.parse_args()
+
+    tfs = [t.strip().upper() for t in args.tf.split(",") if t.strip()]
+    win = args.window
+
     real_dir = os.path.join(REPO, "data", "market", "real")
     symbols = sorted(d for d in os.listdir(real_dir) if os.path.isdir(os.path.join(real_dir, d)))
-    out: dict = {"tp_r": TP_R, "slip_pips": SLIP_PIPS, "split": "183d -> two disjoint halves"}
+    out: dict = {"tp_r": TP_R, "slip_pips": SLIP_PIPS,
+                 "split": f"{win}d -> two disjoint halves"}
 
-    for tf in ("M15", "M5"):
+    for tf in tfs:
         print("=" * 92, flush=True)
-        print(f"{tf}  183d split into two disjoint halves   tp={TP_R}R", flush=True)
+        print(f"{tf}  {win}d split into two disjoint halves   tp={TP_R}R", flush=True)
         print("=" * 92, flush=True)
         per: dict = {}
         for sym in symbols:
-            df, cands = load_symbol(sym, tf, 183)
+            df, cands = load_symbol(sym, tf, win)
             if df is None or cands is None or cands.empty:
                 continue
             cands = dynamic_regimes(df, cands)
@@ -113,7 +125,9 @@ def main() -> int:
         out[tf] = {"symbols": per, "flips_edge": flips_edge,
                    "flips_profitable": flips_prof, "considered": considered}
 
-    path = os.path.join(REPO, "reports", "p0_1_half_split_stability.json")
+    path = args.out or os.path.join(
+        REPO, "reports", f"p0_1_half_split_stability_{'_'.join(tfs)}_{win}d.json"
+    )
     with open(path, "w", encoding="utf-8") as fh:
         json.dump(out, fh, indent=2, default=str)
     print(f"\nwrote {path}", flush=True)
