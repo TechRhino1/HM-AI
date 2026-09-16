@@ -6,6 +6,7 @@ import threading
 import os
 
 from jarvis.config.paths import resolve_db_path, ensure_data_dir
+from jarvis.data.broker_time import broker_utc_offset
 
 logger = logging.getLogger("JARVIS_Database")
 
@@ -162,6 +163,12 @@ class SQLiteTradeDB:
             if not deals:
                 return
 
+            # `deal.time` is broker SERVER time, so reading it as UTC dated every
+            # synced trade 2-3 hours into the future (XM runs GMT+2/+3). Derive the
+            # offset from the deals' own symbols and store true UTC.
+            deal_symbols = sorted({str(d.symbol) for d in deals if getattr(d, "symbol", None)})
+            broker_offset = broker_utc_offset(mt5_module=mt5, symbols=deal_symbols)
+
             conn = self._get_conn()
             pos_map = {}
             for d in deals:
@@ -198,7 +205,9 @@ class SQLiteTradeDB:
                 vol = float(target_deal.volume)
                 pnl = float(exit_deal.profit) if exit_deal else 0.0
                 target_time = exit_deal.time if exit_deal else target_deal.time
-                dt_str = datetime.fromtimestamp(target_time, timezone.utc).isoformat()
+                dt_str = datetime.fromtimestamp(
+                    float(target_time) - broker_offset, timezone.utc
+                ).isoformat()
                 
                 # Determine executor (BOT vs MANUAL)
                 magic_num = getattr(target_deal, "magic", 0)

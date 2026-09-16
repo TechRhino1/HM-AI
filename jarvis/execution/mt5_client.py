@@ -11,6 +11,7 @@ from typing import Dict, List, Optional, Any
 from datetime import datetime, timezone
 
 from jarvis.application.timeout_guard import TimeoutGuard
+from jarvis.data.broker_time import broker_utc_offset
 from jarvis.data.schemas import AccountSnapshot, PositionSnapshot
 
 logger = logging.getLogger("JARVIS_MT5Client")
@@ -223,6 +224,17 @@ class MT5Client:
                 if not positions:
                     return []
 
+                # `p.time` is BROKER SERVER time, not UTC (XM: GMT+2/+3). Derive the
+                # offset from these positions' own symbols - they are guaranteed to be
+                # in Market Watch, so their ticks are available - and stamp open_time
+                # in true UTC. Downstream code (position_monitor's duration, and every
+                # stagnation/time-decay exit built on it) subtracts this from
+                # datetime.now(timezone.utc), so a 2-3h mislabel silently shortens every
+                # holding time and, after the max(0, ...) clamp, zeroes it entirely for
+                # the first three hours of a position's life.
+                pos_symbols = [str(p.symbol) for p in positions]
+                offset = broker_utc_offset(mt5_module=mt5, symbols=pos_symbols)
+
                 results = []
                 for p in positions:
                     results.append(PositionSnapshot(
@@ -237,7 +249,9 @@ class MT5Client:
                         profit=float(p.profit),
                         swap=float(p.swap),
                         commission=float(getattr(p, "commission", 0.0)),
-                        open_time=time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(p.time)),
+                        open_time=time.strftime(
+                            "%Y-%m-%d %H:%M:%S", time.gmtime(int(p.time) - offset)
+                        ),
                         magic=int(p.magic),
                         comment=str(p.comment)
                     ))

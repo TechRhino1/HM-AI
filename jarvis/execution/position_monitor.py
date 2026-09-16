@@ -888,7 +888,20 @@ class PositionMonitorEngine:
             now = datetime.now(timezone.utc)
             if open_dt.tzinfo is None:
                 open_dt = open_dt.replace(tzinfo=timezone.utc)
-            return max(0.0, (now - open_dt).total_seconds())
+            elapsed = (now - open_dt).total_seconds()
+            if elapsed < 0:
+                # A negative holding time means open_time is on a different clock to
+                # `now`. The old `max(0.0, ...)` turned that into a silent zero, and
+                # because the stagnation exits below are gated on `open_dur_sec > 0`
+                # it DISABLED them entirely - which is how a 2-3h broker-server-time
+                # mislabel stayed invisible. Clamp, but say so.
+                logger.warning(
+                    f"Negative holding time for position #{getattr(pos, 'ticket', '?')}: "
+                    f"open_time {open_dt.isoformat()} is in the future. Treating as 0. "
+                    "open_time is probably on the broker's clock rather than UTC."
+                )
+                return 0.0
+            return elapsed
         except Exception:
             return 0.0
 
