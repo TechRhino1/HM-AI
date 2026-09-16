@@ -1,0 +1,207 @@
+{
+  "tp_r": 1.5,
+  "windows": {
+    "183": {
+      "AUDUSD": {
+        "n": 26103,
+        "buy_pct": 0.49955943761253496,
+        "gate_mean_r": -0.3699818254989848,
+        "buy_mean_r": -0.4216547302914111,
+        "sell_mean_r": -0.3183999010946949,
+        "always_long_mean_r": -0.41248007796038777,
+        "edge_over_always_long": 0.042498252461402986,
+        "verdict": "gate loses"
+      },
+      "BTCUSD": {
+        "n": 38350,
+        "buy_pct": 0.4989569752281617,
+        "gate_mean_r": -0.17642022119947848,
+        "buy_mean_r": -0.20405169140318788,
+        "sell_mean_r": -0.14890379224564143,
+        "always_long_mean_r": -0.13823118943937418,
+        "edge_over_always_long": -0.0381890317601043,
+        "verdict": "gate loses"
+      },
+      "ETHUSD": {
+        "n": 37275,
+        "buy_pct": 0.5070154258886653,
+        "gate_mean_r": -0.26724532439973175,
+        "buy_mean_r": -0.2776534832530822,
+        "sell_mean_r": -0.2565409385611667,
+        "always_long_mean_r": -0.21891195264922872,
+        "edge_over_always_long": -0.048333371750503035,
+        "verdict": "gate loses"
+      },
+      "EURJPY": {
+        "n": 25489,
+        "buy_pct": 0.5379575503158225,
+        "gate_mean_r": -0.2670875128879124,
+        "buy_mean_r": -0.33426573176779467,
+        "sell_mean_r": -0.18887169075316296,
+        "always_long_mean_r": -0.27730571054180236,
+        "edge_over_always_long": 0.010218197653889982,
+        "verdict": "gate loses"
+      },
+      "EURUSD": {
+        "n": 25625,
+        "buy_pct": 0.4833560975609756,
+        "gate_mean_r": -0.35747559886829267,
+        "buy_mean_r": -0.4217231366865817,
+        "sell_mean_r": -0.29736758440969857,
+        "always_long_mean_r": -0.3785168066731707,
+        "edge_over_always_long": 0.02104120780487806,
+        "verdict": "gate loses"
+      },
+      "GBPJPY": {
+        "n": 26439,
+        "buy_pct": 0.5546351980029501,
+        "gate_mean_r": -0.2171435222587844,
+        "buy_mean_r": -0.2621433636115657,
+        "sell_mean_r": -0.1611029554989384,
+        "always_long_mean_r": -0.23487601168728015,
+        "edge_over_always_long": 0.017732489428495757,
+        "verdict": "gate loses"
+      },
+      "GBPUSD": {
+        "n": 26097,
+        "buy_pct": 0.49193393876690805,
+        "gate_mean_r": -0.35000557696286927,
+        "buy_mean_r": -0.3849838231032871,
+        "sell_mean_r": -0.31613796070593564,
+        "always_long_mean_r": -0.3429661927424608,
+        "edge_over_always_long": -0.007039384220408451,
+        "verdict": "gate loses"
+      },
+      "GER40": {
+        "n": 25098,
+        "buy_pct": 0.5066539166467448,
+        "gate_mean_r": -0.09805578683560444,
+        "buy_mean_r": -0.11741212189367725,
+        "sell_mean_r": -0.07817732159586496,
+        "always_long_mean_r": -0.08779974049725077,
+        "edge_over_always_long": -0.01025604633835367,
+        "verdict": "gate loses"
+      },
+      "NAS100": {
+        "n": 26639,
+        "buy_pct": 0.5412365329028868,
+        "gate_mean_r": -0.0006446164270430577,
+        "buy_mean_r": 0.03412700332917186,
+        "sell_mean_r": -0.04166721798543489,
+        "always_long_mean_r": -0.0028298439881376944,
+        "edge_over_always_long": 0.0021852275610946366,
+        "verdict": "gate loses"
+      },
+      "NZDUSD": {
+        "n": 26032,
+        "buy_pct": 0.4782575291948371,
+        "gate_mean_r": -0.36058717455439454,
+        "buy_mean_r": -0.43616309847389545,
+        "sell_mean_r": -0.2913101716978353,
+        "always_long_mean_r": -0.44475059253995075,
+        "edge_over_always_long": 0.08416341798555621,
+        "verdict": "gate loses"
+      },
+      "SOLUSD": {
+        "n": 34079,
+        "buy_pct": 0.4983420875025676,
+        "gate_mean_r": -0.3552142624783591,
+        "buy_mean_r": -0.37498919672613784,
+        "sell_mean_r": -0.33557003527140844,
+        "always_long_mean_r": -0.3489670966871094,
+        "edge_over_always_long": -0.006247165791249676,
+        "verdict": "gate loses"
+      },
+      "UK100": {
+        "n": 24775,
+        "buy_pct": 0.5022805247225025,
+        "gate_mean_r": -0.2273802486377397,
+        "buy_mean_r": -0.254279925104468,
+        "sell_mean_r": -0.20023406633687454,
+        "always_long_mean_r": -0.2051691510393542,
+        "edge_over_always_long": -0.022211097598385493,
+        "verdict": "gate loses"
+      },
+      "US30": {
+        "n": 26276,
+        "buy_pct": 0.5249657482112955,
+        "gate_mean_r": -0.0792215587608464,
+        "buy_mean_r": -0.019436044367116146,
+        "sell_mean_r": -0.14529120990225924,
+        "always_long_mean_r": -0.015949138605571626,
+        "edge_over_always_long": -0.06327242015527478,
+        "verdict": "gate loses"
+      },
+      "US500": {
+        "n": 25210,
+        "buy_pct": 0.5343911146370488,
+        "gate_mean_r": -0.12380038829829433,
+        "buy_mean_r": -0.10777052479216152,
+        "sell_mean_r": -0.14219826878514227,
+        "always_long_mean_r": -0.0671178533915113,
+        "edge_over_always_long": -0.05668253490678303,
+        "verdict": "gate loses"
+      },
+      "USDCAD": {
+        "n": 25693,
+        "buy_pct": 0.5188961974078543,
+        "gate_mean_r": -0.36395289176040163,
+        "buy_mean_r": -0.3762866637413741,
+        "sell_mean_r": -0.3506502586360326,
+        "always_long_mean_r": -0.33125233764060247,
+        "edge_over_always_long": -0.03270055411979916,
+        "verdict": "gate loses"
+      },
+      "USDCHF": {
+        "n": 25697,
+        "buy_pct": 0.5417753045102541,
+        "gate_mean_r": -0.4075610319881698,
+        "buy_mean_r": -0.45962528537566444,
+        "sell_mean_r": -0.346003619193206,
+        "always_long_mean_r": -0.3813682936918707,
+        "edge_over_always_long": -0.02619273829629909,
+        "verdict": "gate loses"
+      },
+      "USDJPY": {
+        "n": 25554,
+        "buy_pct": 0.5660170619081162,
+        "gate_mean_r": -0.3329826158331377,
+        "buy_mean_r": -0.37706866966261066,
+        "sell_mean_r": -0.2754839068530207,
+        "always_long_mean_r": -0.3052196084370353,
+        "edge_over_always_long": -0.027763007396102435,
+        "verdict": "gate loses"
+      },
+      "WTI": {
+        "n": 24367,
+        "buy_pct": 0.5184881191775762,
+        "gate_mean_r": -0.029177056757089502,
+        "buy_mean_r": -0.020746810115561187,
+        "sell_mean_r": -0.03825467851359414,
+        "always_long_mean_r": -0.04513047391964544,
+        "edge_over_always_long": 0.01595341716255594,
+        "verdict": "gate loses"
+      },
+      "XAGUSD": {
+        "n": 26163,
+        "buy_pct": 0.4809081527347781,
+        "gate_mean_r": -0.1238400192638459,
+        "buy_mean_r": -0.22569009100302023,
+        "sell_mean_r": -0.02948190111184744,
+        "always_long_mean_r": -0.21663453392195087,
+        "edge_over_always_long": 0.09279451465810497,
+        "verdict": "gate loses"
+      },
+      "XAUUSD": {
+        "n": 26654,
+        "buy_pct": 0.47760186088391987,
+        "gate_mean_r": -0.03044348821940422,
+        "buy_mean_r": -0.0936478930871956,
+        "sell_mean_r": 0.027341061763860953,
+        "always_long_mean_r": -0.08703722398139116,
+        "edge_over_always_long": 0.05659373576198694,
+        "verdict": "gate loses"
+      }
+    }
+  }
+}
