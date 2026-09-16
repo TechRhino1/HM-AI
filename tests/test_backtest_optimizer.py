@@ -10,14 +10,21 @@ Split into two halves on purpose:
   still passes on a machine with no market data.
 
 The alignment test is the important one. Candidates are indexed against the
-frame the *scanner* saw, which for M5 is trimmed by ``--since`` because M1
-history is capped. If that trim is ever mis-replayed, every ``bar_idx`` points
+frame the *scanner* saw, so whatever ``--since`` trim the scanner applied must
+be replayed identically here. If it is mis-replayed, every ``bar_idx`` points
 one offset out — silently, with plausible-looking numbers, because the arrays
 are still long enough to index. ``load_series`` guards it; this test proves the
 guard fires.
+
+M5 used to be the trimmed timeframe (``--since 2026-07-06``) because M1 history
+was hard-capped. The cap is gone — all 20 symbols now hold the full 183d M5
+series back to 2026-03-14 — so M5 is scanned untrimmed like M15. These tests
+therefore assert *consistency with whatever the manifest declares*, not that a
+trim exists; they are correct either way.
 """
 from __future__ import annotations
 
+import json
 import math
 import os
 
@@ -431,11 +438,24 @@ needs_data = pytest.mark.skipif(not HAS_DATA, reason="real MT5 market cache not 
 
 @needs_data
 class TestAgainstRealData:
-    def test_m5_scan_manifest_records_a_trim(self):
-        """M5 is the trimmed timeframe — M1 history is capped, so the scanner
-        applied a --since cutoff that the optimiser must replay."""
-        since = manifest_since("M5")
-        assert since, "expected the M5 scan manifest to record a --since trim"
+    def test_m5_scan_manifest_declares_its_window(self):
+        """The manifest must state which window was scanned, because the
+        optimiser replays `since` as an alignment-critical trim.
+
+        M5 was trimmed (--since 2026-07-06) while M1 history was capped; the cap
+        is gone and it is now scanned untrimmed. Both are legal — what is not
+        legal is an absent or malformed `since`, since `null` and a date mean
+        very different frames.
+        """
+        path = os.path.join("data", "signals", "scan_manifest_M5.json")
+        assert os.path.exists(path), "M5 scan manifest is missing"
+        with open(path, encoding="utf-8") as fh:
+            payload = json.load(fh)
+        assert "since" in payload, "manifest must declare `since` (null = untrimmed)"
+        since = payload["since"]
+        assert since is None or str(since).count("-") == 2, (
+            f"`since` must be null or an ISO date, got {since!r}"
+        )
 
     def test_h1_scan_is_untrimmed(self):
         """H1 is not capped, so no trim should be replayed for it."""
@@ -463,25 +483,36 @@ class TestAgainstRealData:
         """
         bundle = load_series("EURUSD", "SCALP")
         assert bundle is not None, "expected EURUSD M5 data to be present"
-        assert bundle.since, "SCALP should carry a trim from the scan manifest"
+        # No `bundle.since` assertion: M5 is untrimmed now that the M1 cap is
+        # gone. The assertion that matters is that the indices fit the frame.
         assert bundle.n_bars >= 150
 
         max_idx = int(bundle.candidates["bar_idx"].max())
         assert 0 <= max_idx < bundle.n_bars
 
-    def test_trim_actually_shortens_the_frame(self):
-        """A mis-replayed trim would leave the frame at its untrimmed length."""
+    def test_frame_length_matches_the_declared_trim(self):
+        """A mis-replayed trim shows up as a frame length that contradicts the
+        manifest: untrimmed must keep every bar, trimmed must be strictly
+        shorter. Asserting either one unconditionally would bake in whichever
+        convention happened to be current, so check it against `since`.
+        """
         import pandas as pd
 
+        since = manifest_since("M5")
         bundle = load_series("EURUSD", "SCALP")
         assert bundle is not None
         raw = pd.read_parquet(
             os.path.join("data", "market", "real", "EURUSD", "EURUSD_M5_183d.parquet")
         )
-        assert bundle.n_bars < len(raw), (
-            "the trimmed frame should be shorter than the raw parquet — "
-            "otherwise the --since replay did nothing"
-        )
+        if since is None:
+            assert bundle.n_bars == len(raw), (
+                f"untrimmed scan should keep all {len(raw)} bars, got {bundle.n_bars}"
+            )
+        else:
+            assert bundle.n_bars < len(raw), (
+                "the trimmed frame should be shorter than the raw parquet — "
+                "otherwise the --since replay did nothing"
+            )
 
     def test_h1_bundle_is_untrimmed_and_aligned(self):
         bundle = load_series("EURUSD", "SWING")

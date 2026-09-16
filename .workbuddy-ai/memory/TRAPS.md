@@ -250,7 +250,15 @@ in a way that no error message explains.
   so the guard catches gross breakage, not subtle misalignment.
   Fixed 2026-09-17: the scanner now publishes `since` (and `complete: false`) *before* the first
   candidate table lands, so alignment is right for the whole run. Legacy manifests have no
-  `complete` key at all, so `complete is False` cannot detect them.
+  `complete` key at all, so `complete is False` cannot detect them — the M5 manifest written by the
+  2026-09-17 rescan is in that old format, because that process started before the fix landed.
+* **"M5 is trimmed" was a convention that expired silently.** `--since 2026-07-06` existed because
+  **M1 history was hard-capped at ~67-69 days**; the cap is gone and all 20 symbols now hold the
+  full 183d M5 series (2026-03-14 → 2026-09-11, 34k-52k bars), so M5 is scanned untrimmed like M15.
+  Three tests still *asserted* a trim exists (`assert since`, `assert bundle.since`,
+  `assert n_bars < len(raw)`) and would have failed the moment the rescan landed. They now assert
+  **consistency with whatever the manifest declares** instead. When a data limitation behind a
+  convention disappears, tests that encode the convention — not just the data — go stale.
 * **A class-level mutable default is a process-global cache.** `MT5Client._shared_paper_positions` is
   aliased into every instance and never cleared, and `get_open_positions()` returned it whenever
   `is_connected` was False — so a simulated position from an earlier paper run was reported as a live

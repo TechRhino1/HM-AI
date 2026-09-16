@@ -37,7 +37,8 @@ plainly that closing the window stops it.
 
 ## Baselines
 
-**pytest 874 passed / 20 deselected.** `tools/`: `verify_ui_live.py` (44) ·
+**pytest 883 passed / 20 deselected** (was 874; the P0 audit commit added
+`test_deflated_sharpe.py` + `test_sample_uniqueness.py`). `tools/`: `verify_ui_live.py` (44) ·
 `verify_dashboard_render.js` (88) · `verify_dashboard_nav.js` (31) · `verify_ui_layout.js` (238) ·
 `audit_endpoints.py` (44) · `audit_wiring.py`. Screenshots: `.scratch/shot_one.js <tag> <page>`
 (**`agent-browser` does not support Windows**).
