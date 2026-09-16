@@ -2982,12 +2982,31 @@
   }
 
   /* ── Status bar ───────────────────────────────────────────────────────── */
+  var FEED_LABEL = {
+    STREAMING: 'live',
+    STALE: 'stale',
+    CLOSED: 'market closed',
+    SYNTHETIC: 'synthetic',
+    OFFLINE: 'offline'
+  };
+
   function renderStatus() {
     var services = state.services || {};
     var feed = services.DATA_FEED || '—';
     var mt5 = services.MT5 || '—';
 
-    setText($('status-feed'), mt5 === 'CONNECTED' ? 'live' : String(feed).toLowerCase());
+    var feedStatus = String(feed).toUpperCase();
+    // Real bars are the proof that the broker is reachable. "broker online" used
+    // to be `mt5 === 'CONNECTED'` alone - the EXECUTION account flag - so any
+    // session that reads prices without sending orders (paper mode, or a server
+    // started without a broker client) announced "broker offline" while live
+    // bars were streaming in. Reading prices and placing orders are separate
+    // capabilities, so the chip now reports the link that prices come over, and
+    // the feed label beside it still says plainly when bars are synthetic.
+    var realBars = feedStatus === 'STREAMING' || feedStatus === 'STALE' || feedStatus === 'CLOSED';
+    var online = realBars || mt5 === 'CONNECTED';
+
+    setText($('status-feed'), FEED_LABEL[feedStatus] || String(feed).toLowerCase());
 
     // The age of the last SUCCESSFUL TELEMETRY POLL - not the age of the last
     // market tick. The label used to read "Last tick", which claimed otherwise
@@ -3000,7 +3019,6 @@
 
     var conn = $('conn-chip');
     if (conn) {
-      var online = mt5 === 'CONNECTED';
       conn.className = 'tt-chip ' + (online ? 'tt-chip--buy' : 'tt-chip--none');
       conn.textContent = online ? 'broker online' : 'broker offline';
     }

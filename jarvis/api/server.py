@@ -15,7 +15,8 @@ from typing import Any, Optional, Dict, Tuple
 from jarvis.application.state_manager import StateManager, GLOBAL_STATE
 import threading
 import time
-from jarvis.market.data_feed import DataFeedEngine, first_stale_frame
+from jarvis.market.data_feed import DataFeedEngine, first_stale_frame, first_unusable_frame
+from jarvis.data.broker_symbols import terminal_ready
 from jarvis.api.copilot import JarvisCopilot
 from jarvis.execution.mt5_client import MT5Client
 from jarvis.data.schemas import ExecutionMode
@@ -186,6 +187,20 @@ class JarvisRequestHandler(BaseHTTPRequestHandler):
                                         sym, t_style, _stale_role, _stale_age,
                                     )
                                     continue
+
+                                # Fabricated bars must not be selected on, for the
+                                # same reason and with the same
+                                # only-when-the-broker-is-reachable scope as the
+                                # orchestrator's gate.
+                                if terminal_ready():
+                                    _bad_role, _bad_source = first_unusable_frame(mtf)
+                                    if _bad_role:
+                                        logger.warning(
+                                            "Skipping %s (%s) in auto-selection: %s frame "
+                                            "is %s, not real market data.",
+                                            sym, t_style, _bad_role, _bad_source,
+                                        )
+                                        continue
 
                                 spec = resolve_symbol(sym)
                                 ctx = ce.build_context(sym, mtf, current_spread_pips=spec.typical_spread_pips, max_allowed_spread_pips=spec.max_spread_pips, trade_style=t_style)

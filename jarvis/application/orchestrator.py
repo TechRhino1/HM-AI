@@ -11,6 +11,7 @@ from typing import Dict, List, Any, Optional, Tuple
 from jarvis.application.state_manager import StateManager, GLOBAL_STATE
 from jarvis.application.event_bus import EventBus, GLOBAL_EVENT_BUS
 from jarvis.market.data_feed import DataFeedEngine
+from jarvis.data.broker_symbols import terminal_ready
 from jarvis.market.market_context import MarketContextEngine
 from jarvis.intelligence.regime_engine import MarketRegimeClassifier
 from jarvis.intelligence.opportunity_arbiter import UniversalOpportunityArbiter
@@ -73,6 +74,9 @@ class JarvisOrchestrator:
         # Per-symbol last-execution timestamp for 10-min same-symbol cooldown
         self._last_execution_time: Dict[str, float] = {}
         self._SAME_SYMBOL_COOLDOWN_SEC = 600  # 10 minutes
+        # Symbols the broker does not offer are refused every cycle; log the
+        # reason once per symbol/style rather than on every scan.
+        self._unusable_warned: set = set()
 
         # Per-symbol regime tracking to eliminate cross-symbol contamination and race conditions
         self._regime_state: Dict[str, Dict[str, Any]] = {}
@@ -136,13 +140,30 @@ class JarvisOrchestrator:
                         logger.warning(f"Watchdog auto-releasing stale execution lock for {sym}.")
                         self._execution_in_progress.discard(sym)
 
-                # 2. Broker Connection and Quote Health Check
+                # 2. Broker connection and market-data health.
+                # Two different links, previously conflated: DATA_FEED was keyed
+                # off the *execution* account login, so paper mode reported
+                # OFFLINE forever while real bars were streaming, and the
+                # dashboard chip read "broker offline" off the same flag.
+                # Execution link:
                 acc = self.mt5_client.get_account_snapshot()
                 if acc and acc.login > 0:
                     self.state_manager.update_service_health("MT5", "CONNECTED")
-                    self.state_manager.update_service_health("DATA_FEED", "STREAMING")
+                elif terminal_ready():
+                    # Terminal is up and answering; we are simply not sending
+                    # orders. The broker is reachable - say so.
+                    self.state_manager.update_service_health(
+                        "MT5", "SIMULATED" if self.mode == "paper" else "CONNECTED"
+                    )
                 else:
-                    self.state_manager.update_service_health("MT5", "SIMULATED" if self.mode == "paper" else "RECONNECTING")
+                    self.state_manager.update_service_health(
+                        "MT5", "SIMULATED" if self.mode == "paper" else "RECONNECTING"
+                    )
+
+                # Market-data link: measured, not inferred.
+                self.state_manager.update_service_health(
+                    "DATA_FEED", self.data_feed.data_health().get("status", "OFFLINE")
+                )
 
                 # 3. ML Predictor Brier Score Health Check
                 if int(now) % 300 < 10:
@@ -273,6 +294,13 @@ class JarvisOrchestrator:
 
         return first_stale_frame(mtf_data)
 
+    @staticmethod
+    def _first_unusable_frame(mtf_data) -> Tuple[Optional[str], Optional[str]]:
+        """First role whose frame is not real broker data, with its source."""
+        from jarvis.market.data_feed import first_unusable_frame
+
+        return first_unusable_frame(mtf_data)
+
     def run_cycle_for_symbol(self, symbol: str, trade_style: Optional[str] = None,
                              dry_run: bool = False) -> Dict[str, Any]:
         """Executes a single end-to-end analytical and decision cycle for a target symbol and trade style.
@@ -311,6 +339,39 @@ class JarvisOrchestrator:
                 "execution": None,
                 "stale": True,
             }
+
+        # 1c. Fabricated bars must not be reasoned on either, but only when the
+        # broker link is actually up. Gating on `terminal_ready()` makes this
+        # fire in exactly one case: we have a working terminal and it still
+        # answered nothing for this symbol -- i.e. the broker does not offer it
+        # (`WTI` sits in the default symbol list and is absent at XM, so the feed
+        # was quietly synthesising a WTI series and the platform would have
+        # analysed it as if it were real). With the terminal down we keep the
+        # synthetic frame so the UI still renders, and execution is already
+        # blocked because `get_account_snapshot()` reports login 0.
+        if terminal_ready():
+            bad_role, bad_source = self._first_unusable_frame(mtf_data)
+            if bad_role:
+                _key = (symbol, active_trade_style)
+                if _key not in self._unusable_warned:
+                    self._unusable_warned.add(_key)
+                    logger.warning(
+                        "Refusing to decide on %s (%s): the %s frame is %s, not real "
+                        "market data. This broker does not appear to offer this symbol. "
+                        "(Further refusals for this symbol/style are not logged.)",
+                        symbol, active_trade_style, bad_role, bad_source,
+                    )
+                return {
+                    "symbol": symbol,
+                    "trade_style": active_trade_style,
+                    "decision": None,
+                    "context": None,
+                    "authorized": False,
+                    "auth_reason": f"no real market data for {bad_role} ({bad_source})",
+                    "dry_run": bool(dry_run),
+                    "execution": None,
+                    "unusable_data": True,
+                }
 
         _spec = _resolve_sym(symbol)
         

@@ -4,7 +4,7 @@ Provides thread-safe, timeout-guarded OHLCV data streaming from MT5 with realist
 """
 import time
 
-from jarvis.data.broker_symbols import resolve_broker_symbol
+from jarvis.data.broker_symbols import resolve_broker_symbol, ensure_mt5_terminal
 from jarvis.data.broker_time import broker_utc_offset
 # One bar-duration map for the whole codebase. The provider already owned the
 # canonical copy; duplicating it here is how a second source of truth starts.
@@ -78,6 +78,14 @@ def style_timeframe_set(trade_style: Optional[str]) -> set:
 # a 1x rule would flag every healthy frame. 2.5 leaves room for the in-progress
 # bar plus exchange slack without accepting a genuinely stalled feed.
 _FRESH_BAR_TOLERANCE = 2.5
+
+# Cold-history warm-up budget. MT5 downloads a symbol's history on demand and
+# does it asynchronously, so the first read after `symbol_select` can return a
+# stale tail. Measured: 5 of 6 untouched symbols read ~19.6h stale, unchanged
+# across 7 back-to-back calls (30-47ms), then fresh within a few hundred ms.
+# Polled in small steps rather than one guessed sleep.
+_COLD_SYNC_BUDGET_SEC = 1.2
+_COLD_SYNC_POLL_SEC = 0.3
 
 FRESH = "FRESH"
 STALE = "STALE"
@@ -157,6 +165,25 @@ def first_stale_frame(mtf_data) -> tuple:
     return None, 0.0
 
 
+# Sources that are NOT real broker data. A frame stamped with one of these must
+# not be reasoned on when a broker link is available -- see
+# `Orchestrator.run_cycle_for_symbol`.
+UNUSABLE_SOURCES = frozenset({"SYNTHETIC_FALLBACK"})
+
+
+def first_unusable_frame(mtf_data) -> tuple:
+    """First role whose frame is fabricated, with its source.
+
+    ``(None, None)`` when every frame is real market data.
+    """
+    for role, frame in (mtf_data or {}).items():
+        attrs = getattr(frame, "attrs", None) or {}
+        source = attrs.get("data_source")
+        if source in UNUSABLE_SOURCES:
+            return role, source
+    return None, None
+
+
 class DataFeedEngine:
     _mt5_fetch_lock = threading.Lock()
 
@@ -168,6 +195,68 @@ class DataFeedEngine:
         # One warning per symbol/timeframe: a stalled feed repeats on every poll
         # and would otherwise bury the rest of the log.
         self._stale_warned: set = set()
+        # Broker symbols whose on-demand history has already been waited for.
+        self._warmed: set = set()
+        # A symbol the broker does not offer re-warns on every poll, for every
+        # timeframe. One line each, like `_stale_warned`.
+        self._no_rates_warned: set = set()
+        # What the last fetch actually returned. Market-data health is a
+        # *measured* property of this engine; it used to be inferred from the
+        # execution account's login, which reported OFFLINE forever in paper
+        # mode while real bars were streaming.
+        self._health: Dict[str, Any] = {
+            "source": None,
+            "freshness": None,
+            "symbol": None,
+            "timeframe": None,
+            "at": 0.0,
+        }
+        self._health_lock = threading.Lock()
+
+    def _note_health(self, df: pd.DataFrame, symbol: str, timeframe: str) -> None:
+        with self._health_lock:
+            self._health = {
+                "source": df.attrs.get("data_source"),
+                "freshness": df.attrs.get("freshness"),
+                "symbol": symbol,
+                "timeframe": timeframe,
+                "at": time.time(),
+            }
+
+    def data_health(self, max_age_sec: float = 120.0) -> Dict[str, Any]:
+        """Honest market-data health, derived from the last fetch that ran.
+
+        ``status`` is one of:
+          STREAMING - real broker bars, verified fresh
+          STALE     - real broker bars, but the newest one is old
+          CLOSED    - real broker bars, market shut (weekend/holiday gap)
+          SYNTHETIC - not real bars; the feed could not reach the broker
+          OFFLINE   - nothing has been fetched yet, or not for a long while
+        """
+        with self._health_lock:
+            h = dict(self._health)
+
+        age = time.time() - float(h.get("at") or 0.0)
+        if not h.get("source") or age > max_age_sec:
+            h["status"] = "OFFLINE"
+            h["age_sec"] = None if not h.get("at") else round(age, 1)
+            return h
+
+        source = h.get("source")
+        freshness = h.get("freshness")
+        if source != "LIVE_MT5":
+            h["status"] = "SYNTHETIC"
+        elif freshness == FRESH:
+            h["status"] = "STREAMING"
+        elif freshness == MARKET_CLOSED:
+            h["status"] = "CLOSED"
+        elif freshness == STALE:
+            h["status"] = "STALE"
+        else:
+            # Live bars of unverifiable age: real, but not a freshness claim.
+            h["status"] = "STREAMING"
+        h["age_sec"] = round(age, 1)
+        return h
 
     def fetch_rates(self, symbol: str, timeframe: str = "H1", num_bars: int = 300, include_current_bar: bool = False) -> pd.DataFrame:
         cache_key = f"{symbol}_{timeframe}_{num_bars}_{include_current_bar}"
@@ -187,17 +276,69 @@ class DataFeedEngine:
                 df.attrs["freshness"] = FRESHNESS_UNKNOWN
                 return df
 
+            # Reading bars needs an initialized terminal, and paper mode
+            # deliberately does not establish one (it simulates fills). Do it
+            # here so "paper" means simulated fills on REAL bars -- not
+            # simulated bars. Without this the canonical name reaches
+            # `copy_rates_from_pos`, the broker answers 0 rows, and every frame
+            # silently becomes SYNTHETIC_FALLBACK.
+            if not ensure_mt5_terminal():
+                logger.warning(
+                    "MT5 terminal unavailable for market data; %s %s falls back to "
+                    "synthetic bars. (Reading bars is independent of execution mode.)",
+                    symbol, timeframe,
+                )
+                df = self._generate_realistic_rates(symbol, timeframe, num_bars)
+                df.attrs["data_source"] = "SYNTHETIC_FALLBACK"
+                df.attrs["freshness"] = FRESHNESS_UNKNOWN
+                return df
+
             resolved_sym = self.mt5_client.resolve_symbol_name(symbol) if hasattr(self.mt5_client, "resolve_symbol_name") else symbol
             mt5_tf = TF_MAP.get(timeframe, 16385)
             start_pos = 0 if include_current_bar else 1
-            with DataFeedEngine._mt5_fetch_lock:
-                _broker_sym = resolve_broker_symbol(resolved_sym) or resolved_sym
-                rates = mt5.copy_rates_from_pos(_broker_sym, mt5_tf, start_pos, num_bars)
-                if rates is None or len(rates) == 0:
-                    # Fallback to pos 0 if start_pos returns empty
-                    rates = mt5.copy_rates_from_pos(_broker_sym, mt5_tf, 0, num_bars)
+            _broker_sym = resolve_broker_symbol(resolved_sym) or resolved_sym
+
+            def _read():
+                with DataFeedEngine._mt5_fetch_lock:
+                    r = mt5.copy_rates_from_pos(_broker_sym, mt5_tf, start_pos, num_bars)
+                    if r is None or len(r) == 0:
+                        # Fallback to pos 0 if start_pos returns empty
+                        r = mt5.copy_rates_from_pos(_broker_sym, mt5_tf, 0, num_bars)
+                return r
+
+            def _build(rates):
+                """Frame + freshness verdict. `rates["time"]` is the broker's
+                clock, so the age must be measured against now-in-broker-time;
+                against raw UTC it under-reports by the offset (2-3h for XM) and
+                a stalled feed looks healthy. `_broker_sym` is the symbol the
+                broker actually answered for, which is the only one whose tick
+                offset is valid."""
+                d = pd.DataFrame(rates)
+                d["time"] = pd.to_datetime(d["time"], unit="s")
+                d.rename(columns={"tick_volume": "volume"}, inplace=True)
+                out = d[["time", "open", "high", "low", "close", "volume"]].copy()
+                out.attrs["data_source"] = "LIVE_MT5"
+                off = broker_utc_offset(mt5_module=mt5, symbols=[_broker_sym])
+                v, a = classify_bar_freshness(
+                    float(rates["time"][-1]),
+                    timeframe,
+                    include_current_bar=include_current_bar,
+                    offset_sec=off,
+                )
+                out.attrs["freshness"] = v
+                out.attrs["bar_age_sec"] = None if a is None else round(a, 1)
+                return out, v, a
+
+            rates = _read()
             if rates is None or len(rates) == 0:
-                logger.warning(f"MT5 returned 0 rates for {symbol} ({timeframe}). Falling back to synthetic rates.")
+                if _broker_sym not in self._no_rates_warned:
+                    self._no_rates_warned.add(_broker_sym)
+                    logger.warning(
+                        "MT5 returned 0 rates for %s (%s) - the broker does not appear to "
+                        "offer '%s'. Falling back to synthetic rates; a live session "
+                        "refuses to decide on them.",
+                        symbol, timeframe, _broker_sym,
+                    )
                 df = self._generate_realistic_rates(symbol, timeframe, num_bars)
                 df.attrs["data_source"] = "SYNTHETIC_FALLBACK"
                 # Fabricated bars have no age to verify. Marked UNKNOWN rather
@@ -206,27 +347,42 @@ class DataFeedEngine:
                 df.attrs["freshness"] = FRESHNESS_UNKNOWN
                 return df
 
-            df = pd.DataFrame(rates)
-            df["time"] = pd.to_datetime(df["time"], unit="s")
-            df.rename(columns={"tick_volume": "volume"}, inplace=True)
-            res_df = df[["time", "open", "high", "low", "close", "volume"]].copy()
-            res_df.attrs["data_source"] = "LIVE_MT5"
+            res_df, verdict, age = _build(rates)
+            first_age = age
 
-            # Freshness. `rates["time"]` is the broker's clock, so the age must
-            # be measured against now-in-broker-time; against the raw UTC clock
-            # it under-reports by the offset (2-3h for XM) and a stalled feed
-            # looks healthy. `_broker_sym` is the symbol the broker actually
-            # answered for, which is the only one whose tick offset is valid.
-            last_bar_epoch = float(rates["time"][-1])
-            offset = broker_utc_offset(mt5_module=mt5, symbols=[_broker_sym])
-            verdict, age = classify_bar_freshness(
-                last_bar_epoch,
-                timeframe,
-                include_current_bar=include_current_bar,
-                offset_sec=offset,
-            )
-            res_df.attrs["freshness"] = verdict
-            res_df.attrs["bar_age_sec"] = None if age is None else round(age, 1)
+            if verdict == STALE and _broker_sym not in self._warmed:
+                # MT5 pulls a symbol's history on demand, and the download is
+                # ASYNCHRONOUS: the first read after `symbol_select` returns a
+                # stale tail (measured ~19.6h behind on 5 of 6 cold symbols,
+                # unchanged across 7 rapid calls) while the real bars are still
+                # being fetched. They land in well under a second. Without this
+                # bounded wait the freshness gate refuses a perfectly good symbol
+                # on the first cycle after every restart - intermittently, and
+                # only right after a restart, which is what a phantom bug looks
+                # like. Marked warmed either way so the wait is paid once.
+                self._warmed.add(_broker_sym)
+                try:
+                    mt5.symbol_select(_broker_sym, True)
+                except Exception:
+                    pass
+                deadline = time.time() + _COLD_SYNC_BUDGET_SEC
+                started = time.time()
+                while time.time() < deadline:
+                    time.sleep(_COLD_SYNC_POLL_SEC)
+                    retry = _read()
+                    if retry is None or len(retry) == 0:
+                        continue
+                    res2, v2, a2 = _build(retry)
+                    if v2 != STALE:
+                        res_df, verdict, age = res2, v2, a2
+                        logger.info(
+                            "Warmed cold history for %s %s: first read was %.0fs stale, "
+                            "now %s after %.1fs.",
+                            symbol, timeframe,
+                            first_age if first_age is not None else 0.0,
+                            v2, time.time() - started,
+                        )
+                        break
 
             if verdict == STALE and cache_key not in self._stale_warned:
                 self._stale_warned.add(cache_key)
@@ -258,6 +414,7 @@ class DataFeedEngine:
             # A frame of unknown origin must not read as verified.
             df_result.attrs["freshness"] = FRESHNESS_UNKNOWN
 
+        self._note_health(df_result, symbol, timeframe)
         self._cache[cache_key] = {"df": df_result, "timestamp": now}
         return df_result
 
