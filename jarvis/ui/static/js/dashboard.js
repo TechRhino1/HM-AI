@@ -269,13 +269,23 @@
     }).catch(function (err) {
       if (timer) clearTimeout(timer);
       var aborted = err && (err.name === 'AbortError' || /abort/i.test(String(err.message || '')));
+      var raw = String((err && err.message) || err);
+      // `fetch` rejects with the bare string "Failed to fetch" for EVERY
+      // transport-level failure - connection refused, DNS failure, reset
+      // mid-flight. That is the browser's internal phrasing: it names no cause
+      // and suggests no action. The panels render this string verbatim, so a
+      // dead backend used to put "Failed to fetch" in front of a trader. The
+      // common case here is simply that the server is not running, so say so.
+      var msg = aborted
+        ? 'Request timed out after ' + Math.round(budget / 1000) + 's'
+        : (/failed to fetch|networkerror|load failed|err_connection/i.test(raw)
+            ? 'Backend unreachable — is the server running?'
+            : raw);
       return {
         ok: false,
         status: 0,
         data: null,
-        error: aborted
-          ? 'Request timed out after ' + Math.round(budget / 1000) + 's'
-          : String((err && err.message) || err)
+        error: msg
       };
     });
   }

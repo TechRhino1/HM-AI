@@ -1050,7 +1050,191 @@ body.hm-modal-open {
 
 
 /* ==========================================================================
-   13. PRINT
+   13. LIQUID GLASS  (shared surface system)
+   --------------------------------------------------------------------------
+   A surface reads as glass only when four things happen at once, so they are
+   kept as separate ingredients rather than one flat rgba():
+
+     1. SHEEN  - a diagonal specular highlight, brightest at the top-left,
+                 fading out by ~60%. This is the light source.
+     2. TINT   - the translucent body colour, which keeps text legible no
+                 matter what scrolls underneath.
+     3. BLUR   - `backdrop-filter` with a saturation boost. The saturation is
+                 what separates "glass" from "grey fog": it pulls the colour
+                 back into whatever is behind the pane.
+     4. EDGE   - an inset 1px top highlight plus a deep outer shadow. Without
+                 the lit top edge a translucent panel just looks blurry.
+
+   Both the sheen and the tint are painted as `background-image` layers on the
+   element itself, never as an absolutely-positioned ::before. A positioned
+   pseudo-element paints ABOVE non-positioned in-flow content, so it would sit
+   on top of the panel's own text; background layers are always behind it.
+
+   Fallback: where backdrop-filter is unavailable the tint is swapped for an
+   opaque surface. A translucent panel over unblurred content is unreadable,
+   so the fallback must be opaque rather than merely darker.
+   ========================================================================== */
+
+:root {
+    --hm-glass-sheen: linear-gradient(160deg,
+        rgba(255, 255, 255, 0.075) 0%,
+        rgba(255, 255, 255, 0.022) 32%,
+        rgba(255, 255, 255, 0) 62%);
+    --hm-glass-tint: linear-gradient(160deg,
+        rgba(32, 45, 70, 0.62) 0%,
+        rgba(13, 20, 32, 0.58) 100%);
+    --hm-glass-tint-strong: linear-gradient(160deg,
+        rgba(38, 52, 80, 0.88) 0%,
+        rgba(13, 20, 32, 0.84) 100%);
+    --hm-glass-blur: blur(22px) saturate(170%);
+    --hm-glass-blur-sm: blur(12px) saturate(150%);
+    --hm-glass-edge: rgba(255, 255, 255, 0.11);
+    --hm-glass-edge-lit: rgba(255, 255, 255, 0.20);
+    --hm-glass-lift: inset 0 1px 0 rgba(255, 255, 255, 0.09);
+    --hm-glass-drop: 0 10px 34px rgba(0, 0, 0, 0.50);
+}
+
+/* Reusable glass surface. `.hm-glass--strong` is for surfaces that must stay
+   readable over busy content (dropdowns, modals, sticky headers). */
+.hm-glass,
+.hm-glass--strong {
+    background-image: var(--hm-glass-sheen), var(--hm-glass-tint);
+    backdrop-filter: var(--hm-glass-blur);
+    -webkit-backdrop-filter: var(--hm-glass-blur);
+    border: 1px solid var(--hm-glass-edge);
+    box-shadow: var(--hm-glass-lift), var(--hm-glass-drop);
+}
+.hm-glass--strong {
+    background-image: var(--hm-glass-sheen), var(--hm-glass-tint-strong);
+}
+
+/* Apply the system to the shared surfaces. These are declared after the
+   component rules above, so they win on order without needing !important. */
+
+.hm-card {
+    background-image: var(--hm-glass-sheen), var(--hm-glass-tint);
+    backdrop-filter: var(--hm-glass-blur);
+    -webkit-backdrop-filter: var(--hm-glass-blur);
+    border-color: var(--hm-glass-edge);
+    box-shadow: var(--hm-glass-lift), var(--hm-shadow);
+}
+
+.mobile-nav-bar {
+    background-image: var(--hm-glass-sheen), var(--hm-glass-tint-strong);
+    backdrop-filter: var(--hm-glass-blur);
+    -webkit-backdrop-filter: var(--hm-glass-blur);
+    border-bottom-color: var(--hm-glass-edge);
+    box-shadow: var(--hm-glass-lift);
+}
+
+.hm-toast {
+    background-image: var(--hm-glass-sheen), var(--hm-glass-tint-strong);
+    backdrop-filter: var(--hm-glass-blur);
+    -webkit-backdrop-filter: var(--hm-glass-blur);
+    border-color: var(--hm-glass-edge);
+}
+
+/* The four market-page headers. All are sticky, so content scrolls beneath
+   them - which is precisely when the blur earns its cost. */
+.terminal-hud,
+.stocks-hud,
+.india-hud,
+.opt-hud {
+    background-image: var(--hm-glass-sheen), var(--hm-glass-tint-strong);
+    backdrop-filter: var(--hm-glass-blur);
+    -webkit-backdrop-filter: var(--hm-glass-blur);
+    border-bottom-color: var(--hm-glass-edge);
+    box-shadow: var(--hm-glass-lift);
+}
+
+/* Opaque fallback for every surface that took the glass treatment. This MUST
+   come after the component rules above: a later rule of equal specificity
+   wins, so placing it earlier would let the translucent tint through and the
+   panel would sit unblurred over live content - the one outcome the fallback
+   exists to prevent. */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    .hm-glass,
+    .hm-glass--strong,
+    .hm-card,
+    .mobile-nav-bar,
+    .hm-toast,
+    .terminal-hud,
+    .stocks-hud,
+    .india-hud,
+    .opt-hud {
+        background-image: none;
+        background-color: var(--hm-bg-overlay);
+    }
+}
+
+
+/* ==========================================================================
+   14. MOTION  (shared keyframes and primitives)
+   --------------------------------------------------------------------------
+   Every animation is declared inside a `no-preference` query, so a user who
+   has asked their OS to reduce motion gets a static interface rather than a
+   subtly moving one. This is the correct polarity: opt IN to motion, never
+   opt out of it.
+   ========================================================================== */
+
+@keyframes hm-rise {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: none; }
+}
+
+@keyframes hm-fade {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+}
+
+@keyframes hm-scale-in {
+    from { opacity: 0; transform: scale(0.97) translateY(-4px); }
+    to   { opacity: 1; transform: none; }
+}
+
+/* Touch polish: no grey flash on tap, no accidental text selection when
+   dragging a scrolling stat strip. */
+html {
+    -webkit-tap-highlight-color: transparent;
+}
+.hm-nodrag {
+    -webkit-user-select: none;
+    user-select: none;
+}
+
+/* Horizontal swipe strips (stat rows, tab bars): scroll without a visible
+   scrollbar, and snap so a flick lands on a boundary. */
+.hm-swipe {
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+}
+.hm-swipe::-webkit-scrollbar {
+    display: none;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+    .hm-anim-rise { animation: hm-rise var(--hm-dur-slow) var(--hm-ease-out) both; }
+    .hm-anim-fade { animation: hm-fade var(--hm-dur-normal) var(--hm-ease) both; }
+
+    /* Staggered entrance. Capped at 8 children - past that the last card
+       arrives late enough to feel broken rather than choreographed. */
+    .hm-stagger > * { animation: hm-rise var(--hm-dur-slow) var(--hm-ease-out) both; }
+    .hm-stagger > *:nth-child(1) { animation-delay: 0ms; }
+    .hm-stagger > *:nth-child(2) { animation-delay: 40ms; }
+    .hm-stagger > *:nth-child(3) { animation-delay: 80ms; }
+    .hm-stagger > *:nth-child(4) { animation-delay: 120ms; }
+    .hm-stagger > *:nth-child(5) { animation-delay: 160ms; }
+    .hm-stagger > *:nth-child(6) { animation-delay: 200ms; }
+    .hm-stagger > *:nth-child(7) { animation-delay: 240ms; }
+    .hm-stagger > *:nth-child(8) { animation-delay: 280ms; }
+    .hm-stagger > *:nth-child(n + 9) { animation-delay: 280ms; }
+}
+
+
+/* ==========================================================================
+   15. PRINT
    ========================================================================== */
 
 @media print {
@@ -1072,5 +1256,21 @@ body.hm-modal-open {
     .opt-hud {
         box-shadow: none !important;
         border-color: #cccccc !important;
+    }
+    /* Glass is a screen affordance. On paper the sheen and tint would print as
+       a grey wash over the content, so the surfaces go flat and opaque. */
+    .hm-glass,
+    .hm-glass--strong,
+    .hm-card,
+    .mobile-nav-bar,
+    .hm-toast,
+    .terminal-hud,
+    .stocks-hud,
+    .india-hud,
+    .opt-hud {
+        background-image: none !important;
+        background-color: #ffffff !important;
+        backdrop-filter: none !important;
+        -webkit-backdrop-filter: none !important;
     }
 }

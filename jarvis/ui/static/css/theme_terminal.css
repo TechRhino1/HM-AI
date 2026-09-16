@@ -1512,9 +1512,322 @@
   color: var(--hm-text-dim);
 }
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   LIQUID GLASS  +  MOBILE APP SHELL
+   ---------------------------------------------------------------------------
+   Loaded last, so these rules win on source order without !important. Every
+   rule here is additive: no class, id or data-attribute is renamed or removed,
+   because dashboard.js queries those by name and the render harness
+   cross-checks them against this template.
+
+   Order matters and is deliberate:
+     A. Ambient background  - glass is only visible against something varied
+     B. Glass surfaces      - rail, panels, panel heads, dropdowns
+     C. Floating layout     - the gaps that let the ambient background show
+     D. Motion              - every animation, opt-in only
+     E. Mobile app shell    - the responsive rebuild
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+
+/* ── A. Ambient background ──────────────────────────────────────────────────
+   A blur over a flat colour is invisible - there is nothing to refract. These
+   three low-alpha radial washes give every glass surface something to pull
+   colour out of, which is what makes the effect read as glass rather than as
+   a slightly lighter grey box. Kept at 5-11% alpha so the data stays the
+   brightest thing on screen. */
+.tt-app {
+  background-color: var(--hm-bg-base);
+  background-image:
+    radial-gradient(1200px 620px at 12% -10%, rgba(56, 189, 248, 0.11), transparent 62%),
+    radial-gradient(900px 520px at 90% 2%, rgba(129, 140, 248, 0.10), transparent 64%),
+    radial-gradient(820px 700px at 50% 112%, rgba(0, 245, 155, 0.055), transparent 62%);
+  background-attachment: fixed;
+  background-repeat: no-repeat;
+}
+
+
+/* ── B. Glass surfaces ──────────────────────────────────────────────────────
+   The rail sits directly in the root stacking context, so its backdrop-filter
+   samples the page content scrolling underneath it - the one place on this
+   screen where the blur is genuinely load-bearing. */
+.tt-rail {
+  background-image: var(--hm-glass-sheen), var(--hm-glass-tint-strong);
+  backdrop-filter: var(--hm-glass-blur);
+  -webkit-backdrop-filter: var(--hm-glass-blur);
+  border-bottom: 1px solid var(--hm-glass-edge);
+  box-shadow: var(--hm-glass-lift);
+}
+
+/* Panels carry the tint at ~0.78 alpha rather than the shared 0.88: enough
+   translucency for the ambient wash to show through, while keeping the base
+   under the dense numeric tables at roughly #0b1220 - so --hm-text-primary
+   still clears 16:1. Readability first, effect second. */
+.tt-panel {
+  background-image:
+    var(--hm-glass-sheen),
+    linear-gradient(160deg, rgba(30, 43, 66, 0.80) 0%, rgba(10, 16, 26, 0.76) 100%);
+  backdrop-filter: var(--hm-glass-blur);
+  -webkit-backdrop-filter: var(--hm-glass-blur);
+  border: 1px solid var(--hm-glass-edge);
+  border-radius: var(--hm-radius-xl);
+  box-shadow: var(--hm-glass-lift), var(--hm-glass-drop);
+}
+
+/* Panel headers read as a lit band on the pane rather than a second surface. */
+.tt-panel__head {
+  background: rgba(255, 255, 255, 0.032);
+  border-bottom: 1px solid var(--hm-glass-edge);
+}
+
+.tt-panel__count {
+  background: rgba(0, 0, 0, 0.32);
+  border: 1px solid var(--hm-glass-edge);
+}
+
+/* Dropdowns float over live content, so they take the strong tint: at this
+   size a translucent menu over a scrolling table is unreadable. */
+.tt-dropdown__panel {
+  background-image: var(--hm-glass-sheen), var(--hm-glass-tint-strong);
+  backdrop-filter: var(--hm-glass-blur);
+  -webkit-backdrop-filter: var(--hm-glass-blur);
+  border: 1px solid var(--hm-glass-edge);
+  border-radius: var(--hm-radius-lg);
+  box-shadow: var(--hm-glass-lift), var(--hm-glass-drop);
+}
+
+.tt-pane-bar {
+  background-image: var(--hm-glass-sheen), var(--hm-glass-tint-strong);
+  backdrop-filter: var(--hm-glass-blur);
+  -webkit-backdrop-filter: var(--hm-glass-blur);
+  border-bottom: 1px solid var(--hm-glass-edge);
+}
+
+/* The status strip is a child of the app grid; give it the same treatment so
+   the top and bottom edges of the window agree. */
+.tt-status {
+  background-image: var(--hm-glass-sheen), var(--hm-glass-tint-strong);
+  backdrop-filter: var(--hm-glass-blur);
+  -webkit-backdrop-filter: var(--hm-glass-blur);
+  border-top: 1px solid var(--hm-glass-edge);
+}
+
+/* Opaque fallback. Placed after the rules it overrides - a translucent panel
+   over unblurred content is worse than no effect at all. */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .tt-rail,
+  .tt-panel,
+  .tt-dropdown__panel,
+  .tt-pane-bar,
+  .tt-status {
+    background-image: none;
+    background-color: var(--hm-bg-overlay);
+  }
+  .tt-app {
+    background-image: none;
+  }
+}
+
+
+/* ── C. Floating layout ─────────────────────────────────────────────────────
+   The old layout separated panes with a 1px grid line on a coloured `.tt-main`
+   background. Floating glass panes need a real gutter instead, otherwise the
+   ambient background never shows between them and the panes read as one slab. */
+
+/* The app grid declared rows but no column, so its single implicit column was
+   `auto` - and an `auto` track is sized by its items' min-content. That is how
+   a 404px tab strip widened the document to 421px on a 390px viewport. An
+   explicit `minmax(0, 1fr)` column is definite, so no descendant can widen the
+   page again; oversized children scroll inside their own pane instead. This is
+   the actual fix for the horizontal-overflow defect, at every breakpoint. */
+.tt-app {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.tt-main {
+  gap: var(--hm-space-3);
+  background: transparent;
+  padding: var(--hm-space-3);
+  min-width: 0;
+}
+
+/* The chart and the order book draw their own backgrounds; let the pane tint
+   through so they do not appear as opaque rectangles cut into the glass. */
+.tt-chart,
+.tt-panel__body--flush {
+  background: transparent;
+}
+
+
+/* ── D. Motion ──────────────────────────────────────────────────────────────
+   All of it inside `no-preference`. A user who asked their OS to reduce motion
+   gets a static interface, never a subtly moving one. */
+@media (prefers-reduced-motion: no-preference) {
+  /* View switch: a short rise-and-fade. Kept under 250ms so rapid tab
+     switching never feels like it is queueing behind an animation. */
+  .tt-view[data-active="true"] {
+    animation: hm-fade var(--hm-dur-normal) var(--hm-ease) both;
+  }
+  .tt-dropdown__panel:not([hidden]) {
+    animation: hm-scale-in var(--hm-dur-fast) var(--hm-ease-out) both;
+  }
+
+  /* Pointer affordance on the panes and the tab strip. */
+  .tt-panel {
+    transition: border-color var(--hm-dur-fast) var(--hm-ease),
+                box-shadow var(--hm-dur-fast) var(--hm-ease);
+  }
+  .tt-panel:hover {
+    border-color: var(--hm-glass-edge-lit);
+  }
+
+  .tt-tab {
+    transition: background var(--hm-dur-fast) var(--hm-ease),
+                color var(--hm-dur-fast) var(--hm-ease),
+                transform var(--hm-dur-instant) var(--hm-ease);
+  }
+  .tt-tab:active {
+    transform: scale(0.96);
+  }
+
+  .tt-btn:active:not(:disabled) {
+    transform: translateY(1px) scale(0.99);
+  }
+}
+
+
+/* ── E. Mobile app shell ────────────────────────────────────────────────────
+   Two real defects drove this, both measured on a 390px viewport:
+
+     1. `documentElement.scrollWidth` was 421px against a 390px viewport - a
+        31px horizontal overshoot on /, /dashboard and every dashboard view.
+        The cause was `nav.tt-tabs`: a non-shrinking flex row whose content is
+        404px wide inside 374px of usable rail. Everything downstream inherited
+        the widened document.
+     2. The rail packed brand, session, six tabs, a dropdown and two account
+        groups into a single flex row, so on a phone it was unreadable.
+
+   The rebuild turns the rail into a three-band app bar and gives the tab strip
+   its own full-bleed swipeable row. `min-width: 0` + `overflow-x: auto` on
+   `.tt-tabs` is the actual overflow fix and applies at every width, not just
+   mobile - a long label can no longer widen the document. */
+.tt-tabs {
+  display: flex;
+  gap: 2px;
+  min-width: 0;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+.tt-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+@media (max-width: 767px) {
+  /* Rail becomes a wrapping app bar. Safe-area padding keeps it clear of the
+     status bar / notch on a real device. */
+  .tt-rail {
+    flex-wrap: wrap;
+    align-content: flex-start;
+    gap: var(--hm-space-2);
+    padding: var(--hm-space-2) var(--hm-space-3) 0;
+    padding-top: max(var(--hm-space-2), env(safe-area-inset-top));
+  }
+
+  /* Band 1: identity, then the markets menu pushed to the right. */
+  .tt-brand { order: 1; }
+  .tt-session { order: 2; }
+  .tt-rail__spacer { order: 3; }
+  .tt-rail > .tt-dropdown { order: 4; }
+
+  /* Band 2: the account figures become a swipeable stat strip rather than a
+     wrapped block that eats four rows of vertical space. */
+  .tt-rail__group {
+    order: 10;
+    flex: 1 1 100%;
+    flex-wrap: nowrap;
+    gap: var(--hm-space-2);
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    padding-bottom: var(--hm-space-2);
+  }
+  .tt-rail__group::-webkit-scrollbar { display: none; }
+  .tt-rail__group .tt-metric {
+    flex: 0 0 auto;
+    min-width: 92px;
+  }
+
+  /* Band 3: full-bleed tab strip. The negative inline margin cancels the rail
+     padding so the strip scrolls edge to edge, the way a native tab row does. */
+  .tt-tabs {
+    order: 20;
+    flex: 1 1 100%;
+    margin: 0 calc(var(--hm-space-3) * -1);
+    padding: 0 var(--hm-space-2) var(--hm-space-2);
+    scroll-snap-type: x proximity;
+  }
+  .tt-tab {
+    flex: 1 0 auto;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 64px;
+    min-height: 54px;
+    padding: var(--hm-space-1) var(--hm-space-2);
+    scroll-snap-align: center;
+    font-size: var(--hm-text-2xs);
+  }
+
+  /* Icons, added purely in CSS. The glyphs are monochrome geometric forms so
+     they inherit the tab's colour and therefore its selected state - an emoji
+     would stay its own colour and break the active/inactive signal. */
+  .tt-tab::before {
+    font-size: var(--hm-text-lg);
+    line-height: 1;
+    opacity: 0.85;
+  }
+  .tt-tab[data-view-btn="trade"]::before     { content: "\21C5"; }  /* ⇅ */
+  .tt-tab[data-view-btn="news"]::before      { content: "\25A4"; }  /* ▤ */
+  .tt-tab[data-view-btn="analyst"]::before   { content: "\25CE"; }  /* ◎ */
+  .tt-tab[data-view-btn="markets"]::before   { content: "\25CD"; }  /* ◍ */
+  .tt-tab[data-view-btn="analytics"]::before { content: "\25A5"; }  /* ▥ */
+  .tt-tab[data-view-btn="backtest"]::before  { content: "\21BB"; }  /* ↻ */
+
+  .tt-tab[aria-selected="true"]::before { opacity: 1; }
+
+  /* Gutter tightens so the phone keeps its horizontal room for data. */
+  .tt-main { padding: var(--hm-space-2); gap: var(--hm-space-2); }
+  .tt-panel { border-radius: var(--hm-radius-lg); }
+
+  /* Bottom safe area: without this the last row of a table sits under the
+     home indicator on a notched device. */
+  .tt-app { padding-bottom: env(safe-area-inset-bottom); }
+
+  .tt-pane-bar__btn { min-height: var(--hm-touch-target); }
+}
+
+/* Very narrow handsets (360px and below): drop the icon row height and let the
+   tabs stay legible rather than shrinking the labels below 11px. */
+@media (max-width: 380px) {
+  .tt-tab { min-width: 58px; font-size: 10px; }
+  .tt-tab::before { font-size: var(--hm-text-base); }
+  .tt-panel__title { font-size: 10px; }
+}
+
+
 /* ── Print ──────────────────────────────────────────────────────────────── */
 @media print {
   .tt-rail, .tt-status, .tt-pane-bar, .tt-toasts { display: none !important; }
   .tt-app { display: block; background: #fff; color: #000; }
   .tt-panel { break-inside: avoid; border: 1px solid #ccc; }
+  /* Glass is a screen affordance; on paper the sheen and tint print as a grey
+     wash over the data. Flatten every surface. */
+  .tt-rail, .tt-panel, .tt-dropdown__panel, .tt-pane-bar, .tt-status {
+    background-image: none !important;
+    background-color: #ffffff !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    box-shadow: none !important;
+  }
+  .tt-app { background-image: none !important; }
 }

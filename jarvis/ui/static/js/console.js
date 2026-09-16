@@ -113,11 +113,34 @@
     return h;
   }
 
+  /* Normalise a transport failure BEFORE it reaches a caller.
+     `fetch` rejects with the bare string "Failed to fetch" for every
+     transport-level failure - connection refused, DNS failure, reset
+     mid-flight. It is the browser's internal phrasing and it names no cause.
+     Ten catch sites in this file render `err.message` straight to the
+     operator, so normalising in the two wrappers below fixes the wording
+     everywhere without editing a single call site. */
+  function describeTransport(err) {
+    var raw = String((err && err.message) || err || '');
+    if (err && (err.name === 'AbortError' || /abort/i.test(raw))) {
+      return 'Request timed out';
+    }
+    if (/failed to fetch|networkerror|load failed|err_connection/i.test(raw)) {
+      return 'Backend unreachable — is the server running?';
+    }
+    return raw || 'Request failed';
+  }
+
   function getJSON(url) {
     return fetch(url, { headers: authHeaders(), credentials: 'same-origin' })
       .then(function (r) {
         if (!r.ok) throw new Error('HTTP ' + r.status);
         return r.json();
+      })
+      .catch(function (err) {
+        // An HTTP status already reads correctly; re-wrapping it is a no-op
+        // because describeTransport passes unrecognised messages through.
+        throw new Error(describeTransport(err));
       });
   }
 
@@ -132,6 +155,8 @@
         if (!r.ok) throw new Error(body.error || ('HTTP ' + r.status));
         return body;
       });
+    }).catch(function (err) {
+      throw new Error(describeTransport(err));
     });
   }
 
@@ -418,7 +443,7 @@
         body.textContent = '';
         var p = document.createElement('p');
         p.className = 'cx-empty';
-        p.textContent = 'Auto-selection unavailable (' + err.message + '). Sign in if prompted.';
+        p.textContent = 'Auto-selection unavailable — ' + err.message + '. Sign in if prompted.';
         body.appendChild(p);
       });
   }
