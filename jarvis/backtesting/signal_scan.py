@@ -34,6 +34,7 @@ import numpy as np
 import pandas as pd
 
 from jarvis.analysts.parallel_runner import ParallelAnalystCluster
+from jarvis.backtesting.fills import entry_fill
 from jarvis.data.symbol_registry import resolve as resolve_symbol
 from jarvis.intelligence.decision_engine import DecisionEngine
 from jarvis.intelligence.gate_policy import HARD_GATES
@@ -251,10 +252,19 @@ class SignalScanner:
                 hard_gate_fail += 1
 
             # Mirror the engine's fill convention exactly: enter at the NEXT
-            # bar's open, paying the spread on the ask for a long.
-            entry_price = float(nxt["open"])
-            if bias == "BUY":
-                entry_price += spread_pips * spec.pip_size
+            # bar's open, paying the spread on the ask for a long AND on the bid
+            # for a short.
+            #
+            # The short leg used to be free here. `entry_price = next_open` with
+            # the spread added only for BUY meant every SELL candidate entered at
+            # the mid, and the simulator applies no spread on exits either -- so
+            # half of ~95k audited trades carried no spread cost at all. Measured
+            # on the stored tables: (fill - next_open)/pip divided by the row's
+            # own spread was +1.000 for BUY and 0.000 for SELL, on every symbol
+            # checked. `engine.py` already had the fix and the comment explaining
+            # it; the scanner was missed. Both now call `entry_fill` so there is
+            # only one copy of the convention left to get wrong.
+            entry_price = entry_fill(float(nxt["open"]), bias, spread_pips, spec.pip_size)
             price_shift = entry_price - float(decision.entry_price)
             sl_price = float(decision.stop_loss) + price_shift
             tp_price = float(decision.take_profit) + price_shift

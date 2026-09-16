@@ -18,6 +18,7 @@ from jarvis.historical.historical_engine import HISTORICAL_DATA_ENGINE
 from jarvis.intelligence.symbol_profile_config import get_symbol_profile_config
 from jarvis.execution.exit_policy import ExitPolicy, evaluate_exit
 from jarvis.backtesting.exit_geometry import build_exit_geometry
+from jarvis.backtesting.fills import entry_fill
 from jarvis.execution.entry_policy import evaluate_entry
 from jarvis.market.data_feed import style_timeframes, normalise_style
 
@@ -660,14 +661,14 @@ class BacktestEngine:
                     )
 
                     if auth_res["authorized"]:
-                        entry_price = float(next_bar["open"])
-                        if decision.bias == "BUY":
-                            entry_price += spread_pips * spec.pip_size  # Ask = Bid + Spread
-                        else:
-                            # A short is filled at the bid, so it pays the spread
-                            # too. Charging it on longs only made every SELL
-                            # trade cost-free in the backtest.
-                            entry_price -= spread_pips * spec.pip_size
+                        # One spread, charged in the correct direction: a long
+                        # pays the ask, a short is filled at the bid. This used
+                        # to be inline here and duplicated (differently) in
+                        # `tools/scan_signals.py`, where the short leg was free.
+                        # Both now share `entry_fill`.
+                        entry_price = entry_fill(
+                            float(next_bar["open"]), decision.bias, spread_pips, spec.pip_size
+                        )
                         price_shift = entry_price - decision.entry_price
                         sl_price = decision.stop_loss + price_shift
                         
