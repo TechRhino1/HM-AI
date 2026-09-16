@@ -1,4 +1,4 @@
-# JARVIS AI — Complete Project Analysis
+# HM Algo 2.0 — Complete Project Analysis
 
 **Generated:** 2026-09-12
 **Scope:** full codebase review, defect hunt, and a realistic 6-month backtest of

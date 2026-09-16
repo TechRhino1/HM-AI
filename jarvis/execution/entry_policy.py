@@ -1,5 +1,5 @@
 """
-JARVIS AI 5.0 — Calibrated Entry Policy.
+HM Algo 2.0 — Calibrated Entry Policy.
 
 WHY THIS MODULE EXISTS
 ----------------------

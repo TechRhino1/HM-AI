@@ -1,5 +1,5 @@
 /**
- * JARVIS AI 3.0 — AI BREAKOUT STOCK SCREENER & STOCK INTELLIGENCE CONTROLLER
+ * HM Algo 2.0 — AI BREAKOUT STOCK SCREENER & STOCK INTELLIGENCE CONTROLLER
  * Independent client-side application controller for institutional equity screening.
  */
 

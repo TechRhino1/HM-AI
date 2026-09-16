@@ -1,5 +1,5 @@
 """
-JARVIS AI 3.0 — Cross-Asset Dynamic Correlation Engine.
+HM Algo 2.0 — Cross-Asset Dynamic Correlation Engine.
 Calculates dynamic rolling correlations between Gold, USD Majors, Indices, and Crypto to prevent concentrated risk exposure.
 """
 import pandas as pd

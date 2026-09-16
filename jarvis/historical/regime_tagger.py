@@ -1,5 +1,5 @@
 """
-JARVIS AI 4.0 — Historical Market Regime Tagger.
+HM Algo 2.0 — Historical Market Regime Tagger.
 Annotates historical price bars with causal (zero-lookahead) market regime labels
 to enable conditional performance breakdown during backtesting and optimization.
 """

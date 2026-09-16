@@ -1,5 +1,5 @@
 """
-JARVIS AI 3.0 — Chronological Event-Driven Backtesting Engine.
+HM Algo 2.0 — Chronological Event-Driven Backtesting Engine.
 Executes historical simulation without lookahead bias, incorporating realistic spreads, commissions, and slippage.
 """
 import pandas as pd

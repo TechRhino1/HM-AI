@@ -1,5 +1,5 @@
 """
-JARVIS AI 3.0 — Multi-Timeframe Market Context Synthesizer.
+HM Algo 2.0 — Multi-Timeframe Market Context Synthesizer.
 Orchestrates Market Structure, Liquidity, Volatility, Momentum, and Session intelligence across multiple timeframes.
 """
 from datetime import datetime, timezone

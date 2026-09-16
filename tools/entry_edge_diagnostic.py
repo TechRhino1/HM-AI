@@ -428,7 +428,7 @@ def main() -> int:
         return 2
 
     print("=" * 100)
-    print("JARVIS AI — ENTRY-EDGE ATTRIBUTION")
+    print("HM Algo 2.0 — ENTRY-EDGE ATTRIBUTION")
     print("=" * 100)
 
     frames: list[pd.DataFrame] = []

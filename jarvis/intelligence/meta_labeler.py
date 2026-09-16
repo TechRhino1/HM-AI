@@ -1,5 +1,5 @@
 """
-JARVIS AI 4.0 — ML Meta-Labeler (Lopez de Prado style).
+HM Algo 2.0 — ML Meta-Labeler (Lopez de Prado style).
 
 A secondary model that, given a price-window + intended bias (BUY/SELL), predicts
 whether *taking* the primary signal would have been profitable over a forward horizon.

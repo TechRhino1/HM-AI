@@ -1,5 +1,5 @@
 """
-JARVIS AI 4.0 — Historical Market Data Metadata & Indexing Engine.
+HM Algo 2.0 — Historical Market Data Metadata & Indexing Engine.
 Manages metadata, versioning, contiguous range tracking, and quality audit logs
 in an institutional SQLite repository (data/metadata/metadata.db).
 """

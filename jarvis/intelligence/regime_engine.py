@@ -1,5 +1,5 @@
 """
-JARVIS AI 4.0 — Probabilistic Causal Market Regime Classifier.
+HM Algo 2.0 — Probabilistic Causal Market Regime Classifier.
 Classifies the market state into a probability distribution over distinct market regimes without future look-ahead.
 Supports: TREND_BULL, TREND_BEAR, WEAK_TREND, RANGE, CONSOLIDATION, COMPRESSION, BREAKOUT, POST_BREAKOUT,
           REVERSAL, ACCUMULATION, DISTRIBUTION, LIQUIDITY_SWEEP, HIGH_VOLATILITY, LOW_VOLATILITY, TRANSITION.

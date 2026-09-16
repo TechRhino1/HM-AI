@@ -1,5 +1,5 @@
 """
-JARVIS AI 4.0 — Dynamic Risk & Volatility-Adaptive Levels Engine.
+HM Algo 2.0 — Dynamic Risk & Volatility-Adaptive Levels Engine.
 Computes purely structural, volatility-adaptive SL, TP, and scale-out plans with zero static tables:
 - Dynamic Structural SL: Outer boundary of recent swing point / Order Block / FVG + dynamic volatility buffer.
 - Liquidity-Anchored Dynamic TP: Nearest opposing unmitigated Order Block / FVG / Liquidity Pool (1.5R to 3.5R+).

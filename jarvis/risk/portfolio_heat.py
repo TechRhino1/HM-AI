@@ -1,5 +1,5 @@
 """
-JARVIS AI 4.0 — Portfolio Heat & Stress Measurement Engine.
+HM Algo 2.0 — Portfolio Heat & Stress Measurement Engine.
 Calculates a real-time standardized Portfolio Heat score (0–100) combining open monetary risk,
 floating drawdown, margin utilization, active position density, and cross-asset correlation stress.
 """

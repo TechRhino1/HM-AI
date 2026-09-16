@@ -1,5 +1,5 @@
 """
-JARVIS AI 4.0 — Canonical Exit Policy.
+HM Algo 2.0 — Canonical Exit Policy.
 
 SINGLE SOURCE OF TRUTH for every trade-exit decision in the system.
 

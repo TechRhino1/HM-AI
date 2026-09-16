@@ -1,5 +1,5 @@
 """
-JARVIS AI 4.0 — Gamma Exposure (GEX) / Dealer-Flow Analytics for India Options.
+HM Algo 2.0 — Gamma Exposure (GEX) / Dealer-Flow Analytics for India Options.
 
 Implements the standard institutional dealer-gamma framework (Squeezemetrics /
 vannacharm style):

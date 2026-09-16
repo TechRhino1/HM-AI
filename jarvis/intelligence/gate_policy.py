@@ -1,5 +1,5 @@
 """
-JARVIS AI 4.0 — Adaptive Quality-Gate Policy.
+HM Algo 2.0 — Adaptive Quality-Gate Policy.
 
 Per the user's directive, gate strictness is decided automatically by the AI:
 - CRITICAL gates (market session, drawdown, margin, event-regime) are ALWAYS hard

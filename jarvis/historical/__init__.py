@@ -1,5 +1,5 @@
 """
-JARVIS AI 4.0 — Historical Market Data Lake & Replay Engine Package.
+HM Algo 2.0 — Historical Market Data Lake & Replay Engine Package.
 """
 from jarvis.historical.storage import StorageEngine
 from jarvis.historical.metadata_db import MetadataDB

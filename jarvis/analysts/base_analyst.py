@@ -1,5 +1,5 @@
 """
-JARVIS AI 3.0 — Abstract Base Analyst Agent.
+HM Algo 2.0 — Abstract Base Analyst Agent.
 Defines the standard asynchronous and synchronous execution contract for specialized analytical intelligence agents.
 """
 from abc import ABC, abstractmethod

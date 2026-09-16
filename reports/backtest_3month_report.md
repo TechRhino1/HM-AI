@@ -1,4 +1,4 @@
-# JARVIS AI — 3-Month Backtest on Real MT5 Data
+# HM Algo 2.0 — 3-Month Backtest on Real MT5 Data
 
 **Mode:** calibrated per-symbol win-rate profiles  
 **Data:** MT5 terminal, real H1 bars (validated non-synthetic)  

@@ -1,5 +1,5 @@
 """
-JARVIS AI 4.0 — Ensemble Multi-Armed Bandit Strategy Allocator.
+HM Algo 2.0 — Ensemble Multi-Armed Bandit Strategy Allocator.
 Combines LinUCB (Linear Upper Confidence Bound), Thompson Sampling (Beta distribution),
 and EXP3 (Exponential-weight algorithm for Exploration and Exploitation) to dynamically re-weight strategy selection.
 """

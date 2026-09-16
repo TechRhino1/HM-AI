@@ -1,5 +1,5 @@
 """
-JARVIS AI 4.0 — Hierarchical Risk Parity (HRP) Position Allocator Module.
+HM Algo 2.0 — Hierarchical Risk Parity (HRP) Position Allocator Module.
 Implements Marcos López de Prado's Hierarchical Risk Parity (HRP) portfolio optimization algorithm,
 clustering multi-asset covariance matrices without requiring matrix inversion to eliminate Markowitz instability.
 """

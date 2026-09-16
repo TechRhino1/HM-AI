@@ -1,5 +1,5 @@
 """
-JARVIS AI 4.0 — Walk-Forward Optimization & Purged Cross-Validation (Lopez de Prado).
+HM Algo 2.0 — Walk-Forward Optimization & Purged Cross-Validation (Lopez de Prado).
 
 Provides institutional-grade OOS validation utilities used to optimize strategy /
 ML hyperparameters without look-ahead bias:

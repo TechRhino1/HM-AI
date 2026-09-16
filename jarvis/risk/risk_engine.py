@@ -1,5 +1,5 @@
 """
-JARVIS AI 4.0 — Master Adaptive Risk Management Engine.
+HM Algo 2.0 — Master Adaptive Risk Management Engine.
 Enforces multi-tier portfolio protection:
   - Base Soft Limit: 1 trade per symbol
   - AI-Adaptive Second Trade Gate: 15-condition validation for high-conviction pyramiding

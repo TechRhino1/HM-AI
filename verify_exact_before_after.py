@@ -1,5 +1,5 @@
 """
-JARVIS AI 4.0 — Exact Before vs After Comparative Verification Script.
+HM Algo 2.0 — Exact Before vs After Comparative Verification Script.
 Runs side-by-side backtests comparing the baseline system against the new upgraded quantitative AI system.
 """
 import sys

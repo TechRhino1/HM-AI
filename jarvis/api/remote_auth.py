@@ -1,5 +1,5 @@
 """
-JARVIS AI 4.0 — Remote Access Authentication & Session Management Engine.
+HM Algo 2.0 — Remote Access Authentication & Session Management Engine.
 Provides secure password verification with salted hashing, HMAC-SHA256 session token generation,
 token validation, server-side token revocation (logout), role-based access control, and user profile management.
 """
@@ -84,7 +84,7 @@ logger.info(f"RemoteAuthEngine initialized with ADMIN_USER='{ADMIN_USERNAME}', A
 
 class RemoteAuthEngine:
     """
-    Secure Authentication and Session Engine for JARVIS AI Remote Web Terminals.
+    Secure Authentication and Session Engine for HM Algo 2.0 Remote Web Terminals.
     Includes rate limiting, temporary lockout against brute-force attacks, and persistent HMAC signing.
     """
     _tokens: Dict[str, float] = {}       # token -> expiration timestamp (30 days validity)

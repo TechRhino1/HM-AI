@@ -271,10 +271,10 @@ def main():
         for asset, needle in (
             ("/static/css/theme_terminal.css", "tt-panel"),
             ("/static/css/console.css", "cx-topbar"),
-            ("/static/js/dashboard.js", "JARVIS"),
+            ("/static/js/dashboard.js", "HM Algo 2.0"),
             # console.js is an IIFE and deliberately exports no global, so match
             # a distinctive string from the file body instead.
-            ("/static/js/console.js", "JARVIS Console"),
+            ("/static/js/console.js", "HM Algo 2.0 Console"),
         ):
             status, body = request(asset)
             record(

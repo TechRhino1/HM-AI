@@ -1,5 +1,5 @@
 """
-JARVIS AI 4.0 — Institutional Next-Generation Entry Engine.
+HM Algo 2.0 — Institutional Next-Generation Entry Engine.
 Precision institutional entry protocols across three trading horizons:
 - SCALP Protocol (M1 / M5): Liquidity sweep detection, MSS displacement body ratio, OTE / micro-FVG CE refinement, sniper trigger.
 - DAY TRADING Protocol (M15 / H1): London/NY Kill Zone filter, H1 structure alignment, M15 FVG midpoint / breaker block retest.

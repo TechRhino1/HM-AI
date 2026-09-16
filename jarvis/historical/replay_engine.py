@@ -1,5 +1,5 @@
 """
-JARVIS AI 4.0 — Event-Driven Historical Market Replay & Realistic Execution Simulator.
+HM Algo 2.0 — Event-Driven Historical Market Replay & Realistic Execution Simulator.
 Replays historical market streams chronologically with zero look-ahead bias,
 feeding simulated data feeds and executing orders in a strictly isolated broker sandbox.
 """

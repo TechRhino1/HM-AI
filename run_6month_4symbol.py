@@ -1,5 +1,5 @@
 """
-JARVIS AI 4.0 — 6-Month REAL MT5 Live Data Backtest (All 4 Primary Symbols)
+HM Algo 2.0 — 6-Month REAL MT5 Live Data Backtest (All 4 Primary Symbols)
 """
 import os
 import sys
@@ -98,7 +98,7 @@ if __name__ == "__main__":
     mt5.initialize()
     info = mt5.account_info()
     print("=" * 100)
-    print("  JARVIS AI 4.0 — 6-MONTH REAL MT5 LIVE DATA BACKTEST (4 SYMBOLS)")
+    print("  HM Algo 2.0 — 6-MONTH REAL MT5 LIVE DATA BACKTEST (4 SYMBOLS)")
     print(f"  Server: {info.server} | Account: #{info.login} | Balance: ${info.balance:,.2f} | Leverage: 1:{info.leverage}")
     print("=" * 100)
 

@@ -1,5 +1,5 @@
 """
-JARVIS AI 4.0 — Sample Uniqueness & Overlapping Weighting Engine.
+HM Algo 2.0 — Sample Uniqueness & Overlapping Weighting Engine.
 Implements Marcos López de Prado's Sample Uniqueness Weighting algorithm to handle
 overlapping return periods across trade records, preventing ML model overfitting.
 """

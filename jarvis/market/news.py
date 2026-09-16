@@ -1,5 +1,5 @@
 """
-HM AI 4.0 — Live Institutional Macro News & Economic Calendar Engine.
+HM Algo 2.0 — Live Institutional Macro News & Economic Calendar Engine.
 Fetches real-time economic calendar from live financial feeds (FairEconomy + MyFxBook),
 parses currency impact, evaluates macro shocks, computes Indian Standard Time (IST) & UTC,
 provides deep indicator intelligence for modal inspection, displays the single most recent 1 release on top,

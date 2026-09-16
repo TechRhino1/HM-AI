@@ -1,5 +1,5 @@
 """
-JARVIS AI 3.0 — Monte Carlo Resampling & Risk of Ruin Simulator.
+HM Algo 2.0 — Monte Carlo Resampling & Risk of Ruin Simulator.
 Simulates randomized trade sequences, slippage variance, and maximum drawdown distributions.
 """
 from typing import List, Dict, Any

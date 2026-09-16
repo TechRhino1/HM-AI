@@ -1,5 +1,5 @@
 /**
- * JARVIS AI 3.0 â€” Advanced Institutional Financial Trading Terminal Controller
+ * HM Algo 2.0 â€” Advanced Institutional Financial Trading Terminal Controller
  * 
  * Features:
  * - TradingView Lightweight Charts v4 Integration (Live MT5 Candles + Volume + S/R Price Lines)
@@ -206,7 +206,7 @@
         { id: "radar", title: "View High-Probability Radar", desc: "Switch left sidebar to Setup Radar", shortcut: "R", action: () => switchLeftTab("radar") },
         { id: "desk", title: "View 1-Click Desk & Plan", desc: "Switch right panel to Trade Desk & Targets", shortcut: "D", action: () => switchRightTab("desk") },
         { id: "cognition", title: "View AI Cognition & Gates", desc: "Switch right panel to 14 Quality Gates & Analysis", shortcut: "A", action: () => switchRightTab("cognition") },
-        { id: "copilot", title: "Toggle HM AI 4.0 Copilot", desc: "Open / Close intelligent assistant modal", shortcut: "C", action: () => toggleCopilotModal() },
+        { id: "copilot", title: "Toggle HM Algo 2.0 Copilot", desc: "Open / Close intelligent assistant modal", shortcut: "C", action: () => toggleCopilotModal() },
         { id: "swing", title: "Trade Style: SWING (D1/H4/H1)", desc: "Switch trading engine to Multi-Day Swing Horizon", shortcut: "1", action: () => window.setTradeStyle("SWING") },
         { id: "day", title: "Trade Style: DAY TRADING (H1/M15/M5)", desc: "Switch trading engine to Intraday Horizon", shortcut: "2", action: () => window.setTradeStyle("DAY_TRADING") },
         { id: "scalp", title: "Trade Style: SCALP (M15/M5/M1)", desc: "Switch trading engine to Micro Scalp Horizon", shortcut: "3", action: () => window.setTradeStyle("SCALP") },
@@ -1101,7 +1101,7 @@
             const slVal = p.sl || p.stop_loss || 0;
             const tpVal = p.tp || p.take_profit || 0;
             const volumeVal = p.volume || p.lots || 0.01;
-            const commentVal = p.comment || "JARVIS";
+            const commentVal = p.comment || "HM Algo 2.0";
 
             return `
                 <tr onclick="window.setSymbol('${p.symbol}')" style="cursor:pointer;" title="Click to view ${p.symbol} chart">
@@ -1778,7 +1778,7 @@
 
         // Description
         const descEl = document.getElementById("mn-modal-desc");
-        if (descEl) descEl.textContent = item.description || "Comprehensive macroeconomic release parsed by HM AI 4.0 Institutional Decision Engine.";
+        if (descEl) descEl.textContent = item.description || "Comprehensive macroeconomic release parsed by HM Algo 2.0 Institutional Decision Engine.";
 
         // Affected Pairs
         const pairsEl = document.getElementById("mn-modal-pairs");
@@ -2318,17 +2318,17 @@
 
     window.clearCopilotChat = function () {
         if (!el.copilotMessages) return;
-        el.copilotMessages.innerHTML = `<div class="copilot-bubble">🤖 <b>HM AI 4.0:</b> Context cleared. Standing by.</div>`;
+        el.copilotMessages.innerHTML = `<div class="copilot-bubble">🤖 <b>HM Algo 2.0:</b> Context cleared. Standing by.</div>`;
     };
 
     window.exportCopilotChat = function () {
         if (!el.copilotMessages) return;
         const bubbles = el.copilotMessages.querySelectorAll(".copilot-bubble");
-        let transcript = `# HM AI 4.0 — Trading Intelligence Transcript\nGenerated: ${new Date().toISOString()}\n\n---\n\n`;
+        let transcript = `# HM Algo 2.0 — Trading Intelligence Transcript\nGenerated: ${new Date().toISOString()}\n\n---\n\n`;
         bubbles.forEach(b => {
             const isUser = b.classList.contains("user");
-            const sender = isUser ? "TRADER" : "HM AI 4.0";
-            const text = b.innerText.replace(/🤖 HM AI 4.0:\n/, "").replace(/🤖 JARVIS AI:\n/, "");
+            const sender = isUser ? "TRADER" : "HM Algo 2.0";
+            const text = b.innerText.replace(/🤖 HM Algo 2\.0(?: AI)?:\n/, "");
             transcript += `### [${sender}]\n${text}\n\n`;
         });
 
@@ -2364,7 +2364,7 @@
             const data = await res.json();
             const aiBubble = document.createElement("div");
             aiBubble.className = "copilot-bubble";
-            aiBubble.innerHTML = `🤖 <b>HM AI 4.0:</b><br>${data.response || 'No response.'}`;
+            aiBubble.innerHTML = `🤖 <b>HM Algo 2.0:</b><br>${data.response || 'No response.'}`;
             el.copilotMessages.appendChild(aiBubble);
             el.copilotMessages.scrollTop = el.copilotMessages.scrollHeight;
         } catch (err) {

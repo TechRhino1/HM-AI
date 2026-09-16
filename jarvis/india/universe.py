@@ -1,5 +1,5 @@
 """
-JARVIS AI 3.0 — India Markets (NSE/BSE & F&O Universe Master)
+HM Algo 2.0 — India Markets (NSE/BSE & F&O Universe Master)
 Comprehensive repository of Indian Benchmark Indices, Sectoral Baskets, and Top 100+ NSE/BSE Large/Mid-Cap Equities.
 """
 from typing import Dict, Any, List

@@ -1,5 +1,5 @@
 """
-JARVIS AI 3.0 — Persistent Trade Memory & Journaling Engine.
+HM Algo 2.0 — Persistent Trade Memory & Journaling Engine.
 Logs rich execution records, market snapshots, MFE/MAE excursions, and decision context to SQLite.
 """
 import os

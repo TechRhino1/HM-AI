@@ -1,5 +1,5 @@
 """
-JARVIS 5.1 — Exit Geometry comparison + walk-forward validation.
+HM Algo 2.0 — Exit Geometry comparison + walk-forward validation.
 
 Compares the five exit geometries (and BE / trail variants) on IDENTICAL entries,
 selects per symbol by out-of-sample expectancy / profit factor / drawdown, and
@@ -225,7 +225,7 @@ def main() -> int:
     cal = WRTargetCalibrator(target_wr=0.75, slippage_pips=0.5)
 
     print("=" * 118)
-    print("JARVIS 5.1 — EXIT GEOMETRY COMPARISON  (walk-forward purged OOS, ranked on expectancy/PF/DD)")
+    print("HM Algo 2.0 — EXIT GEOMETRY COMPARISON  (walk-forward purged OOS, ranked on expectancy/PF/DD)")
     print(f"gates: min_oos_trades={MIN_OOS_TRADES}  min_oos_pf={MIN_OOS_PF}  max_oos_dd={MAX_OOS_DD_PCT}%  folds={FOLDS}")
     print("=" * 118)
 

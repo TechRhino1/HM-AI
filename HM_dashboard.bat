@@ -1,8 +1,8 @@
 @echo off
-title HM_v3 - JARVIS AI 3.0 Dashboard (UI + REST API only)
+title HM Algo 2.0 Dashboard (UI + REST API only)
 cd /d "%~dp0"
 echo ======================================================================
-echo    Starting HM_v3 JARVIS AI 3.0 Dashboard  ^(UI + REST API only^)
+echo    Starting HM Algo 2.0 Dashboard  ^(UI + REST API only^)
 echo ======================================================================
 echo.
 echo  This starts the web terminal on http://127.0.0.1:8501 and NOTHING else.

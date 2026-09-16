@@ -1,5 +1,5 @@
 """
-JARVIS AI 3.0 — Deepened Adversarial Intelligence Agent (Devil's Advocate).
+HM Algo 2.0 — Deepened Adversarial Intelligence Agent (Devil's Advocate).
 Implements parameterized adversarial risk scoring, cross-asset correlation checks,
 liquidity sweep detection, spread vulnerability, session timing, and empirical invalidation.
 """

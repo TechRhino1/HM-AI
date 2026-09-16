@@ -1,5 +1,5 @@
 """
-Automated Authentication Test Suite for HM AI 4.0
+Automated Authentication Test Suite for HM Algo 2.0
 Tests Login, Logout, Session Verification, Password Validation, and Token Revocation.
 """
 import urllib.request
@@ -28,7 +28,7 @@ OPENER = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(COOKIE_J
 
 def run_auth_tests():
     print("=" * 80)
-    print("RUNNING HM AI 4.0 AUTHENTICATION (LOGIN, LOGOUT, VERIFY & ROLES) TEST SUITE")
+    print("RUNNING HM Algo 2.0 AUTHENTICATION (LOGIN, LOGOUT, VERIFY & ROLES) TEST SUITE")
     print("=" * 80)
     passed = 0
     failed = 0

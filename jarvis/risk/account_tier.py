@@ -1,8 +1,8 @@
 """
-JARVIS AI 4.0 — Unified Account Tier & Micro Definition System.
+HM Algo 2.0 — Unified Account Tier & Micro Definition System.
 
 Provides a single source of truth for account sizing tiers, micro-mode gating,
-lot caps, and economic expected-value (EV) scaling across all JARVIS engines.
+lot caps, and economic expected-value (EV) scaling across all HM Algo 2.0 engines.
 """
 from enum import Enum
 from typing import Dict, Any

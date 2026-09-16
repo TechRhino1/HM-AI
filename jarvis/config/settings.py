@@ -1,4 +1,4 @@
-"""JARVIS AI 4.0 Settings Engine."""
+"""HM Algo 2.0 Settings Engine."""
 import os
 import json
 import logging

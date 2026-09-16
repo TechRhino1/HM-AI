@@ -1,5 +1,5 @@
 """
-JARVIS AI 4.0 — Live NSE / BSE Market-Data Adapter (free public endpoints).
+HM Algo 2.0 — Live NSE / BSE Market-Data Adapter (free public endpoints).
 
 Wires REAL Indian market data from public sources:
   * NSE equity / index quotes + historical candles (requires session cookie).

@@ -1,4 +1,4 @@
-# JARVIS AI 5.0 — Architecture Reference
+# HM Algo 2.0 — Architecture Reference
 
 > Status: post-refactor. This document is the entry point for anyone modifying
 > the system. Read it before touching execution, learning or configuration.

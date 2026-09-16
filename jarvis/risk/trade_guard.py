@@ -1,5 +1,5 @@
 """
-JARVIS AI 3.0 — Autonomous Trade Quality Guard.
+HM Algo 2.0 — Autonomous Trade Quality Guard.
 Executes hard independent pre-flight checks before approving any trade for execution.
 """
 from typing import Dict, List, Any, Optional

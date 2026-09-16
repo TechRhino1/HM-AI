@@ -1,5 +1,5 @@
 """
-JARVIS AI 3.0 — Institutional India Options Intelligence & Multi-Leg Derivatives Suite
+HM Algo 2.0 — Institutional India Options Intelligence & Multi-Leg Derivatives Suite
 Supports complete Option Buying (Long CE/PE), Option Selling/Writing (Short CE/PE),
 and 12 Institutional Defined-Risk Strategies (Bull Call, Bear Put, Bull Put Credit, Bear Call Credit,
 Short Straddle, Short Strangle, Iron Condor, Iron Butterfly, Long Straddle, Long Strangle).

@@ -1,5 +1,5 @@
 """
-JARVIS AI 3.0 — AI Stock Intelligence & Quantitative Breakout Engine
+HM Algo 2.0 — AI Stock Intelligence & Quantitative Breakout Engine
 Calculates multi-factor institutional breakout scores, Chaikin Money Flow (CMF),
 On-Balance Volume (OBV) divergence, Mansfield Relative Strength vs SPY, Dual-Squeeze compression,
 1,000-run Monte Carlo price distributions, and institutional setup grades (A+, A, B, C).

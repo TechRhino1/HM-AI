@@ -1,5 +1,5 @@
 """
-JARVIS AI 3.0 — High-Velocity Single Entry Option Buying Intelligence Engine (Buy CE / Buy PE)
+HM Algo 2.0 — High-Velocity Single Entry Option Buying Intelligence Engine (Buy CE / Buy PE)
 Calculates exact Delta-adjusted entry, TP1 (+25% to +45%), TP2 (+50% to +85%), and SL (-15% to -25%)
 using Taylor series Greek expansions, Central Pivot Range (CPR), Camarilla H4/L4 breakouts,
 Put-Call Ratio (PCR) momentum, Volume Spread Analysis (VSA/RVOL), and live FII/DII institutional flows.

@@ -1,5 +1,5 @@
 """
-Unit and Integration tests for JARVIS AI Master-Trader Next-Generation Institutional Entry & Exit Architecture.
+Unit and Integration tests for HM Algo 2.0 Master-Trader Next-Generation Institutional Entry & Exit Architecture.
 Covers:
 1. InstitutionalEntryEngine (SCALP, DAY_TRADING, SWING protocols)
 2. DynamicRiskAndLevelsEngine MTF wiring and seamless fallback
@@ -319,7 +319,7 @@ class TestHorizonAdaptiveRatchetAndExits(unittest.TestCase):
             open_price=1.0800, current_price=1.0843, sl=1.0750, tp=1.0950,
             profit=43.0, swap=0.0, commission=0.0,
             open_time=datetime.now(timezone.utc).isoformat(),
-            magic=JARVIS_MAGIC_NUMBER, comment="JARVIS DAY_TRADING"
+            magic=JARVIS_MAGIC_NUMBER, comment="HM Algo 2.0 DAY_TRADING"
         )
         self.mt5_client.modify_position.return_value = {"status": "MODIFIED"}
 

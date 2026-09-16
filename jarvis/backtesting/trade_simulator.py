@@ -1,5 +1,5 @@
 """
-JARVIS AI 5.0 — Fast Trade Simulator (calibration instrument).
+HM Algo 2.0 — Fast Trade Simulator (calibration instrument).
 
 WHY THIS MODULE EXISTS
 ----------------------
@@ -165,7 +165,7 @@ class TradeOutcome:
     is_win: bool
     partial_taken: bool
     be_locked: bool
-    # Scale-out accounting (JARVIS 5.1). These were COMPUTED inside the
+    # Scale-out accounting (HM Algo 2.0). These were COMPUTED inside the
     # simulation loop but then thrown away -- only the ``partial_taken`` flag
     # survived into the outcome. Without the quantity, the price and the banked
     # R it is impossible to audit a scale-out: you cannot tell a 33%-at-1.5R

@@ -1,5 +1,5 @@
 """
-JARVIS AI 5.2 — Backtest Optimiser (maximum-profit geometry search on real MT5 data).
+HM Algo 2.0 — Backtest Optimiser (maximum-profit geometry search on real MT5 data).
 
 WHY THIS MODULE EXISTS
 ----------------------

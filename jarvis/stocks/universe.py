@@ -1,5 +1,5 @@
 """
-JARVIS AI 3.0 — Stock Universe Definition
+HM Algo 2.0 — Stock Universe Definition
 Contains comprehensive metadata for major US and global equities across all key sectors.
 """
 from typing import Dict, Any, List
@@ -829,7 +829,7 @@ def get_stock_profile(symbol: str) -> Dict[str, Any]:
             "pe_ratio": 25.0,
             "week52_high": 125.00,
             "week52_low": 75.00,
-            "description": f"Publicly traded equity instrument {sym} analyzed by JARVIS AI Institutional Screener.",
+            "description": f"Publicly traded equity instrument {sym} analyzed by HM Algo 2.0 Institutional Screener.",
             "tags": ["US_EQUITIES"]
         }).copy()
 

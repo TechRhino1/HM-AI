@@ -1,5 +1,5 @@
 """
-JARVIS AI 3.0 — Central State Manager.
+HM Algo 2.0 — Central State Manager.
 Thread-safe, atomic centralized state repository for live telemetry, account records, decisions, and system health.
 """
 import threading

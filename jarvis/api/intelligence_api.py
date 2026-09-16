@@ -1,5 +1,5 @@
 """
-JARVIS AI 5.2 — Intelligence API (auto-selection + backtest jobs).
+HM Algo 2.0 — Intelligence API (auto-selection + backtest jobs).
 
 WHY THIS MODULE EXISTS
 ----------------------

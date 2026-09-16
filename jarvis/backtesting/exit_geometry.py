@@ -1,5 +1,5 @@
 """
-JARVIS AI 5.1 — Exit Geometry Engine.
+HM Algo 2.0 — Exit Geometry Engine.
 
 WHY THIS MODULE EXISTS
 ----------------------

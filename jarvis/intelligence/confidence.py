@@ -1,5 +1,5 @@
 """
-JARVIS AI 3.0 — Confidence Calibration Engine.
+HM Algo 2.0 — Confidence Calibration Engine.
 Calibrates model confidence against historical win rates using reliability curves to eliminate overconfidence.
 """
 from typing import Dict, List, Any

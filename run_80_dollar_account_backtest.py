@@ -1,5 +1,5 @@
 """
-JARVIS AI 4.0 — $80 Micro Account Historical Performance Suite.
+HM Algo 2.0 — $80 Micro Account Historical Performance Suite.
 Evaluates 6-month trading performance on an $80 micro-account balance (Option B risk floor & micro quality gates).
 """
 import sys
@@ -17,7 +17,7 @@ def run_80_dollar_account_backtest(symbols: list = ["XAUUSD", "BTCUSD"], num_bar
     feed = DataFeedEngine()
 
     print("=" * 95)
-    print("          JARVIS AI 4.0 — $80 MICRO ACCOUNT HISTORICAL PERFORMANCE REPORT")
+    print("          HM Algo 2.0 — $80 MICRO ACCOUNT HISTORICAL PERFORMANCE REPORT")
     print("=" * 95)
 
     for symbol in symbols:

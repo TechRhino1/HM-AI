@@ -1,5 +1,5 @@
 """
-JARVIS AI 3.0 — Macroeconomic Event & Directional Shock Analyst Agent.
+HM Algo 2.0 — Macroeconomic Event & Directional Shock Analyst Agent.
 Features:
 - Live Macro News Shock Directional Prediction (USD Bullish/Bearish impact on Gold, FX, Crypto)
 - High-Impact Economic Event Blackout Window Management

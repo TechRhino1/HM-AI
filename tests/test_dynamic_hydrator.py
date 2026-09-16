@@ -1,5 +1,5 @@
 """
-Unit and Integration Tests for JARVIS Dynamic Market Data Hydration Architecture.
+Unit and Integration Tests for HM Algo 2.0 Dynamic Market Data Hydration Architecture.
 Verifies real-time field resolution, thread-safe caching (<0.1ms), arbitrary ticker resolution,
 batch hydration, and US/Indian universe integration.
 """

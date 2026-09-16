@@ -1,4 +1,4 @@
-# JARVIS 5.1 — Exit Geometry, OOS Expectancy & Loss Attribution
+# HM Algo 2.0 — Exit Geometry, OOS Expectancy & Loss Attribution
 
 **Date:** 2026-09-11
 **Objective:** positive, stable **out-of-sample expectancy** with controlled drawdown —

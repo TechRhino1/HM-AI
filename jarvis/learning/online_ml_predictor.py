@@ -1,5 +1,5 @@
 """
-JARVIS AI 4.0 — Online Adaptive Machine Learning Predictor & Meta-Labeler.
+HM Algo 2.0 — Online Adaptive Machine Learning Predictor & Meta-Labeler.
 Features:
 - 24-Dimensional Quantitative & Institutional Feature Extraction
 - Online Stochastic Gradient Descent (SGD) with L2 Ridge Regularization

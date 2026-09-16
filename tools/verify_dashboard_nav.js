@@ -1,5 +1,5 @@
 /* ===========================================================================
-   Live interaction check for the JARVIS dashboard (tools/verify_dashboard_nav.js)
+   Live interaction check for the HM Algo 2.0 dashboard (tools/verify_dashboard_nav.js)
 
    WHY THIS EXISTS
    ---------------

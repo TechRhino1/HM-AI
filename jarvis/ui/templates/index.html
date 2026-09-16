@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <meta name="theme-color" content="#070b12">
     <meta name="color-scheme" content="dark">
-    <title>HM AI 4.0 — Institutional Financial Trading Terminal</title>
+    <title>HM Algo 2.0 — Institutional Financial Trading Terminal</title>
     <!-- Google Fonts: Inter & JetBrains Mono -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -33,7 +33,7 @@
     <header class="terminal-hud" id="terminal-hud">
         <!-- LEFT: Brand, Status Badge, Mode, and Trade Style Custom Dropdown -->
         <div class="hud-left">
-            <a href="/" class="brand-logo" title="HM AI 4.0 Institutional Terminal">
+            <a href="/" class="brand-logo" title="HM Algo 2.0 Institutional Terminal">
                 <div class="brand-icon">⚡</div>
                 <div class="brand-text">HM <span>AI 4.0</span></div>
             </a>
@@ -183,7 +183,7 @@
             </button>
 
             <!-- Copilot Assistant Button -->
-            <button class="btn-hud-action btn-copilot" onclick="window.toggleCopilotModal()" title="Open HM AI Copilot Assistant (C)">
+            <button class="btn-hud-action btn-copilot" onclick="window.toggleCopilotModal()" title="Open HM Algo 2.0 Copilot Assistant (C)">
                 <span class="hud-action-icon">🤖</span>
                 <span class="hud-action-text hide-compact">Copilot</span>
             </button>
@@ -647,7 +647,7 @@
                             <div class="log-entry">
                                 <span class="log-time">[SYSTEM]</span>
                                 <span class="log-tag tag-info">READY</span>
-                                <span class="log-msg">HM AI 4.0 Institutional Terminal Controller initialized and synchronized.</span>
+                                <span class="log-msg">HM Algo 2.0 Institutional Terminal Controller initialized and synchronized.</span>
                             </div>
                         </div>
                     </div>
@@ -902,13 +902,13 @@
     </main>
 
     <!-- ==========================================================================
-         FLOATING & DRAGGABLE HM AI 4.0 COPILOT WINDOW
+         FLOATING & DRAGGABLE HM Algo 2.0 COPILOT WINDOW
          ========================================================================== -->
     <div id="copilot-window" class="copilot-window floating" style="display:none;">
         <div id="copilot-header" class="copilot-header">
             <div class="copilot-header-title">
                 <span>🤖</span>
-                <span>HM AI 4.0 Copilot Intelligence</span>
+                <span>HM Algo 2.0 Copilot Intelligence</span>
             </div>
             <div class="copilot-header-actions">
                 <button class="copilot-action-btn" title="Clear Context" onclick="clearCopilotChat()">🗑️</button>
@@ -920,18 +920,18 @@
         <div class="copilot-body">
             <div id="copilot-messages" class="copilot-messages">
                 <div class="copilot-bubble">
-                    🤖 <b>HM AI 4.0:</b> Standing by. Ask me about real-time market regimes, economic news shocks, or click any opportunity in the Radar to trade manually.
+                    🤖 <b>HM Algo 2.0:</b> Standing by. Ask me about real-time market regimes, economic news shocks, or click any opportunity in the Radar to trade manually.
                 </div>
             </div>
             <div class="copilot-input-bar">
-                <input id="copilot-input" class="copilot-input" placeholder="Ask HM AI (e.g. Analyze Gold pullback setup)..." onkeydown="handleChatKey(event)">
+                <input id="copilot-input" class="copilot-input" placeholder="Ask HM Algo 2.0 (e.g. Analyze Gold pullback setup)..." onkeydown="handleChatKey(event)">
                 <button class="btn-terminal" style="padding:4px 10px;" onclick="sendChatMessage()">Send</button>
             </div>
         </div>
     </div>
 
     <!-- Floating Chat Head FAB -->
-    <div id="copilot-fab" class="copilot-fab" title="Open HM AI Copilot" onclick="toggleCopilotMinimize(false)">
+    <div id="copilot-fab" class="copilot-fab" title="Open HM Algo 2.0 Copilot" onclick="toggleCopilotMinimize(false)">
         🤖
     </div>
 
@@ -1005,7 +1005,7 @@
 
             <!-- AI Directional & Shock Breakdown -->
             <div class="macro-news-section-box">
-                <div class="macro-section-header">🤖 HM AI Directional Bias & Shock Forecast</div>
+                <div class="macro-section-header">🤖 HM Algo 2.0 Directional Bias & Shock Forecast</div>
                 <div id="mn-modal-bias" class="macro-bias-banner">BULLISH USD / BEARISH XAUUSD</div>
                 <div id="mn-modal-impact-desc" class="macro-section-body" style="margin-top:6px;">Impact analysis...</div>
             </div>
@@ -1038,7 +1038,7 @@
         <div class="macro-news-modal-content" style="max-width:390px; padding:28px 24px; text-align:center; border:1px solid rgba(56,189,248,0.4); border-radius:14px; box-shadow:0 20px 60px rgba(0,0,0,0.95);">
             <div style="font-size:36px; margin-bottom:8px;">🔒</div>
             <h2 style="color:#ffffff; font-size:18px; font-weight:800; letter-spacing:0.05em; margin-bottom:4px;">REMOTE ACCESS TERMINAL</h2>
-            <p style="color:var(--text-dim); font-size:11px; margin-bottom:18px; text-transform:uppercase; letter-spacing:0.06em;">Secure Authentication — HM AI 4.0 Desk</p>
+            <p style="color:var(--text-dim); font-size:11px; margin-bottom:18px; text-transform:uppercase; letter-spacing:0.06em;">Secure Authentication — HM Algo 2.0 Desk</p>
             <form id="remote-login-form" onsubmit="handleRemoteLogin(event)" style="display:flex; flex-direction:column; gap:14px;">
                 <div style="text-align:left;">
                     <span class="desk-field-lbl" style="font-size:10px; font-weight:700; color:var(--accent-cyan); text-transform:uppercase;">Username</span>

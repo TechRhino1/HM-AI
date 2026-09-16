@@ -1,5 +1,5 @@
 """
-JARVIS AI 4.0 — Institutional Historical Market Data Quality & Anomaly Engine.
+HM Algo 2.0 — Institutional Historical Market Data Quality & Anomaly Engine.
 Audits every dataset before storage, detecting impossible OHLC, gaps, spikes,
 duplicate timestamps, and calculating DATA_QUALITY_SCORE (0–100).
 """

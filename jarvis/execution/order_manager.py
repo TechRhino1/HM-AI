@@ -1,5 +1,5 @@
 """
-JARVIS AI 3.0 — Active Order & Position Manager.
+HM Algo 2.0 — Active Order & Position Manager.
 Features:
 - Canonical stop management (delegated to jarvis.execution.exit_policy)
 - Execution Deterioration & Spread Expansion Protection

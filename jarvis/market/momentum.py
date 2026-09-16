@@ -1,5 +1,5 @@
 """
-JARVIS AI 3.0 — Multi-Factor Momentum & Trend Dynamics Engine.
+HM Algo 2.0 — Multi-Factor Momentum & Trend Dynamics Engine.
 Calculates RSI, ADX, DI+/DI-, EMA alignments, Momentum slope, Acceleration/Deceleration, and Divergence.
 """
 import numpy as np

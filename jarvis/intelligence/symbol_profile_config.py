@@ -1,5 +1,5 @@
 """
-JARVIS AI 4.0 — Institutional Symbol-Specific Configuration Matrix.
+HM Algo 2.0 — Institutional Symbol-Specific Configuration Matrix.
 Defines separate, specialized trading logic, Bayesian strategy priors,
 dynamic SL/TP envelopes, fast-cash profit banking, trailing ratchets,
 session hours, and XM Ultra Low Standard account specifications.

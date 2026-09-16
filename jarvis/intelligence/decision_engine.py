@@ -1,5 +1,5 @@
 """
-JARVIS AI 3.0 — Autonomous Decision Engine & Trade Quality Gate.
+HM Algo 2.0 — Autonomous Decision Engine & Trade Quality Gate.
 Synthesizes multi-agent confluences, applies Devil's Advocate risk penalties, calculates expected value, and gates execution.
 """
 from typing import Dict, List, Any, Optional

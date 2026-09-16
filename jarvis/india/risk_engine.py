@@ -1,5 +1,5 @@
 """
-JARVIS AI 3.0 — India Risk Engine & SEBI Margin / Position Calculator
+HM Algo 2.0 — India Risk Engine & SEBI Margin / Position Calculator
 Calculates exact lot size allocation, Span + Exposure margins, freeze limit constraints,
 and generates 1-click broker order tickets formatted for Indian discount & full-service brokers.
 """

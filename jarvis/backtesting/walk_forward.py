@@ -1,5 +1,5 @@
 """
-JARVIS AI 4.0 — Event-Driven Walk-Forward Validation Engine.
+HM Algo 2.0 — Event-Driven Walk-Forward Validation Engine.
 Executes rolling In-Sample (IS) and Out-Of-Sample (OOS) validation windows to measure Walk-Forward Efficiency (WFE) and eliminate overfitting.
 """
 import logging

@@ -1,5 +1,5 @@
 """
-JARVIS AI 5.0 — Runtime execution mode.
+HM Algo 2.0 — Runtime execution mode.
 
 WHY THIS MODULE EXISTS
 ----------------------

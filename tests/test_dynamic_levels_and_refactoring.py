@@ -1,5 +1,5 @@
 """
-Unit tests for JARVIS AI Master-Trader Dynamic Refactoring (Tasks 1 through 5).
+Unit tests for HM Algo 2.0 Master-Trader Dynamic Refactoring (Tasks 1 through 5).
 Validates:
 1. DynamicRiskAndLevelsEngine (purely structural, volatility-adaptive SL/TP and scale-out plans)
 2. DecisionEngine dynamic quality gates (Kelly win prob, dynamic score hurdle, RSI exhaustion, Gold sweep check)

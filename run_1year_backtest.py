@@ -1,5 +1,5 @@
 """
-JARVIS AI 4.0 — 1-Year Multi-Asset Historical Performance Suite.
+HM Algo 2.0 — 1-Year Multi-Asset Historical Performance Suite.
 Executes 1-year backtest over 8,760 H1 bars (365 days of continuous trading) to evaluate performance metrics for XAUUSD & BTCUSD.
 """
 import sys
@@ -17,7 +17,7 @@ def run_1year_backtest(symbols: list = ["XAUUSD", "BTCUSD"], num_bars: int = 876
     feed = DataFeedEngine()
 
     print("=" * 95)
-    print("          JARVIS AI 4.0 — 1-YEAR HISTORICAL PERFORMANCE REPORT (8,760 H1 BARS)")
+    print("          HM Algo 2.0 — 1-YEAR HISTORICAL PERFORMANCE REPORT (8,760 H1 BARS)")
     print("=" * 95)
 
     results = {}

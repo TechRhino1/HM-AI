@@ -1,5 +1,5 @@
 """
-JARVIS AI 4.0 — Live Multi-Asset Telemetry & Analytical Sweep Suite.
+HM Algo 2.0 — Live Multi-Asset Telemetry & Analytical Sweep Suite.
 Executes live analytical cycles across XAUUSD, EURUSD, GBPUSD, USDJPY, and BTCUSD.
 """
 import sys
@@ -11,7 +11,7 @@ logging.basicConfig(level=logging.WARNING)
 
 def run_live_sweep(symbols: list = ["XAUUSD", "EURUSD", "GBPUSD", "USDJPY", "BTCUSD"]):
     print("=" * 95)
-    print("          JARVIS AI 4.0 — LIVE MULTI-ASSET ANALYTICAL TELEMETRY SWEEP")
+    print("          HM Algo 2.0 — LIVE MULTI-ASSET ANALYTICAL TELEMETRY SWEEP")
     print("=" * 95)
 
     orchestrator = JarvisOrchestrator(mode="paper")

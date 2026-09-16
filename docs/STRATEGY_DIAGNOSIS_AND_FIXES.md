@@ -1,4 +1,4 @@
-# JARVIS AI 4.0 — Strategy Diagnosis & Profitability Remediation Plan
+# HM Algo 2.0 — Strategy Diagnosis & Profitability Remediation Plan
 
 **Date:** 2026-09-11
 **Analyst:** WorkBuddy AI

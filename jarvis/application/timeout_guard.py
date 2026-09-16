@@ -1,5 +1,5 @@
 """
-JARVIS AI 3.0 — Timeout Guard Utilities.
+HM Algo 2.0 — Timeout Guard Utilities.
 Protects the system against hanging network calls, slow analytical agents, and unresponsive I/O operations.
 """
 import asyncio

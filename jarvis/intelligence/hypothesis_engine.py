@@ -1,5 +1,5 @@
 """
-JARVIS AI 3.0 — Competing Hypothesis & Invalidation Engine.
+HM Algo 2.0 — Competing Hypothesis & Invalidation Engine.
 Constructs competing theses (Primary vs Alternative) and explicit invalidation criteria ("What would change my mind?").
 """
 from typing import Dict, List, Any

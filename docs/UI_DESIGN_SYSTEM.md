@@ -1,7 +1,7 @@
-# HM AI 4.0 — UI Design System & Modernisation
+# HM Algo 2.0 — UI Design System & Modernisation
 
 **Status:** delivered (additive layer, no functional regressions)
-**Scope owner:** HM AI 4.0 web terminal
+**Scope owner:** HM Algo 2.0 web terminal
 **Artefacts:** `jarvis/ui/static/css/hm_ui.css`, `jarvis/ui/static/js/hm_ui.js`, `docs/ui_preview.html`
 
 ---

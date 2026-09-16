@@ -1,5 +1,5 @@
 """
-JARVIS AI 3.0 — Circuit Breaker & Safety Lockout Engine.
+HM Algo 2.0 — Circuit Breaker & Safety Lockout Engine.
 Halts trading during consecutive execution failures, rapid loss streaks, or platform anomalies.
 """
 import time

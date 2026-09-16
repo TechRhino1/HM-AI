@@ -1,5 +1,5 @@
 /**
- * JARVIS AI 3.0 — India F&O Options & Derivatives Terminal Client Controller
+ * HM Algo 2.0 — India F&O Options & Derivatives Terminal Client Controller
  * Renders live interactive payoff curves (Sensibull/Opstra algorithm), strike-wise OI bar visualizers,
  * multi-leg strategy builder, and Zerodha/Upstox basket orders.
  */

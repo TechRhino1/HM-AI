@@ -1,4 +1,4 @@
-"""JARVIS AI 4.0 — Canonical filesystem paths.
+"""HM Algo 2.0 — Canonical filesystem paths.
 
 WHY THIS MODULE EXISTS
 ----------------------

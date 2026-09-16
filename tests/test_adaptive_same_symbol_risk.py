@@ -1,5 +1,5 @@
 """
-Unit Test Suite for HM AI 4.0 Adaptive Same-Symbol Trade Risk Engine & Portfolio Heat.
+Unit Test Suite for HM Algo 2.0 Adaptive Same-Symbol Trade Risk Engine & Portfolio Heat.
 Covers:
   - Base Soft Limit (1 trade) vs Hard Limit (2 trades)
   - 15-Point Adaptive Second-Trade Validation

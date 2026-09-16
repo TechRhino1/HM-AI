@@ -92,7 +92,7 @@ def resolve_broker_symbol(mt5_instance, canonical_name: str) -> str:
 
 def run_1y_backtest():
     print("=" * 125)
-    print("             JARVIS AI 4.0 -- COMPREHENSIVE 1-YEAR REAL MT5 HISTORICAL BENCHMARK (8,760 H1 BARS)")
+    print("             HM Algo 2.0 -- COMPREHENSIVE 1-YEAR REAL MT5 HISTORICAL BENCHMARK (8,760 H1 BARS)")
     print("=" * 125)
 
     mt5_active = mt5.initialize()

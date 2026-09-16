@@ -1,5 +1,5 @@
 """
-JARVIS AI 3.0 — Comprehensive Performance Metrics Calculator.
+HM Algo 2.0 — Comprehensive Performance Metrics Calculator.
 Calculates institutional performance metrics: Sharpe, Sortino, Calmar, Expectancy, Profit Factor, Max Drawdown, MFE/MAE.
 """
 from typing import List, Dict, Any

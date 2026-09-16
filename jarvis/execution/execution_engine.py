@@ -1,5 +1,5 @@
 """
-JARVIS AI 3.0 — Master Execution Engine.
+HM Algo 2.0 — Master Execution Engine.
 Orchestrates order dispatch, mode verification (LIVE/PAPER/DEMO), and execution logging.
 """
 import logging

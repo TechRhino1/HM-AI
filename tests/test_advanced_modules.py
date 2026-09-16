@@ -1,4 +1,4 @@
-"""Tests for the new JARVIS AI 4.0 advanced modules (ML, gates, GEX, walk-forward)."""
+"""Tests for the new HM Algo 2.0 advanced modules (ML, gates, GEX, walk-forward)."""
 import math
 import numpy as np
 import unittest

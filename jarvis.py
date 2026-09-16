@@ -1,5 +1,5 @@
 """
-JARVIS AI 3.0 — Platform Supervisor and CLI Manager.
+HM Algo 2.0 — Platform Supervisor and CLI Manager.
 """
 import sys
 import os
@@ -33,7 +33,7 @@ def print_status_hud():
     snap = GLOBAL_STATE.get_state_snapshot()
     acc = snap.get("account") or {}
     print("\n" + "=" * 60)
-    print("              JARVIS AI 3.0 COMMAND CENTER              ")
+    print("              HM Algo 2.0 COMMAND CENTER              ")
     print("=" * 60)
     print(f"STATUS:          {'🟢 OPERATIONAL' if not snap['safe_mode'] else '🟡 SAFE MODE'}")
     print(f"EXECUTION MODE:  {snap['execution_mode']}")
@@ -65,13 +65,13 @@ def main():
         server_thread.start()
 
         print_status_hud()
-        print(f"🚀 JARVIS AI 3.0 ONLINE at http://localhost:8501 (Mode: {mode.upper()}). Press Ctrl+C to stop.")
+        print(f"🚀 HM Algo 2.0 ONLINE at http://localhost:8501 (Mode: {mode.upper()}). Press Ctrl+C to stop.")
         try:
             while True:
                 time.sleep(1)
         except KeyboardInterrupt:
             orchestrator.stop()
-            print("\n🛑 JARVIS AI 3.0 safely terminated.")
+            print("\n🛑 HM Algo 2.0 safely terminated.")
 
     elif cmd in ["status", "health", "info"]:
         print_status_hud()
@@ -82,14 +82,14 @@ def main():
         df = feed.fetch_rates("XAUUSD", timeframe="H1", num_bars=500)
         bt = BacktestEngine()
         res = bt.run_backtest(df, symbol="XAUUSD")
-        print("\n=== JARVIS 3.0 BACKTEST SUMMARY ===")
+        print("\n=== HM Algo 2.0 BACKTEST SUMMARY ===")
         for k, v in res["metrics"].items():
             print(f"  {k}: {v}")
         print(f"  Final Balance: ${res['final_balance']:,.2f}\n")
     else:
         print(f"Unknown command: '{cmd}'")
         print("Usage:")
-        print("  python jarvis.py start [paper|live]  -> Start JARVIS 3.0 & Web Terminal")
+        print("  python jarvis.py start [paper|live]  -> Start HM Algo 2.0 & Web Terminal")
         print("  python jarvis.py status              -> Display system status HUD")
         print("  python jarvis.py backtest            -> Run quantitative backtest")
 

@@ -1,5 +1,5 @@
 """
-JARVIS AI 4.0 — Dynamic Context-Aware Strategy Selection Engine.
+HM Algo 2.0 — Dynamic Context-Aware Strategy Selection Engine.
 Features:
 - Micro-Account Adaptive Sizing & Execution (< $100 Equity)
 - Context-Aware Bayesian Probability Weighting Engine driven by Sweep Detection, Volume Delta, and ADX Slope.

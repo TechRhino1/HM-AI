@@ -1,5 +1,5 @@
 """
-JARVIS AI 3.0 — Master System Orchestrator.
+HM Algo 2.0 — Master System Orchestrator.
 Coordinates data feeds, multi-symbol radar scans, parallel analyst clusters, risk authorization, MT5 state synchronization, and execution.
 """
 import time
@@ -107,7 +107,7 @@ class JarvisOrchestrator:
         self._last_heartbeat: float = time.time()
 
     def start(self):
-        """Starts the full JARVIS 4.0 engine, background workers, and watchdog supervisor."""
+        """Starts the full HM Algo 2.0 engine, background workers, and watchdog supervisor."""
         if not self._running:
             self._running = True
             self.state_manager.set_orchestrator_running(True)
@@ -117,11 +117,11 @@ class JarvisOrchestrator:
             self._main_thread.start()
             self._watchdog_thread = threading.Thread(target=self._watchdog_loop, daemon=True, name="jarvis_watchdog")
             self._watchdog_thread.start()
-            logger.info("JARVIS 4.0 Orchestrator and Watchdog started.")
+            logger.info("HM Algo 2.0 Orchestrator and Watchdog started.")
 
     def _watchdog_loop(self):
         """Autonomous self-healing watchdog monitoring broker state, thread health, and stale locks."""
-        logger.info("JARVIS 4.0 Autonomous Watchdog supervisor active.")
+        logger.info("HM Algo 2.0 Autonomous Watchdog supervisor active.")
         while self._running:
             try:
                 now = time.time()
@@ -167,7 +167,7 @@ class JarvisOrchestrator:
         self.position_monitor.stop()
         self.state_synchronizer.stop()
         self.mt5_client.shutdown()
-        logger.info("JARVIS 4.0 Orchestrator stopped.")
+        logger.info("HM Algo 2.0 Orchestrator stopped.")
 
     def _on_trade_closed(self, data):
         ticket = data.get("ticket")

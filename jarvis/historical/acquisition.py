@@ -1,5 +1,5 @@
 """
-JARVIS AI 4.0 — Intelligent Historical Market Data Acquisition Engine.
+HM Algo 2.0 — Intelligent Historical Market Data Acquisition Engine.
 Connects to MT5 broker, extracts contract specs/sessions/swaps, detects exact
 missing historical intervals, downloads deltas, merges, and validates.
 """

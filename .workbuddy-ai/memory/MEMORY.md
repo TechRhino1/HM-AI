@@ -1,4 +1,4 @@
-# HM-AI / JARVIS — durable project notes
+# HM-AI / HM Algo 2.0 — durable project notes
 
 Curated facts that outlive a session. **This file is injected every session and silently truncated at
 the tail** — it has already lost its last two sections once, so keep it small. Detail lives in

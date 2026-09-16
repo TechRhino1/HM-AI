@@ -1,5 +1,5 @@
 """
-JARVIS AI 3.0 — India Institutional News & FII / DII Flow Analyzer
+HM Algo 2.0 — India Institutional News & FII / DII Flow Analyzer
 Synthesizes Indian macroeconomic indicators, RBI policy decisions, corporate quarterly results,
 and real-time Foreign & Domestic Institutional Investors (FII / DII) buying & selling cash data.
 """

@@ -1,5 +1,5 @@
 """
-JARVIS AI 3.0 — NSE/SEBI India Rule & Contract Specifications Engine
+HM Algo 2.0 — NSE/SEBI India Rule & Contract Specifications Engine
 Dynamically determines official lot sizes, quantity freeze limits, strike intervals,
 expiry schedules, circuit filters, and exchange turnover/STT charges for Indian derivatives and equities.
 """

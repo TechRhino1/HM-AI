@@ -1,5 +1,5 @@
 """
-JARVIS AI 3.0 — Main CLI Entrypoint.
+HM Algo 2.0 — Main CLI Entrypoint.
 Provides command-line launching for live/paper trading, radar scans, and historical backtests.
 """
 import os
@@ -27,7 +27,7 @@ logging.basicConfig(
 logger = logging.getLogger("JARVIS_Main")
 
 def main():
-    parser = argparse.ArgumentParser(description="JARVIS AI 3.0 — Professional Trading Intelligence Platform")
+    parser = argparse.ArgumentParser(description="HM Algo 2.0 — Professional Trading Intelligence Platform")
     parser.add_argument("--mode", type=str, default=SETTINGS.trading.default_mode, choices=["paper", "live", "demo"], help="Execution mode")
 
     parser.add_argument("--symbol", type=str, default="XAUUSD", help="Primary target symbol")
@@ -38,14 +38,14 @@ def main():
     args = parser.parse_args()
 
     if args.backtest:
-        logger.info(f"--- STARTING JARVIS 3.0 HISTORICAL BACKTEST FOR {args.symbol} ---")
+        logger.info(f"--- STARTING HM Algo 2.0 HISTORICAL BACKTEST FOR {args.symbol} ---")
         feed = DataFeedEngine()
         df = feed.fetch_rates(args.symbol, timeframe="H1", num_bars=500)
         bt = BacktestEngine(initial_balance=10000.0, risk_per_trade_pct=0.5)
         res = bt.run_backtest(df, symbol=args.symbol)
 
         logger.info("================================================================================")
-        logger.info(f"                 JARVIS 3.0 BACKTEST RESULTS ({args.symbol})                   ")
+        logger.info(f"                 HM Algo 2.0 BACKTEST RESULTS ({args.symbol})                   ")
         logger.info("================================================================================")
         for k, v in res["metrics"].items():
             logger.info(f"  {k}: {v}")
@@ -76,12 +76,12 @@ def main():
     )
     server_thread.start()
 
-    logger.info(f"JARVIS 3.0 is ONLINE in {orchestrator.mode.upper()} mode. Web Terminal at http://{args.host}:{args.port}")
+    logger.info(f"HM Algo 2.0 is ONLINE in {orchestrator.mode.upper()} mode. Web Terminal at http://{args.host}:{args.port}")
     try:
         while True:
             time.sleep(1.0)
     except KeyboardInterrupt:
-        logger.info("Termination signal received. Shutting down JARVIS 3.0...")
+        logger.info("Termination signal received. Shutting down HM Algo 2.0...")
     finally:
         orchestrator.stop()
 

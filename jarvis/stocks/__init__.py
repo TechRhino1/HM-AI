@@ -1,5 +1,5 @@
 """
-JARVIS AI 3.0 — AI Breakout Stock Screener & Stock Intelligence Module
+HM Algo 2.0 — AI Breakout Stock Screener & Stock Intelligence Module
 Provides institutional-grade stock screening, multi-factor breakout probability scoring,
 volatility squeeze detection, multi-timeframe analysis, and stock news sentiment intelligence.
 """

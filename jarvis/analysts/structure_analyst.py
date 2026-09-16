@@ -1,5 +1,5 @@
 """
-JARVIS AI 3.0 — Market Structure Analyst Agent.
+HM Algo 2.0 — Market Structure Analyst Agent.
 Features:
 - Fast Intraday Structure Inversion & Breakdown Detection (M5/M15 CHoCH & BOS)
 - Strict Institutional Premium vs Discount Equilibrium Filtering

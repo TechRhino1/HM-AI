@@ -1,5 +1,5 @@
 """
-JARVIS 5.1 — Engine-backed calibration.
+HM Algo 2.0 — Engine-backed calibration.
 
 WHY THIS EXISTS
 ---------------

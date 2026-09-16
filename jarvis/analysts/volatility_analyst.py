@@ -1,5 +1,5 @@
 """
-JARVIS AI 3.0 — Volatility & Spread Feasibility Analyst Agent.
+HM Algo 2.0 — Volatility & Spread Feasibility Analyst Agent.
 Answers: Is volatility expanding or compressing? Is the stop loss distance realistic? Is the spread within acceptable limits?
 """
 import time

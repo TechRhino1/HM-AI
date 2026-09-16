@@ -1,5 +1,5 @@
 """
-JARVIS AI 3.0 — Multi-Timeframe Data Feed Engine.
+HM Algo 2.0 — Multi-Timeframe Data Feed Engine.
 Provides thread-safe, timeout-guarded OHLCV data streaming from MT5 with realistic synthetic fallback generation.
 """
 import time

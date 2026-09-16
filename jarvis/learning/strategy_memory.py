@@ -1,5 +1,5 @@
 """
-JARVIS AI 3.0 — Strategy & Regime Performance Memory Engine.
+HM Algo 2.0 — Strategy & Regime Performance Memory Engine.
 Evaluates historical performance segmented by market regime to dynamically adjust strategy activation probabilities.
 """
 from typing import Dict, List, Any

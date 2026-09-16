@@ -1,5 +1,5 @@
 /* ==========================================================================
-   HM AI 4.0 — SHARED UX / ACCESSIBILITY LAYER
+   HM Algo 2.0 — SHARED UX / ACCESSIBILITY LAYER
    --------------------------------------------------------------------------
    Loaded last, after every page script. Responsibilities:
 

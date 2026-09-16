@@ -1,5 +1,5 @@
 """
-JARVIS AI 3.0 — Volatility & Spread Protection Engine.
+HM Algo 2.0 — Volatility & Spread Protection Engine.
 Computes ATR, Bollinger bandwidth, volatility regime states (Compression, Normal, Expansion, Extreme), and spread feasibility.
 """
 import numpy as np

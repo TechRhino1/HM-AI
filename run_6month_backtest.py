@@ -1,5 +1,5 @@
 """
-JARVIS AI 4.0 — 6-Month Continuous Historical Backtest Runner (4,380 H1 Bars).
+HM Algo 2.0 — 6-Month Continuous Historical Backtest Runner (4,380 H1 Bars).
 Executes 6-fold Purged & Embargoed Walk-Forward Out-Of-Sample validation for XAUUSD and BTCUSD over 182.5 days.
 """
 import os
@@ -19,7 +19,7 @@ logger = logging.getLogger("6MonthBacktest")
 
 def run_6month_backtest():
     print("=" * 95)
-    print("        JARVIS AI 4.0 — 6-MONTH CONTINUOUS HISTORICAL PERFORMANCE SIMULATION")
+    print("        HM Algo 2.0 — 6-MONTH CONTINUOUS HISTORICAL PERFORMANCE SIMULATION")
     print("                            (4,380 H1 BARS / 182.5 DAYS)")
     print("=" * 95)
 
@@ -49,7 +49,7 @@ def run_6month_backtest():
         results[sym] = m
 
     print("\n" + "=" * 95)
-    print("          JARVIS AI 4.0 — 6-MONTH HISTORICAL PERFORMANCE REPORT (4,380 H1 BARS)")
+    print("          HM Algo 2.0 — 6-MONTH HISTORICAL PERFORMANCE REPORT (4,380 H1 BARS)")
     print("=" * 95)
     print(f"{'Performance Metric':<30} | {'XAUUSD (Gold)':<25} | {'BTCUSD (Bitcoin)':<25}")
     print("-" * 95)

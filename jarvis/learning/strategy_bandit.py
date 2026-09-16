@@ -1,5 +1,5 @@
 """
-JARVIS AI 4.0 — Contextual Multi-Armed Bandit Strategy Optimizer with Thompson Sampling.
+HM Algo 2.0 — Contextual Multi-Armed Bandit Strategy Optimizer with Thompson Sampling.
 Implements Bayesian Beta-Binomial Thompson Sampling and UCB1 for dynamic strategy selection
 across (Market Regime, Trading Style, Strategy) contexts.
 """

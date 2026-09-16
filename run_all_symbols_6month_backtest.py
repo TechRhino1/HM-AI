@@ -1,5 +1,5 @@
 """
-JARVIS AI 4.0 — Complete 6-Month Multi-Symbol Historical Backtest Runner.
+HM Algo 2.0 — Complete 6-Month Multi-Symbol Historical Backtest Runner.
 Downloads/validates real 6-month MT5 history across all 13 institutional symbols,
 executes backtests, performs 6-fold walk-forward validation, and computes portfolio metrics.
 """
@@ -48,7 +48,7 @@ ASSET_CLASS_MAP = {
 
 def run_complete_6month_backtest():
     print("=" * 115)
-    print("         JARVIS AI 4.0 — COMPLETE 6-MONTH HISTORICAL BACKTEST (ALL 13 SYMBOLS)")
+    print("         HM Algo 2.0 — COMPLETE 6-MONTH HISTORICAL BACKTEST (ALL 13 SYMBOLS)")
     print("         Historical Data Engine: Local Parquet Data Lake + Real MT5 Execution")
     print("=" * 115)
 
@@ -126,7 +126,7 @@ def run_complete_6month_backtest():
 
     # Phase 3: Display Detailed Multi-Symbol Performance Table
     print("\n" + "=" * 135)
-    print("                                      JARVIS AI 4.0 — 6-MONTH BACKTEST SUMMARY TABLE")
+    print("                                      HM Algo 2.0 — 6-MONTH BACKTEST SUMMARY TABLE")
     print("=" * 135)
     print(f"{'Symbol':<8} | {'Class':<9} | {'Bars':<6} | {'Trades':<7} | {'Win %':<7} | {'OOS Win%':<8} | {'Profit Factor':<13} | {'Net Profit':<12} | {'ROI %':<8} | {'Max DD %':<8} | {'Sharpe':<6} | {'WFE':<5}")
     print("-" * 135)

@@ -1,5 +1,5 @@
 """
-JARVIS 5.1 — Geometry-aware calibration.
+HM Algo 2.0 — Geometry-aware calibration.
 
 WHY THIS EXISTS
 ---------------

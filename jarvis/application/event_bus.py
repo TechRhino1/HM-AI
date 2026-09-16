@@ -1,5 +1,5 @@
 """
-JARVIS AI 3.0 — Asynchronous Event Bus.
+HM Algo 2.0 — Asynchronous Event Bus.
 Decouples communication between market data feeds, analyst agents, decision pipelines, and UI streams.
 """
 import asyncio

@@ -1,5 +1,5 @@
 """
-Unit Tests for JARVIS Master-Trader Autonomous Trade Selector & Self-Learning Architecture.
+Unit Tests for HM Algo 2.0 Master-Trader Autonomous Trade Selector & Self-Learning Architecture.
 Covers:
 - UniversalOpportunityArbiter (Utility math, Grade A+/A/B/C assignment, multi-style ranking & selection)
 - OnlineMLPredictor (24-D feature extraction, return-weighted SGD, Brier score tracking, [0.35, 0.88] calibration)

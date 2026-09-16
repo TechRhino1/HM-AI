@@ -1,5 +1,5 @@
 """
-JARVIS AI 3.0 — India Markets REST Dispatcher & Service Coordinator
+HM Algo 2.0 — India Markets REST Dispatcher & Service Coordinator
 Provides unified JSON API endpoints for Indian Market Scanning, Option Chain Analytics,
 Greeks, FII/DII Institutional Flows, CPR/Camarilla Pivots, and NSE/SEBI Rule Validation.
 """

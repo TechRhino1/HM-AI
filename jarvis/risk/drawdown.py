@@ -1,5 +1,5 @@
 """
-JARVIS AI 3.0 — Drawdown & Daily Loss Monitoring Engine.
+HM Algo 2.0 — Drawdown & Daily Loss Monitoring Engine.
 Enforces hard daily loss caps and maximum portfolio drawdown limits to guarantee capital preservation.
 """
 import sqlite3

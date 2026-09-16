@@ -1,5 +1,5 @@
 """
-JARVIS AI 3.0 — Conversational AI Copilot Layer.
+HM Algo 2.0 — Conversational AI Copilot Layer.
 Answers discretionary trader queries using verified in-memory system state, market context, and decision records.
 """
 from typing import Dict, Any, List, Optional
@@ -28,7 +28,7 @@ class JarvisCopilot:
                     reasons = d.quality_gate.failing_reasons
                     adv_threats = d.risk_factors
                     return (
-                        f"**JARVIS 3.0 Decision Status for {sym}: {d.decision}**\n\n"
+                        f"**HM Algo 2.0 Decision Status for {sym}: {d.decision}**\n\n"
                         f"- **Current Bias**: {d.bias} ({d.strategy})\n"
                         f"- **Calibrated Win Probability**: {d.probabilities.get(d.bias.lower(), 0.5)*100:.1f}%\n"
                         f"- **Quality Gate Failing Checks**: {', '.join(reasons) if reasons else 'Waiting on Lower Timeframe Trigger'}\n"
@@ -37,7 +37,7 @@ class JarvisCopilot:
                         f"- **Invalidation Trigger**: {', '.join(d.invalidation_levels[:2])}"
                     )
                 else:
-                    return f"**JARVIS 3.0 has APPROVED execution for {sym}**: Bias={d.bias}, EV=${d.expected_value:.2f}, R:R=1:{d.risk_reward_ratio:.2f}."
+                    return f"**HM Algo 2.0 has APPROVED execution for {sym}**: Bias={d.bias}, EV=${d.expected_value:.2f}, R:R=1:{d.risk_reward_ratio:.2f}."
             return f"No active decision recorded yet for {sym}. Radar is currently scanning market conditions."
 
         # 2. "analyze [symbol]" / "market status"
@@ -61,7 +61,7 @@ class JarvisCopilot:
         elif "risk" in q or "exposure" in q or "drawdown" in q or "account" in q:
             if account:
                 return (
-                    f"**JARVIS 3.0 Risk & Account Telemetry**\n"
+                    f"**HM Algo 2.0 Risk & Account Telemetry**\n"
                     f"- Server: {account.server} (#{account.login})\n"
                     f"- Balance: ${account.balance:,.2f} | Equity: ${account.equity:,.2f}\n"
                     f"- Free Margin: ${account.free_margin:,.2f} | Open Margin: ${account.margin:,.2f}\n"
@@ -85,7 +85,7 @@ class JarvisCopilot:
 
         # 5. Default conversational intelligence response
         return (
-            "**JARVIS 3.0 AI Intelligence Copilot**\n"
+            "**HM Algo 2.0 Intelligence Copilot**\n"
             "I have access to live MT5 state, multi-timeframe market context, and adversarial decision telemetry.\n\n"
             "You can ask me:\n"
             "- *'Why aren't you entering XAUUSD?'*\n"

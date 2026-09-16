@@ -1,5 +1,5 @@
 """
-JARVIS AI 4.0 — Empirical Validation & Monte Carlo Comparison Suite.
+HM Algo 2.0 — Empirical Validation & Monte Carlo Comparison Suite.
 Generates full statistical before-and-after comparison of regime-adaptive TP/SL/partial-close constants.
 """
 import sys

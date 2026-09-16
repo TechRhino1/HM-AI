@@ -1,5 +1,5 @@
 """
-JARVIS AI 3.0 — MT5 Client & Execution Gateway.
+HM Algo 2.0 — MT5 Client & Execution Gateway.
 Provides a thread-safe, timeout-guarded connection to MetaTrader 5 with automatic symbol resolution and retry mechanisms.
 """
 import os
@@ -175,7 +175,7 @@ class MT5Client:
                 paper_pnl = sum(getattr(p, "profit", 0.0) for p in self._paper_positions.values())
             return AccountSnapshot(
                 login=999999,
-                server="JARVIS-PAPER",
+                server="HM Algo 2.0-PAPER",
                 balance=10000.0,
                 equity=10000.0 + paper_pnl,
                 margin=0.0,
@@ -184,7 +184,7 @@ class MT5Client:
                 leverage=100,
                 profit=paper_pnl,
                 name="Paper Account",
-                company="JARVIS Simulator",
+                company="HM Algo 2.0 Simulator",
                 currency="USD",
                 trade_allowed=True
             )

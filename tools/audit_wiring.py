@@ -1,4 +1,4 @@
-"""Static + dynamic wiring audit for the JARVIS package.
+"""Static + dynamic wiring audit for the HM Algo 2.0 package.
 
 Two independent passes:
 

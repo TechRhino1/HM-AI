@@ -1,5 +1,5 @@
 """
-JARVIS AI 4.0 — Quantitative Performance Benchmark & Win Rate Comparison Script.
+HM Algo 2.0 — Quantitative Performance Benchmark & Win Rate Comparison Script.
 Compares baseline strategy results against current upgraded quantitative AI system.
 """
 import sys
@@ -18,7 +18,7 @@ def run_comparison(symbol: str = "XAUUSD", num_bars: int = 600):
     df = feed.fetch_rates(symbol, timeframe="H1", num_bars=num_bars)
 
     print("=" * 80)
-    print(f"            JARVIS AI 4.0 QUANTITATIVE PERFORMANCE BENCHMARK ({symbol})")
+    print(f"            HM Algo 2.0 QUANTITATIVE PERFORMANCE BENCHMARK ({symbol})")
     print("=" * 80)
 
     # 1. Run Current Upgraded System Backtest

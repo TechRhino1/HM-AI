@@ -1,5 +1,5 @@
 """
-JARVIS AI 3.0 — Momentum & Trend Dynamics Analyst Agent.
+HM Algo 2.0 — Momentum & Trend Dynamics Analyst Agent.
 Answers: Is momentum increasing or exhausting? Is price accelerating? Is there momentum divergence?
 """
 import time

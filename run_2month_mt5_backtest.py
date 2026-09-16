@@ -1,5 +1,5 @@
 """
-JARVIS AI 4.0 — 2-Month Real MT5 Historical Backtest Runner (All Symbols).
+HM Algo 2.0 — 2-Month Real MT5 Historical Backtest Runner (All Symbols).
 Loads 2 months of real H1 bar data directly from MetaTrader 5 institutional history cache,
 executes event-driven backtests across all 13 symbols in parallel, and generates full performance metrics.
 """
@@ -189,7 +189,7 @@ def _run_single_symbol_backtest(cfg: Dict[str, Any], initial_balance: float = 10
 
 def run_2month_backtest(initial_balance_per_symbol: float = 10000.0):
     print("=" * 135, flush=True)
-    print("                 JARVIS AI 4.0 — 2-MONTH REAL MT5 HISTORICAL BACKTEST (ALL 13 INSTITUTIONAL SYMBOLS)", flush=True)
+    print("                 HM Algo 2.0 — 2-MONTH REAL MT5 HISTORICAL BACKTEST (ALL 13 INSTITUTIONAL SYMBOLS)", flush=True)
     print("                 Source: Real MetaTrader 5 History Cache | Timeframe: H1 (60-Day Evaluation Window)", flush=True)
     print("=" * 135, flush=True)
 
@@ -228,7 +228,7 @@ def run_2month_backtest(initial_balance_per_symbol: float = 10000.0):
 
     # Phase 3: Display Detailed Summary Table
     print("=" * 135, flush=True)
-    print("                             JARVIS AI 4.0 — 2-MONTH BACKTEST MULTI-ASSET SUMMARY TABLE", flush=True)
+    print("                             HM Algo 2.0 — 2-MONTH BACKTEST MULTI-ASSET SUMMARY TABLE", flush=True)
     print("=" * 135, flush=True)
     print(f"{'Symbol':<8} | {'Class':<10} | {'Bars':<5} | {'Trades':<7} | {'Win %':<7} | {'PF':<6} | {'Net Profit':<12} | {'ROI %':<8} | {'Max DD %':<8} | {'Sharpe':<6} | {'Long WR':<8} | {'Short WR'}", flush=True)
     print("-" * 135, flush=True)

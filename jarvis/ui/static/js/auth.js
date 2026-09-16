@@ -1,5 +1,5 @@
 /**
- * HM AI 4.0 — Universal Authentication & Session Management Module
+ * HM Algo 2.0 — Universal Authentication & Session Management Module
  * Handles login modal, token persistence, user profile header widgets, and server-side logout.
  */
 (function () {
@@ -177,7 +177,7 @@
                     <div class="universal-auth-card">
                         <button class="auth-close-btn" onclick="window.HM_AUTH.closeLoginModal()" title="Close">✕</button>
                         <div class="auth-card-top-icon">🔒</div>
-                        <div class="auth-card-title">HM AI 4.0 TERMINAL LOGIN</div>
+                        <div class="auth-card-title">HM Algo 2.0 TERMINAL LOGIN</div>
                         <div class="auth-card-subtitle" id="auth-modal-subtitle">Secure Multi-Market Execution Desk</div>
                         <div id="auth-modal-error" class="auth-error-alert"></div>
                         <form id="universal-auth-form" onsubmit="window.HM_AUTH.handleFormSubmit(event)">

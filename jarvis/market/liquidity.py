@@ -1,5 +1,5 @@
 """
-JARVIS AI 3.0 — Liquidity & Order Flow Sweep Intelligence Engine.
+HM Algo 2.0 — Liquidity & Order Flow Sweep Intelligence Engine.
 Identifies Equal Highs/Lows, Buy-Side/Sell-Side Liquidity Pools, Liquidity Sweeps, and Stop-Run Traps.
 """
 import numpy as np

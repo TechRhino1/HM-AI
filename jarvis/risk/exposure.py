@@ -1,5 +1,5 @@
 """
-JARVIS AI 4.0 — Adaptive Portfolio Exposure & Margin Management Engine.
+HM Algo 2.0 — Adaptive Portfolio Exposure & Margin Management Engine.
 Enforces soft/hard same-symbol position limits, currency directional concentration,
 and total portfolio monetary risk budget.
 """

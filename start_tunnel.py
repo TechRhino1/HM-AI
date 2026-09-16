@@ -1,5 +1,5 @@
 """
-JARVIS AI 4.0 — Automated Remote Access Tunnel Launcher Script.
+HM Algo 2.0 — Automated Remote Access Tunnel Launcher Script.
 Connects with your authenticated localhost.run account or Serveo fallback.
 """
 import subprocess
@@ -30,7 +30,7 @@ def main():
     port = 8501
 
     print("=" * 80, flush=True)
-    print("        HM AI 4.0 -- WORLDWIDE REMOTE MOBILE ACCESS LAUNCHER", flush=True)
+    print("        HM Algo 2.0 -- WORLDWIDE REMOTE MOBILE ACCESS LAUNCHER", flush=True)
     print("=" * 80, flush=True)
     print(f"\n1. PERMANENT LOCAL WI-FI ACCESS (Never changes at home):", flush=True)
     print(f"   ->  http://{local_ip}:{port}", flush=True)
@@ -65,7 +65,7 @@ def main():
             print("\n" + "*" * 80, flush=True)
             print("  LIVE AUTHENTICATED MOBILE HTTPS URL (Access anywhere globally):", flush=True)
             print(f"  ->  {tunnel_url}", flush=True)
-            print("  Log in with your configured JARVIS credentials (set JARVIS_ADMIN_PASS).", flush=True)
+            print("  Log in with your configured HM Algo 2.0 credentials (set JARVIS_ADMIN_PASS).", flush=True)
             print("*" * 80 + "\n", flush=True)
             print("  Tunnel is running in background. Press Ctrl+C to close.", flush=True)
             proc.wait()

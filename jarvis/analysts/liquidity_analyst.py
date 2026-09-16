@@ -1,5 +1,5 @@
 """
-JARVIS AI 3.0 — Liquidity & Smart Money Sweep Analyst Agent.
+HM Algo 2.0 — Liquidity & Smart Money Sweep Analyst Agent.
 Answers: Where is liquidity? Was liquidity swept? Is this a genuine breakout or a stop-run trap?
 """
 import time

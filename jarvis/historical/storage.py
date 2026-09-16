@@ -1,5 +1,5 @@
 """
-JARVIS AI 4.0 — Local Historical Data Lake Storage Engine.
+HM Algo 2.0 — Local Historical Data Lake Storage Engine.
 Handles atomic Parquet writes, schema normalization, versioned files,
 SHA256 checksum generation, and fast filtered reads.
 """

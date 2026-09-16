@@ -1,5 +1,5 @@
 """
-JARVIS AI 3.0 — AI Stock Screener & Intelligence Service
+HM Algo 2.0 — AI Stock Screener & Intelligence Service
 Unified service orchestrating stock universe scans, filtering, search indexing,
 breakout probability ranking, and REST API dispatching.
 """

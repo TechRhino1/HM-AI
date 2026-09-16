@@ -1,5 +1,5 @@
 """
-HM AI 4.0 — Primary Autonomous System Launcher (HM_start.py).
+HM Algo 2.0 — Primary Autonomous System Launcher (HM_start.py).
 Launches:
  1. Autonomous Multi-Asset Trading Engine & Quality Gate Decision Matrix
  2. Remote Access Web Terminal & REST API Server (Port 8501)
@@ -277,7 +277,7 @@ def hm_start(mode: str = "live", port: int = 8501, host: str = "127.0.0.1", trad
     actual_mode = orchestrator.mode.upper()
 
     print("=" * 95, flush=True)
-    print("                 HM AI 4.0 — INSTITUTIONAL QUANTITATIVE TRADING PLATFORM", flush=True)
+    print("                 HM Algo 2.0 — INSTITUTIONAL QUANTITATIVE TRADING PLATFORM", flush=True)
     print("=" * 95, flush=True)
     print(f" -> Execution Mode             : {actual_mode}", flush=True)
     print(f" -> Trade Style                : {trade_style.upper()}", flush=True)
@@ -299,7 +299,7 @@ def hm_start(mode: str = "live", port: int = 8501, host: str = "127.0.0.1", trad
             run_web_server(port=port, host=host, mt5_client=orchestrator.mt5_client,
                            orchestrator=orchestrator)
         except KeyboardInterrupt:
-            logger.info("Shutting down HM AI 4.0 trading platform...")
+            logger.info("Shutting down HM Algo 2.0 trading platform...")
             orchestrator.stop()
             for proc_key in ("serveo_proc", "cloudflare_proc"):
                 proc = _TUNNEL_STATE.get(proc_key)
@@ -308,7 +308,7 @@ def hm_start(mode: str = "live", port: int = 8501, host: str = "127.0.0.1", trad
                         proc.terminate()
                     except Exception:
                         pass
-            print("\n[SHUTDOWN] HM AI 4.0 stopped cleanly.", flush=True)
+            print("\n[SHUTDOWN] HM Algo 2.0 stopped cleanly.", flush=True)
             break
         except Exception as e:
             logger.error(f"Web server encountered error: {e}. Auto-restarting in 3s...", exc_info=True)

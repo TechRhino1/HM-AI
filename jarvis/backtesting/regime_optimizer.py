@@ -1,5 +1,5 @@
 """
-JARVIS AI 5.2 — Regime-Conditioned Profit Optimiser ("max profit in any condition").
+HM Algo 2.0 — Regime-Conditioned Profit Optimiser ("max profit in any condition").
 
 WHY THIS MODULE EXISTS
 ----------------------

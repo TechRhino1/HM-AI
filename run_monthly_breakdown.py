@@ -1,5 +1,5 @@
 """
-JARVIS AI 4.0 — Month-by-Month Multi-Asset Backtest Performance Suite.
+HM Algo 2.0 — Month-by-Month Multi-Asset Backtest Performance Suite.
 Evaluates performance across 6 individual monthly partitions (720 H1 bars per month) for XAUUSD & BTCUSD.
 """
 import sys
@@ -19,7 +19,7 @@ def run_monthly_breakdown(symbols: list = ["XAUUSD", "BTCUSD"], bars_per_month: 
     month_names = ["Month 1 (Mar)", "Month 2 (Apr)", "Month 3 (May)", "Month 4 (Jun)", "Month 5 (Jul)", "Month 6 (Aug)"]
 
     print("=" * 95)
-    print("          JARVIS AI 4.0 — MONTH-BY-MONTH HISTORICAL PERFORMANCE BREAKDOWN")
+    print("          HM Algo 2.0 — MONTH-BY-MONTH HISTORICAL PERFORMANCE BREAKDOWN")
     print("=" * 95)
 
     for symbol in symbols:

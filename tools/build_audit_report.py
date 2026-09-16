@@ -177,7 +177,7 @@ def build_html() -> str:
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>HM-AI / JARVIS — Trade Plan Profitability Audit</title>
+<title>HM-AI / HM Algo 2.0 — Trade Plan Profitability Audit</title>
 <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
 <style>
   :root {{
@@ -229,7 +229,7 @@ def build_html() -> str:
 <body>
 <div class="wrap">
 
-<h1>Trade Plan Profitability Audit — HM-AI / JARVIS</h1>
+<h1>Trade Plan Profitability Audit — HM-AI / HM Algo 2.0</h1>
 <div class="sub">
   Generated {generated} · Source: local replay of <code>data/market/real/&lt;SYM&gt;/*_183d.parquet</code>
   (MT5 real bars, 2026-03-15 → 2026-09-11/13) through

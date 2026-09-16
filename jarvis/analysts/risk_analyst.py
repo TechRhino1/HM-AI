@@ -1,5 +1,5 @@
 """
-JARVIS AI 3.0 — Risk & Reward Feasibility Analyst Agent.
+HM Algo 2.0 — Risk & Reward Feasibility Analyst Agent.
 Answers: Is the risk-to-reward ratio viable? What is the expected loss if invalidated? What is the baseline viability?
 """
 import time

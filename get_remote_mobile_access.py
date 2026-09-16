@@ -1,6 +1,6 @@
 """
-JARVIS AI 4.0 — Remote Mobile Access Link & Tunnel Helper.
-Displays live public HTTPS URLs to connect to HM AI 4.0 Dashboard from any smartphone globally.
+HM Algo 2.0 — Remote Mobile Access Link & Tunnel Helper.
+Displays live public HTTPS URLs to connect to HM Algo 2.0 Dashboard from any smartphone globally.
 """
 import urllib.request
 import json
@@ -22,13 +22,13 @@ def main():
     primary_url = "https://hm2026.serveousercontent.com"
 
     print("=" * 80)
-    print("      HM AI 4.0 -- WORLDWIDE REMOTE MOBILE ACCESS INSTRUCTIONS")
+    print("      HM Algo 2.0 -- WORLDWIDE REMOTE MOBILE ACCESS INSTRUCTIONS")
     print("=" * 80)
     print("\n1. Open this URL on your mobile phone browser from ANYWHERE in the world:\n")
     print(f"   URL: {primary_url}")
     print("\n2. If prompted for Endpoint IP / Tunnel Password:")
     print(f"   Enter IP: {public_ip}")
-    print("\n3. Credentials to log into HM AI 4.0 Dashboard on mobile:")
+    print("\n3. Credentials to log into HM Algo 2.0 Dashboard on mobile:")
     print("   Username: admin")
     print("   Password: hm2026admin (or hm2026)")
     print("=" * 80)

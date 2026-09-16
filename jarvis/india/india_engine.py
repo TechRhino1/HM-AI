@@ -1,5 +1,5 @@
 """
-JARVIS AI 3.0 — India Technical Intelligence & CPR/Camarilla Structure Engine
+HM Algo 2.0 — India Technical Intelligence & CPR/Camarilla Structure Engine
 High-precision mathematical analysis of Indian equities & indices using Central Pivot Range (CPR),
 Camarilla Breakouts, VWAP standard deviation corridors, Multi-Timeframe Alignment, and Monte Carlo statistical forecasting.
 """

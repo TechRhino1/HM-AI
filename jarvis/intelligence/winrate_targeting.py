@@ -1,5 +1,5 @@
 """
-JARVIS AI 5.0 — Per-Symbol Win-Rate Targeting.
+HM Algo 2.0 — Per-Symbol Win-Rate Targeting.
 
 THE MATHEMATICS THAT DRIVES THIS DESIGN
 ---------------------------------------

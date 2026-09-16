@@ -1,5 +1,5 @@
 """
-JARVIS AI 3.0 — Black-Scholes Pricing & Option Greeks Engine
+HM Algo 2.0 — Black-Scholes Pricing & Option Greeks Engine
 Computes analytical Greeks (Delta, Gamma, Theta, Vega, Rho), Implied Volatility (IV),
 Max Pain Strike, Put-Call Ratio (PCR), and IV Percentiles for Indian F&O contracts.
 """

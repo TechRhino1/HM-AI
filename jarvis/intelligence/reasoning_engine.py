@@ -1,5 +1,5 @@
 """
-JARVIS AI 3.0 — Explainable Reasoning Engine.
+HM Algo 2.0 — Explainable Reasoning Engine.
 Generates structured natural-language rationales and decision explainability audit records.
 """
 from typing import Dict, List, Any
@@ -12,7 +12,7 @@ class ReasoningEngine:
     def generate_explanation(decision: DecisionObject) -> str:
         d = decision
         lines = [
-            f"=== JARVIS 3.0 DECISION EXPLANATION [{d.symbol}] ===",
+            f"=== HM Algo 2.0 DECISION EXPLANATION [{d.symbol}] ===",
             f"ACTION: {d.decision} ({d.bias}) | STRATEGY: {d.strategy}",
             f"CALIBRATED WIN PROBABILITY: {d.probabilities.get(d.bias.lower(), 0.5)*100:.1f}% | EXPECTED VALUE: ${d.expected_value:.2f}",
             f"REGIME: {d.regime.primary_regime.value} (Confidence: {d.regime.confidence*100:.0f}%)",

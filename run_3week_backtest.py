@@ -1,5 +1,5 @@
 """
-JARVIS AI 4.0 — 3-Week Live MT5 Backtest (All Primary Symbols)
+HM Algo 2.0 — 3-Week Live MT5 Backtest (All Primary Symbols)
 Downloads 3 weeks of real H1 data from MT5, runs event-driven backtest,
 and produces a comprehensive performance report.
 """
@@ -87,7 +87,7 @@ def resolve_broker_symbol(mt5_instance, canonical_name: str) -> str:
 
 def run_3week_backtest():
     print("=" * 125)
-    print("          JARVIS AI 4.0 — 3-WEEK REAL MT5 LIVE DATA BACKTEST (504 H1 BARS)")
+    print("          HM Algo 2.0 — 3-WEEK REAL MT5 LIVE DATA BACKTEST (504 H1 BARS)")
     print("=" * 125)
 
     mt5_active = mt5.initialize()

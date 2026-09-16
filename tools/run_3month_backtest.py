@@ -121,7 +121,7 @@ def main() -> int:
         return 2
 
     print("=" * 108)
-    print(f"JARVIS AI — 3-MONTH BACKTEST ON REAL MT5 DATA   "
+    print(f"HM Algo 2.0 — 3-MONTH BACKTEST ON REAL MT5 DATA   "
           f"({'UNCALIBRATED BASELINE' if args.legacy else 'CALIBRATED PROFILES'})")
     print("=" * 108)
 
@@ -299,7 +299,7 @@ def render_markdown(report: dict, profiles: dict, legacy: bool) -> str:
     L: list[str] = []
     A = L.append
 
-    A("# JARVIS AI — 3-Month Backtest on Real MT5 Data")
+    A("# HM Algo 2.0 — 3-Month Backtest on Real MT5 Data")
     A("")
     A(f"**Mode:** {'uncalibrated baseline (legacy 29-gate stack)' if legacy else 'calibrated per-symbol win-rate profiles'}  ")
     A(f"**Data:** {meta['data_source']}  ")

@@ -1,5 +1,5 @@
 """
-JARVIS AI 4.0 — Fractional Differentiation Feature Transformer Module.
+HM Algo 2.0 — Fractional Differentiation Feature Transformer Module.
 Implements Marcos López de Prado's Fixed-Width Window Fractional Differentiation (0 < d < 1)
 to achieve stationarity (ADF test p < 0.05) while preserving maximum memory / long-range dependence in feature signals.
 """

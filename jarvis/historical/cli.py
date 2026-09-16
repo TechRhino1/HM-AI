@@ -1,5 +1,5 @@
 """
-JARVIS AI 4.0 — Historical Market Data Engine Operator CLI.
+HM Algo 2.0 — Historical Market Data Engine Operator CLI.
 Provides command-line commands for data status, inventory, download, validation, and replay.
 """
 import sys
@@ -17,7 +17,7 @@ from jarvis.historical.replay_engine import MarketReplayEngine, RealisticExecuti
 def print_status():
     stats = HISTORICAL_DATA_ENGINE.get_engine_stats()
     print("\n" + "=" * 70)
-    print("      JARVIS AI 4.0 - HISTORICAL MARKET DATA REPOSITORY STATUS")
+    print("      HM Algo 2.0 - HISTORICAL MARKET DATA REPOSITORY STATUS")
     print("=" * 70)
     print(f"Broker Server         : {stats.get('broker_server')}")
     print(f"Database Path         : {stats.get('db_path')}")
@@ -32,7 +32,7 @@ def print_status():
 def print_inventory(symbol=None, timeframe=None):
     datasets = HISTORICAL_DATA_ENGINE.list_datasets(symbol=symbol, timeframe=timeframe)
     print("\n" + "=" * 105)
-    print("                        JARVIS AI 4.0 - HISTORICAL DATA INVENTORY")
+    print("                        HM Algo 2.0 - HISTORICAL DATA INVENTORY")
     print("=" * 105)
     if not datasets:
         print("No datasets found in repository.")
@@ -108,7 +108,7 @@ def run_replay(symbol, timeframe, bars):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="JARVIS AI 4.0 Historical Market Data Engine CLI")
+    parser = argparse.ArgumentParser(description="HM Algo 2.0 Historical Market Data Engine CLI")
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
 
     # status

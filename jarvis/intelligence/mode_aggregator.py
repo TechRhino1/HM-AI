@@ -1,5 +1,5 @@
 """
-JARVIS AI 5.2 — Cross-Style Consensus Aggregator.
+HM Algo 2.0 — Cross-Style Consensus Aggregator.
 
 WHY THIS MODULE EXISTS
 ----------------------

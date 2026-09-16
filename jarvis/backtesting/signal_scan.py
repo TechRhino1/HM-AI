@@ -1,5 +1,5 @@
 """
-JARVIS AI 5.0 — Signal Scanner.
+HM Algo 2.0 — Signal Scanner.
 
 The live decision pipeline is *extremely* selective: on three months of real H1
 EURUSD it evaluated ~1,600 bars and executed 4 trades. Four samples cannot

@@ -1,5 +1,5 @@
 """
-JARVIS AI 4.0 — Master Confluence Engine.
+HM Algo 2.0 — Master Confluence Engine.
 Synthesizes PROVEN combinations from top trading masters — the highest win-rate
 stacks documented over 100 years, verified by backtests and audited track records.
 Sources researched (2026):

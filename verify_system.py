@@ -21,7 +21,7 @@ from jarvis.data.symbol_registry import resolve as resolve_symbol
 
 def run_end_to_end_system_verification():
     print("================================================================================")
-    print("           JARVIS AI 4.0 MT5 END-TO-END SYSTEM DIAGNOSTICS & VERIFICATION      ")
+    print("           HM Algo 2.0 MT5 END-TO-END SYSTEM DIAGNOSTICS & VERIFICATION      ")
     print("================================================================================")
     
     diagnostics = {}

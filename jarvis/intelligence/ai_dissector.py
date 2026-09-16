@@ -1,5 +1,5 @@
 """
-JARVIS AI 4.0 — Real-Time AI Dissection Engine.
+HM Algo 2.0 — Real-Time AI Dissection Engine.
 Breaks a trade setup into 7 independent pillars, scores each, and returns
 a dissection confidence that directly predicts win probability.
 Used to filter low-quality setups before execution — the core win-rate booster.

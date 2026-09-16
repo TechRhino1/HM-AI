@@ -1,5 +1,5 @@
 """
-JARVIS AI 3.0 — Advanced Institutional Market Structure Engine.
+HM Algo 2.0 — Advanced Institutional Market Structure Engine.
 Detects Swing Pivots (HH, HL, LH, LL), BOS, CHoCH, Order Blocks, Fair Value Gaps (FVG), and Premium/Discount Zones.
 """
 import numpy as np

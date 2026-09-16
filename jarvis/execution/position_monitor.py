@@ -1,5 +1,5 @@
 """
-JARVIS AI 4.0 — Continuous Position Monitor Engine.
+HM Algo 2.0 — Continuous Position Monitor Engine.
 
 A dedicated background thread that independently monitors and dynamically manages
 EVERY open position (AI-opened and manually opened) at a 2-second resolution,
@@ -52,7 +52,7 @@ PARTIAL_CLOSE_PCT          = 0.50   # 50% scale out at partial target
 REGIME_INVALIDATION_CONFIDENCE = 0.70   # Regime confidence required to act
 FLOAT_DD_EMERGENCY_PCT         = 5.0    # % of equity — triggers emergency brake
 
-# Magic number used by JARVIS AI orders (manual trades have different magic)
+# Magic number used by HM Algo 2.0 orders (manual trades have different magic)
 JARVIS_MAGIC_NUMBER        = 888999
 
 # Spread blowout: pause modifications if spread > 2× typical
@@ -838,7 +838,7 @@ class PositionMonitorEngine:
     # ─── Helpers ───────────────────────────────────────────────────────────────
 
     def _is_manual_trade(self, pos: PositionSnapshot) -> bool:
-        """Identifies trades NOT placed by JARVIS AI (manual dashboard or MT5 terminal)."""
+        """Identifies trades NOT placed by HM Algo 2.0 (manual dashboard or MT5 terminal)."""
         is_wrong_magic = (pos.magic != JARVIS_MAGIC_NUMBER)
         has_manual_comment = any(
             tag in (pos.comment or "").upper()

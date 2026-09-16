@@ -1,5 +1,5 @@
 /* ===========================================================================
-   JARVIS — Trading Terminal controller (dashboard.js)
+   HM Algo 2.0 — Trading Terminal controller (dashboard.js)
 
    DESIGN NOTES
    ------------

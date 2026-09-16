@@ -1,5 +1,5 @@
 """
-JARVIS AI 4.0 — Universal Master Opportunity Arbiter & Autonomous Trade Selector.
+HM Algo 2.0 — Universal Master Opportunity Arbiter & Autonomous Trade Selector.
 Evaluates, scores, and ranks trading opportunities across multi-asset universes and multiple trading styles
 (SWING, DAY_TRADING, SCALP) using Machine Learning probability, Expected Value (EV), Master Confluence,
 Adversarial Threat Penalty, and Market Regime dynamic multipliers.
@@ -68,7 +68,7 @@ class CandidateOpportunity:
         }
 
     def to_radar_item(self) -> Dict[str, Any]:
-        """Converts candidate opportunity to standard JARVIS state radar dictionary."""
+        """Converts candidate opportunity to standard HM Algo 2.0 state radar dictionary."""
         d = self.decision_obj
         ctx = self.context
         

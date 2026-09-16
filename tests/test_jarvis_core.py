@@ -1,5 +1,5 @@
 """
-JARVIS AI 4.0 — Core System Unit & Integration Test Suite.
+HM Algo 2.0 — Core System Unit & Integration Test Suite.
 Verifies all 19 bug fixes and architectural guarantees.
 """
 import unittest

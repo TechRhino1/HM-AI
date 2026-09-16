@@ -1,5 +1,5 @@
 """
-JARVIS AI 3.0 — Strict MT5 State Synchronization & Reconciliation Engine.
+HM Algo 2.0 — Strict MT5 State Synchronization & Reconciliation Engine.
 Guarantees real-time consistency between broker terminal state and internal application memory.
 """
 import time

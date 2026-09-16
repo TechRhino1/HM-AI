@@ -1,9 +1,9 @@
 ====================================================================================================
-               HM AI 4.0 / JARVIS AI TRADING ARCHITECTURE
+               HM Algo 2.0 TRADING ARCHITECTURE
                COMPREHENSIVE MASTER PROJECT DOCUMENTATION
 ====================================================================================================
 Document Version : 4.0.0 (Production Release)
-System Codename  : HM-AI-2026 / JARVIS Autonomous Quantitative Trading Platform
+System Codename  : HM-AI-2026 / HM Algo 2.0 Autonomous Quantitative Trading Platform
 Architecture     : Multi-Agent Parallel Intelligence, SMC/ICT/Wyckoff Matrix, Online ML & Adaptive Risk
 Classification   : Institutional Quantitative Execution Engine
 Release Date     : August 2026
@@ -29,7 +29,7 @@ TABLE OF CONTENTS
 ====================================================================================================
 1. SYSTEM OVERVIEW & HIGH-LEVEL ARCHITECTURE
 ====================================================================================================
-HM AI 4.0 (JARVIS) is a state-of-the-art, institutional-grade autonomous quantitative trading system
+HM Algo 2.0 (HM Algo 2.0) is a state-of-the-art, institutional-grade autonomous quantitative trading system
 engineered for high-precision algorithmic execution across global markets: Forex, Commodities (Gold/Oil),
 Cryptocurrencies, US Equities, and Indian Equities / F&O Options.
 
@@ -108,7 +108,7 @@ HM-AI_2026/
 │   │   └── parallel_runner.py      # ThreadPoolExecutor Concurrent Dispatcher
 │   ├── api/                        # Web Terminal & REST API Infrastructure
 │   │   ├── server.py               # HTTP/SSE Telemetry, Rates, Radar & Action Server
-│   │   ├── copilot.py              # JARVIS AI Copilot Reasoning & Natural Language Engine
+│   │   ├── copilot.py              # HM Algo 2.0 Copilot Reasoning & Natural Language Engine
 │   │   └── remote_auth.py          # Secure JWT/Session Token & Role-Based Auth Engine
 │   ├── application/                # Lifecycle, State & Orchestration
 │   │   ├── orchestrator.py         # Master System Orchestrator & Watchdog Supervisor
@@ -253,7 +253,7 @@ HM-AI_2026/
 ====================================================================================================
 3. AGENTS, SUBAGENTS & PARALLEL ANALYST CLUSTER
 ====================================================================================================
-HM AI 4.0 utilizes a multi-agent distributed intelligence model. Execution is divided among
+HM Algo 2.0 utilizes a multi-agent distributed intelligence model. Execution is divided among
 specialized autonomous agents and a parallel cluster of domain experts.
 
 3.1 Master System Agents:
@@ -304,7 +304,7 @@ with a strict 2.0-second timeout ceiling via `TimeoutGuard`.
 ====================================================================================================
 4. MULTI-ASSET STRATEGIES & SMC / ICT / WYCKOFF FRAMEWORK
 ====================================================================================================
-HM AI 4.0 integrates 100 years of proven market theory into a unified algorithmic framework:
+HM Algo 2.0 integrates 100 years of proven market theory into a unified algorithmic framework:
 
 4.1 Smart Money Concepts (SMC) & ICT Core Framework:
   - Fair Value Gaps (FVG): Detects 3-candle imbalance zones (Bullish FVG: Low of candle 3 > High of candle 1;
@@ -536,7 +536,7 @@ Lightweight, thread-safe asynchronous server hosted on Port 8501:
   - Trading Actions (`/api/action/manual_trade`, `/api/action/close_position`, `/api/action/close_all_positions`):
     Protected endpoints for manual execution and emergency risk actions.
 
-11.2 JARVIS AI Copilot (`jarvis/api/copilot.py`):
+11.2 HM Algo 2.0 Copilot (`jarvis/api/copilot.py`):
 Interactive natural language trading assistant (`/api/copilot/ask`):
   - Understands queries regarding account status, open risk, market regime, trade explanations, and strategy logic.
   - Formulates institutional answers using real-time telemetry state and market context.
@@ -700,5 +700,5 @@ Create a `.env` file in root for production settings:
   ```
 
 ====================================================================================================
-               END OF JARVIS COMPLETE MASTER PROJECT DOCUMENTATION
+               END OF HM Algo 2.0 COMPLETE MASTER PROJECT DOCUMENTATION
 ====================================================================================================

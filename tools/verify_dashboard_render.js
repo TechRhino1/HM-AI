@@ -1,5 +1,5 @@
 /* ===========================================================================
-   Headless render check for the JARVIS dashboard (tools/verify_dashboard_render.js)
+   Headless render check for the HM Algo 2.0 dashboard (tools/verify_dashboard_render.js)
 
    WHY THIS EXISTS
    ---------------

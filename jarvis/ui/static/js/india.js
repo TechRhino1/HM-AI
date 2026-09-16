@@ -1,5 +1,5 @@
 /**
- * JARVIS AI 3.0 — India Markets (NSE/BSE & F&O Intelligence) Client Controller
+ * HM Algo 2.0 — India Markets (NSE/BSE & F&O Intelligence) Client Controller
  */
 
 (function () {

@@ -1,5 +1,5 @@
 /* ===========================================================================
-   Layout / responsive verifier for the JARVIS UI (tools/verify_ui_layout.js)
+   Layout / responsive verifier for the HM Algo 2.0 UI (tools/verify_ui_layout.js)
 
    WHY THIS EXISTS
    ---------------

@@ -1,5 +1,5 @@
 ======================================================================================================================
-JARVIS 5.1 — EXIT GEOMETRY COMPARISON  (walk-forward purged OOS, ranked on expectancy/PF/DD)
+HM Algo 2.0 — EXIT GEOMETRY COMPARISON  (walk-forward purged OOS, ranked on expectancy/PF/DD)
 gates: min_oos_trades=30  min_oos_pf=1.05  max_oos_dd=15.0%  folds=4
 ======================================================================================================================
 

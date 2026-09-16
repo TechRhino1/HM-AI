@@ -1,5 +1,5 @@
 """
-JARVIS AI 4.0 — Unified Backtest & Research Historical Market Data Engine.
+HM Algo 2.0 — Unified Backtest & Research Historical Market Data Engine.
 Provides a single, institutional API for querying, downloading, validating,
 and versioning historical market data across all strategies, backtests, and replay sessions.
 """
@@ -20,7 +20,7 @@ logger = logging.getLogger("JARVIS_HistoricalEngine")
 
 class HistoricalDataEngine:
     """
-    Unified institutional historical market data engine for JARVIS 4.0.
+    Unified institutional historical market data engine for HM Algo 2.0.
     Ensures data is downloaded once from MT5, validated, versioned, and reused everywhere.
     """
 

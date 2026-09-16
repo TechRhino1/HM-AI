@@ -1,5 +1,5 @@
 """
-JARVIS AI 3.0 — High-Performance Telemetry, Trading & Web Terminal Server.
+HM Algo 2.0 — High-Performance Telemetry, Trading & Web Terminal Server.
 Provides REST, JSON streaming, manual trading execution, position management, news feed, and static assets.
 """
 import os
@@ -1016,7 +1016,7 @@ def start_server(host: str = "127.0.0.1", port: int = 8501, mt5_client: Optional
     ThreadingHTTPServer.allow_reuse_address = True
     server = ThreadingHTTPServer((host, port), JarvisRequestHandler)
     JarvisRequestHandler.start_background_syncer()
-    logger.info(f"JARVIS AI 3.0 Web Terminal Server running at http://{host}:{port}")
+    logger.info(f"HM Algo 2.0 Web Terminal Server running at http://{host}:{port}")
     return server
 
 def run_web_server(port: int = 8501, host: str = "127.0.0.1", mt5_client: Optional[MT5Client] = None,
@@ -1030,7 +1030,7 @@ def run_web_server(port: int = 8501, host: str = "127.0.0.1", mt5_client: Option
     ThreadingHTTPServer.allow_reuse_address = True
     server = ThreadingHTTPServer((host, port), JarvisRequestHandler)
     JarvisRequestHandler.start_background_syncer()
-    logger.info(f"JARVIS AI 3.0 Web Terminal Server running at http://{host}:{port}")
+    logger.info(f"HM Algo 2.0 Web Terminal Server running at http://{host}:{port}")
     try:
         server.serve_forever()
     except Exception as e:

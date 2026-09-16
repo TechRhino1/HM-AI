@@ -1,5 +1,5 @@
 """
-JARVIS AI 3.0 — Parallel Analyst Cluster Orchestrator.
+HM Algo 2.0 — Parallel Analyst Cluster Orchestrator.
 Dispatches all specialized analyst agents concurrently via asyncio / ThreadPool with timeout protection.
 """
 import time
