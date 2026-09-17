@@ -646,6 +646,16 @@ in a way that no error message explains.
   an early weekend return was added above it, and `max(0, ...)` clamped a difference that is always
   positive inside that branch. Both are harmless dead code, not missing coverage. Ask "can any input
   reach the mutated line and still differ?" before writing a test to chase it.
+* **A name bound inside one `try` and read by the next turns one exception into a silent total
+  failure.** `master_confluence.score()` assigned `reg`/`st`/`liq` inside its first `try`, then read
+  them in four later blocks that each had `except Exception: <component> = 0`. A `regime` of `None`
+  raised, the names stayed unbound, and every following block died with a `NameError` its own handler
+  swallowed → **0/100 → WEAK → the decision gate blocked the order, with nothing logged**. Assign
+  anything shared *before* the try blocks, and never let `except: x = 0` be silent when the value is
+  a gate.
+* **Derive expected scores from the source, not from the docstring's headline numbers.** Six of my
+  first-run `master_confluence` failures were my own arithmetic: I missed the `elif adx >= 15:
+  trend += 2` ladder and the `min(20, ...)` cap that made two bonuses invisible.
 * **A docstring is a claim — check it against the code, and check `git log --diff-filter=A`.**
   `jarvis/risk/hrp_allocator.py` advertised Hierarchical Risk Parity and shipped inverse-variance
   weighting; the *adding* commit was already a 48-line stub and its one HRP-specific helper,
