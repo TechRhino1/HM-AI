@@ -100,6 +100,19 @@ into 45s navigation timeouts, which read exactly like a regression.
   telemetry/radar/news/candles at boot but registers history only as `setInterval(fetchHistory, 5000)`,
   so a no-op `setInterval` leaves the history table empty and every assertion about it passes vacuously.
   Capture the intervals and tick them.
+* **Escaping an inline handler needs the JS layer escaped FIRST — HTML entities are decoded before the JS
+  runs.** `escapeHtml()` turns `'` into `&#39;`, which looks like it protects
+  `onclick="window.setSymbol('<symbol>')"`. It does not: the parser decodes `&#39;` back to `'` before the
+  JS is parsed, so the string still closes. A value inside an inline handler is a JS string inside an HTML
+  attribute and needs both layers, JS first —
+  `escapeHtml(s.replace(/\\/g,"\\\\").replace(/'/g,"\\'"))` (`escAttr()` in `terminal.js`). Applied to all
+  three inline-handler sites plus every server string reaching `innerHTML`: **3 → 40 call sites**. Verify
+  with a **sweep**, not by eye: list every `${…}` inside an `.innerHTML` assignment, exclude those already
+  wrapped in `escapeHtml(`/`escAttr(`/`Number(`/`formatPrice(`, expect 0 (an unfiltered sweep reported 77
+  and was useless — most hits were `textContent`, `alert()` and `fetch()` strings, none of which parse
+  HTML). When measuring the fix, read the **raw `innerHTML`**, not `deepHtml()` — the latter re-adds
+  decoded `_text` and cannot tell a parsed tag from text that looks like one — and count **unescaped**
+  quotes, because the payload text still appears after escaping, preceded by a backslash.
 
 ## Signal quality
 

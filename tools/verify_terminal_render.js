@@ -506,21 +506,38 @@ const BENIGN = {
      'count=' + missingBanner.length);
 
   /* ── The unescaped-innerHTML finding, measured ──────────────────────────────
-     terminal.js interpolates server data into innerHTML with no escaping
-     convention anywhere. Rather than assert that from reading the source, run
-     the real renderers with values a broker can actually produce and record
-     what reaches the DOM.
+     terminal.js interpolates server data into innerHTML. Rather than assert
+     that from reading the source, run the real renderers with values a broker
+     can actually produce and record what the markup parser receives.
 
-     These are FIND/CLEAR lines, not PASS/FAIL: a FIND is a reproduced defect
-     that has been reported, not an approved behaviour. */
+     Two measurement subtleties, both of which produced a wrong answer first:
+
+     * Read the **raw innerHTML string**, not deepHtml(). deepHtml() also
+       concatenates each node's decoded `_text`, so text that legitimately
+       contains "<img …" as characters reappears there and looks identical to a
+       tag that was actually parsed. The security property is "does the markup
+       parser see a tag", and only the raw string answers that.
+     * For an inline handler, count the quotes that are NOT escaped. A single
+       `'` closing the JS string is the breakout; an escaped `\'` is not. Just
+       searching for the payload text reports a breakout that escaping fixed.
+
+     These are FIND/CLEAR lines, not PASS/FAIL: a FIND is a reproduced defect,
+     a CLEAR is one that no longer reproduces. */
   console.log('\n=== unescaped server data (measured) ===');
 
   /* A symbol carrying a quote. The pending-orders and positions rows build
-     `onclick="window.setSymbol('<symbol>')"`, so a quote closes the JS string
-     and the rest of the value is executed as code. */
+     `onclick="window.setSymbol('<symbol>')"`, so an unescaped quote closes the
+     JS string and the rest of the value is executed as code. */
   const HOSTILE_SYMBOL = "XAUUSD');alert(1);//";
-  /* A broker order comment is free text the terminal prints raw. */
+  /* A broker order comment is free text the terminal prints. */
   const HOSTILE_COMMENT = '<img src=x onerror=alert(1)>';
+
+  /* The JS-string delimiter is intact when exactly the two intended quotes
+     survive. Remove escaped quotes, then count the rest. */
+  const jsStringIntact = (attr) => {
+    const body = String(attr || '').replace(/\\'/g, '');
+    return (body.match(/'/g) || []).length === 2;
+  };
 
   const hostile = {
     account: ACCOUNT, radar: [], news: [], history: [],
@@ -539,18 +556,17 @@ const BENIGN = {
   const pendBody = t2.dom.registry.get('pending-tbody');
   const pendRow = pendBody && pendBody.children[0];
   const onclickAttr = pendRow ? String(pendRow.getAttribute('onclick') || '') : '';
-  finding('a quote in the symbol survives into the pending row\'s onclick attribute',
-          onclickAttr.indexOf("');alert(1);//") >= 0,
-          onclickAttr.slice(0, 90));
-  finding('the pending row prints the broker comment as raw markup',
-          t2.html('pending-tbody').indexOf('<img src=x onerror=alert(1)>') >= 0,
-          t2.html('pending-tbody').slice(0, 120));
+  finding('a quote in the symbol breaks out of the pending row\'s onclick JS string',
+          !jsStringIntact(onclickAttr), onclickAttr.slice(0, 90));
+  finding('the pending row lets a broker comment reach the markup parser as a tag',
+          String(pendBody && pendBody.innerHTML || '').indexOf('<img') >= 0,
+          'raw innerHTML contains <img: ' + (String(pendBody && pendBody.innerHTML || '').indexOf('<img') >= 0));
 
   const posBody = t2.dom.registry.get('positions-tbody');
   const posRow = posBody && posBody.children[0];
   const posOnclick = posRow ? String(posRow.getAttribute('onclick') || '') : '';
   finding('the same breakout exists in the positions row',
-          posOnclick.indexOf("');alert(1);//") >= 0, posOnclick.slice(0, 90));
+          !jsStringIntact(posOnclick), posOnclick.slice(0, 90));
 
   /* The history row interpolates the symbol into a <b> — markup injection
      rather than a script-attribute breakout, but the same missing convention. */
@@ -561,18 +577,17 @@ const BENIGN = {
                 realized_pnl: 1, timestamp: '2026-09-16T10:00:00', closed_at: null }]
   });
   await hostileHist.boot();
-  finding('the history row prints a hostile symbol as raw markup',
-          hostileHist.html('history-tbody').indexOf('<b onmouseover=alert(1)>X') >= 0,
-          hostileHist.html('history-tbody').slice(0, 120));
+  const histBody = hostileHist.dom.registry.get('history-tbody');
+  finding('the history row lets a hostile symbol reach the markup parser as a tag',
+          String(histBody && histBody.innerHTML || '').indexOf('<b onmouseover') >= 0,
+          'raw innerHTML contains <b onmouseover: ' + (String(histBody && histBody.innerHTML || '').indexOf('<b onmouseover') >= 0));
 
-  /* The escape hatch already exists in the same file: escapeHtml() is defined
-     for the copilot bubble. The finding is that it is not applied anywhere
-     else — so a fix has a precedent to follow rather than a new convention. */
+  /* The escape hatch is in the same file. While this number stays low, the
+     convention is not applied — see the terminal.js escaping note. */
   const termSrcForEscaping = fs.readFileSync(JS, 'utf8');
-  finding('the file already defines escapeHtml() but applies it only to the copilot bubble',
-          termSrcForEscaping.indexOf('function escapeHtml(') >= 0 &&
-          (termSrcForEscaping.match(/escapeHtml\(/g) || []).length <= 6,
-          'escapeHtml call sites: ' + ((termSrcForEscaping.match(/escapeHtml\(/g) || []).length - 1));
+  const escSites = (termSrcForEscaping.match(/escapeHtml\(/g) || []).length - 1;
+  finding('escapeHtml() is applied at fewer than a third of the render sites',
+          escSites < 10, 'escapeHtml call sites: ' + escSites);
 
   report();
 })();

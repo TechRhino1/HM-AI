@@ -70,6 +70,23 @@
             .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
     }
 
+    /* A value interpolated into an inline handler such as
+       `onclick="window.setSymbol('<symbol>')"` sits inside a **JS string inside
+       an HTML attribute**, so both layers have to be escaped — and in that
+       order.
+
+       escapeHtml() alone is NOT enough here, which is the non-obvious part: the
+       HTML parser decodes entities *before* the JS is parsed, so `&#39;` arrives
+       at the JS layer as a plain `'` and closes the string anyway. The value is
+       therefore escaped for the JS string first (backslash, then quote) and for
+       the attribute second. For a well-formed symbol — [A-Za-z0-9._#-] — the
+       result is byte-identical to the unescaped form, so this changes nothing
+       except what it is meant to change. */
+    function escAttr(value) {
+        const s = String(value === null || value === undefined ? "" : value);
+        return escapeHtml(s.replace(/\\/g, "\\\\").replace(/'/g, "\\'"));
+    }
+
     /* Trimmed-down markdown: **bold**, "- " bullets and newlines. Mirrors
        `copilotHtml` in dashboard.js. The inline pass is shared with the bullet
        branch on purpose — nearly every bullet the copilot writes wraps its label
@@ -1105,15 +1122,15 @@
 
             html += `<tr>
                 <td style="color:var(--text-dim);">#${ticketVal}</td>
-                <td><b style="color:#ffffff;">${t.symbol}</b></td>
-                <td><span class="badge ${sideClass}" style="font-size:8.5px; padding:1px 5px;">${t.action || t.type}</span></td>
+                <td><b style="color:#ffffff;">${escapeHtml(t.symbol)}</b></td>
+                <td><span class="badge ${sideClass}" style="font-size:8.5px; padding:1px 5px;">${escapeHtml(t.action || t.type)}</span></td>
                 <td>${execBadge}</td>
                 <td class="mono-number" style="font-weight:700;">${volVal}</td>
                 <td class="mono-number">${formatPrice(t.entry_price || t.open_price || 0, t.symbol)}</td>
                 <td class="mono-number" style="color:var(--neon-bear);">${slVal > 0 ? formatPrice(slVal, t.symbol) : '—'}</td>
                 <td class="mono-number" style="color:var(--neon-bull);">${tpVal > 0 ? formatPrice(tpVal, t.symbol) : '—'}</td>
                 <td class="mono-number" style="color:${pnlColor}; font-weight:800; font-size:11px;">${pnlPrefix}$${pnlVal.toFixed(2)}</td>
-                <td class="mono-number" style="color:var(--text-dim); font-size:9px;">${dtStr}</td>
+                <td class="mono-number" style="color:var(--text-dim); font-size:9px;">${escapeHtml(dtStr)}</td>
             </tr>`;
         }
         tbody.innerHTML = html;
@@ -1146,15 +1163,15 @@
             const commentVal = p.comment || "HM Algo 2.0";
 
             return `
-                <tr onclick="window.setSymbol('${p.symbol}')" style="cursor:pointer;" title="Click to view ${p.symbol} chart">
+                <tr onclick="window.setSymbol('${escAttr(p.symbol)}')" style="cursor:pointer;" title="Click to view ${escAttr(p.symbol)} chart">
                     <td style="color:var(--text-dim);">#${p.ticket}</td>
-                    <td><b style="color:#ffffff;">${p.symbol}</b></td>
-                    <td><span class="badge ${isBuy ? 'badge-ready-buy' : 'badge-ready-sell'}" style="font-size:8.5px; padding:1px 5px;">${orderType}</span></td>
+                    <td><b style="color:#ffffff;">${escapeHtml(p.symbol)}</b></td>
+                    <td><span class="badge ${isBuy ? 'badge-ready-buy' : 'badge-ready-sell'}" style="font-size:8.5px; padding:1px 5px;">${escapeHtml(orderType)}</span></td>
                     <td class="mono-number" style="font-weight:700;">${Number(volumeVal).toFixed(2)}</td>
                     <td class="mono-number" style="color:var(--neon-gold); font-weight:700;">${formatPrice(priceVal, p.symbol)}</td>
                     <td class="mono-number" style="color:var(--neon-bear);">${slVal > 0 ? formatPrice(slVal, p.symbol) : '—'}</td>
                     <td class="mono-number" style="color:var(--neon-bull);">${tpVal > 0 ? formatPrice(tpVal, p.symbol) : '—'}</td>
-                    <td style="color:var(--text-dim); font-size:10px;">${commentVal}</td>
+                    <td style="color:var(--text-dim); font-size:10px;">${escapeHtml(commentVal)}</td>
                     <td>
                         <button class="btn-close-pos" onclick="event.stopPropagation(); window.cancelPendingOrder(${p.ticket})">Cancel</button>
                     </td>
@@ -1471,7 +1488,7 @@
                 el.chartMarketStatus.title = statusObj.status_text;
             } else {
                 el.chartMarketStatus.className = "market-status-pill market-closed";
-                el.chartMarketStatus.innerHTML = `🔴 CLOSED (WEEKEND) — Re-opens <b>${statusObj.next_open_ist || 'Mon 02:30 AM IST'}</b> (<span id="mkt-countdown-val">${statusObj.countdown_formatted}</span>)`;
+                el.chartMarketStatus.innerHTML = `🔴 CLOSED (WEEKEND) — Re-opens <b>${escapeHtml(statusObj.next_open_ist || 'Mon 02:30 AM IST')}</b> (<span id="mkt-countdown-val">${escapeHtml(statusObj.countdown_formatted)}</span>)`;
                 el.chartMarketStatus.title = statusObj.reason || statusObj.status_text;
             }
         }
@@ -1605,20 +1622,20 @@
                 : (opp.gate_passed ? '<b style="color:var(--neon-bull);">GATE PASS (14/14)</b>' : '<b style="color:var(--devil-amber);">GATE WAIT</b>');
 
             const evLabel = isMarketClosed
-                ? `<span class="mono-number" style="color: var(--text-dim); font-size:9.5px;">Re-opens ${symStatus.next_open_ist ? symStatus.next_open_ist.split(',')[0] : 'Mon'}</span>`
+                ? `<span class="mono-number" style="color: var(--text-dim); font-size:9.5px;">Re-opens ${escapeHtml(symStatus.next_open_ist ? symStatus.next_open_ist.split(',')[0] : 'Mon')}</span>`
                 : `<span class="mono-number" style="color: ${evVal >= 0 ? 'var(--neon-bull)' : 'var(--neon-bear)'}; font-weight:700;">EV: ${evStr}</span>`;
 
             return `
-                <div class="radar-opportunity-card ${isActive ? 'active' : ''}" onclick="window.setSymbol('${opp.symbol}')">
+                <div class="radar-opportunity-card ${isActive ? 'active' : ''}" onclick="window.setSymbol('${escAttr(opp.symbol)}')">
                     <div class="radar-card-top">
                         <div class="radar-symbol">
-                            ${opp.symbol}
+                            ${escapeHtml(opp.symbol)}
                             <span class="radar-timeframe-tag ${styleTagClass}">[${tfDisplay}]</span>
                         </div>
-                        <div class="radar-action-pill ${badge.cssClass}">${badge.label}</div>
+                        <div class="radar-action-pill ${badge.cssClass}">${escapeHtml(badge.label)}</div>
                     </div>
                     <div class="radar-meta-row">
-                        <span class="radar-setup-name">${strategyName}</span>
+                        <span class="radar-setup-name">${escapeHtml(strategyName)}</span>
                         ${evLabel}
                     </div>
                     <div class="radar-plan-chip">
@@ -1692,9 +1709,9 @@
             if (isLive) {
                 shockBannerHtml = `<div class="news-shock-banner live">⚡ <b>VOLATILITY SHOCK ACTIVE:</b> High spread expansion & slippage risk</div>`;
             } else if (isMostRecent && !isLive && n.actual && n.actual !== "—" && n.actual !== "Upcoming") {
-                shockBannerHtml = `<div class="news-shock-banner upcoming" style="background:rgba(56,189,248,0.12); color:var(--accent-cyan); border-color:var(--accent-cyan);">⚡ <b>LATEST MACRO REPORT:</b> Actual: ${n.actual} vs Forecast: ${n.forecast} (Prev: ${n.previous})</div>`;
+                shockBannerHtml = `<div class="news-shock-banner upcoming" style="background:rgba(56,189,248,0.12); color:var(--accent-cyan); border-color:var(--accent-cyan);">⚡ <b>LATEST MACRO REPORT:</b> Actual: ${escapeHtml(n.actual)} vs Forecast: ${escapeHtml(n.forecast)} (Prev: ${escapeHtml(n.previous)})</div>`;
             } else if (isUpcoming && isHigh) {
-                shockBannerHtml = `<div class="news-shock-banner upcoming">⏳ <b>APPROACHING HIGH IMPACT:</b> Expect liquidity volatility on ${n.currency}</div>`;
+                shockBannerHtml = `<div class="news-shock-banner upcoming">⏳ <b>APPROACHING HIGH IMPACT:</b> Expect liquidity volatility on ${escapeHtml(n.currency)}</div>`;
             }
 
             // Affected pairs tags
@@ -1703,7 +1720,7 @@
                 affectedHtml = `
                     <div class="news-affected-row">
                         <span style="color:var(--text-dim);">Impacts:</span>
-                        ${n.affected_pairs.slice(0, 4).map(p => `<span class="news-affected-tag">${p}</span>`).join("")}
+                        ${n.affected_pairs.slice(0, 4).map(p => `<span class="news-affected-tag">${escapeHtml(p)}</span>`).join("")}
                     </div>
                 `;
             }
@@ -1720,17 +1737,17 @@
                 <div class="${cardClass}" onclick="openNewsDetailModal(${idx})" title="Click to view deep shock analysis and Indian Standard Time schedule">
                     <div class="news-card-header">
                         <div style="display:flex; align-items:center; gap:4px;">
-                            <span class="news-currency-tag">${n.currency}</span>
-                            <span class="${impactBadgeClass}">${n.impact}</span>
+                            <span class="news-currency-tag">${escapeHtml(n.currency)}</span>
+                            <span class="${impactBadgeClass}">${escapeHtml(n.impact)}</span>
                         </div>
-                        <span class="news-status-pill ${statusPillClass}">${statusText}</span>
+                        <span class="news-status-pill ${statusPillClass}">${escapeHtml(statusText)}</span>
                     </div>
 
-                    <div class="news-card-title">${n.event}</div>
+                    <div class="news-card-title">${escapeHtml(n.event)}</div>
 
                     <div class="news-meta-row">
-                        <span class="news-time-ist">${istDisplay}</span>
-                        <span class="news-countdown-text">${n.status_badge || ''}</span>
+                        <span class="news-time-ist">${escapeHtml(istDisplay)}</span>
+                        <span class="news-countdown-text">${escapeHtml(n.status_badge || '')}</span>
                     </div>
 
                     ${shockBannerHtml}
@@ -1738,15 +1755,15 @@
                     <div class="news-metrics-grid">
                         <div class="news-metric-col">
                             <span class="news-metric-label">Actual</span>
-                            <span class="news-metric-value" style="${actualStyle}">${n.actual || "—"}</span>
+                            <span class="news-metric-value" style="${actualStyle}">${escapeHtml(n.actual || "—")}</span>
                         </div>
                         <div class="news-metric-col">
                             <span class="news-metric-label">Forecast</span>
-                            <span class="news-metric-value">${n.forecast || "—"}</span>
+                            <span class="news-metric-value">${escapeHtml(n.forecast || "—")}</span>
                         </div>
                         <div class="news-metric-col">
                             <span class="news-metric-label">Previous</span>
-                            <span class="news-metric-value">${n.previous || "—"}</span>
+                            <span class="news-metric-value">${escapeHtml(n.previous || "—")}</span>
                         </div>
                     </div>
 
@@ -1826,7 +1843,7 @@
         const pairsEl = document.getElementById("mn-modal-pairs");
         if (pairsEl) {
             const pairs = item.affected_pairs || ["XAUUSD", "EURUSD", "GBPUSD", "USDJPY", "BTCUSD"];
-            pairsEl.innerHTML = pairs.map(p => `<span class="news-affected-tag" style="font-size:11px; padding:3px 8px;">${p}</span>`).join("");
+            pairsEl.innerHTML = pairs.map(p => `<span class="news-affected-tag" style="font-size:11px; padding:3px 8px;">${escapeHtml(p)}</span>`).join("");
         }
 
         // Warning Box
@@ -1891,10 +1908,10 @@
             }
 
             return `
-                <tr onclick="window.setSymbol('${p.symbol}')" style="cursor:pointer;" title="Click to view ${p.symbol} chart">
+                <tr onclick="window.setSymbol('${escAttr(p.symbol)}')" style="cursor:pointer;" title="Click to view ${escAttr(p.symbol)} chart">
                     <td style="color:var(--text-dim);">#${p.ticket}</td>
-                    <td><b style="color:#ffffff;">${p.symbol}</b></td>
-                    <td><span class="badge ${isBuy ? 'badge-ready-buy' : 'badge-ready-sell'}" style="font-size:8.5px; padding:1px 5px;">${p.type}</span></td>
+                    <td><b style="color:#ffffff;">${escapeHtml(p.symbol)}</b></td>
+                    <td><span class="badge ${isBuy ? 'badge-ready-buy' : 'badge-ready-sell'}" style="font-size:8.5px; padding:1px 5px;">${escapeHtml(p.type)}</span></td>
                     <td class="mono-number" style="font-weight:700;">${Number(volumeVal).toFixed(2)}</td>
                     <td class="mono-number">${formatPrice(openPrice, p.symbol)}</td>
                     <td class="mono-number">${formatPrice(currentPrice, p.symbol)}</td>
@@ -2091,7 +2108,7 @@
                 el.decisionRationaleContent.innerHTML = `
                     <div class="rationale-item" style="color:#ff5277; display:flex; gap:5px;">
                         <span class="icon">🔒</span>
-                        <span>Trading session is closed for the weekend. Live execution and automated order dispatch are halted until session re-opens on <b>${symStatus.next_open_ist || 'Monday'}</b>.</span>
+                        <span>Trading session is closed for the weekend. Live execution and automated order dispatch are halted until session re-opens on <b>${escapeHtml(symStatus.next_open_ist || 'Monday')}</b>.</span>
                     </div>
                     <div class="rationale-item" style="color:var(--text-secondary); margin-top:4px; display:flex; gap:5px;">
                         <span class="icon">📐</span>
@@ -2124,7 +2141,7 @@
                 el.decisionRationaleContent.innerHTML = reasons.map(r => `
                     <div class="rationale-item wait">
                         <span class="icon">⏳</span>
-                        <span>${r}</span>
+                        <span>${escapeHtml(r)}</span>
                     </div>
                 `).join("");
             } else {
@@ -2151,10 +2168,10 @@
         if (el.invalidationTriggerText) {
             const invs = d.invalidation_levels || [];
             if (invs.length > 0) {
-                el.invalidationTriggerText.innerHTML = invs.map(i => `<div style="margin-bottom:3px;">• ${i}</div>`).join("");
+                el.invalidationTriggerText.innerHTML = invs.map(i => `<div style="margin-bottom:3px;">• ${escapeHtml(i)}</div>`).join("");
             } else {
                 const triggerSide = d.bias === 'BUY' ? 'demand support' : 'supply resistance';
-                el.invalidationTriggerText.innerHTML = `<div>• H1 close violating ${triggerSide} (${slStr}).</div><div>• Bearish structural displacement breaking swing structure.</div>`;
+                el.invalidationTriggerText.innerHTML = `<div>• H1 close violating ${escapeHtml(triggerSide)} (${escapeHtml(slStr)}).</div><div>• Bearish structural displacement breaking swing structure.</div>`;
             }
         }
 
@@ -2162,7 +2179,7 @@
         if (el.threatVectorList) {
             const threats = d.risk_factors || [];
             if (threats.length > 0) {
-                el.threatVectorList.innerHTML = threats.map(t => `<div class="threat-vector-item"><span style="color:var(--devil-amber);">⚠</span><span>${t}</span></div>`).join("");
+                el.threatVectorList.innerHTML = threats.map(t => `<div class="threat-vector-item"><span style="color:var(--devil-amber);">⚠</span><span>${escapeHtml(t)}</span></div>`).join("");
             } else {
                 el.threatVectorList.innerHTML = `<div class="threat-vector-item"><span style="color:var(--neon-bull);">✓</span><span>Normal institutional market parameters.</span></div>`;
             }
