@@ -3636,7 +3636,17 @@
       var pnl = historyPnl(t);
       var exec = String(t.executor || '—');
       var manual = /MANUAL|SL EXIT|TP EXIT|BROKER/.test(exec.toUpperCase());
-      var when = t.timestamp ? String(t.timestamp).replace('T', ' ').replace(/\.\d+.*$/, '').slice(0, 19) : '—';
+      /* `timestamp` is ambiguous: for a row the engine logged it is the entry
+         time, for one synced from a closed MT5 deal it is the exit. The original
+         history table was a *closed* list and named this column "Closed", so
+         show the real close time wherever one exists and mark the rows that have
+         none, rather than passing an entry time off as a close. */
+      var closedAt = t.closed_at || null;
+      var stamp = closedAt || t.timestamp;
+      var when = stamp ? String(stamp).replace('T', ' ').replace(/\.\d+.*$/, '').slice(0, 19) : '—';
+      var whenCell = closedAt
+        ? esc(when)
+        : (stamp ? esc(when) + ' <span class="tt-muted">(open)</span>' : '—');
       return '<tr>' +
         '<td class="tt-muted">' + esc(t.ticket || t.id || '—') + '</td>' +
         '<td><span class="tt-symbol">' + esc(sym) + '</span></td>' +
@@ -3648,7 +3658,8 @@
         '<td class="tt-num tt-up">' + (Number(t.tp) > 0 ? formatPrice(t.tp, sym) : '—') + '</td>' +
         '<td class="tt-num ' + (pnl === null ? 'tt-muted' : signClass(pnl)) + '">' +
           (pnl === null ? '—' : (pnl > 0 ? '+' : '') + num(pnl, 2)) + '</td>' +
-        '<td class="tt-muted">' + esc(when) + '</td>' +
+        '<td class="tt-muted" title="' + (closedAt ? 'Closed' : 'Opened; not yet closed') + '">' +
+          whenCell + '</td>' +
         '</tr>';
     }).join('');
   }

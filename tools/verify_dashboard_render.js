@@ -793,6 +793,52 @@ function preFixReportReader(payload) {
   return r.per_symbol || r.symbols || null;
 }
 
+/* ── Closed-trade history fixture ───────────────────────────────────────────
+   /api/history answers with a BARE ARRAY (server.py: "The route answers with a
+   bare array — both existing consumers read it that way"), so the fixture is an
+   array, not a wrapper object. A stub that returned `{}` — which is what this
+   suite used to do — left renderHistory() with zero rows and therefore tested
+   nothing about the ten columns, the four filters or the summary line.
+
+   The rows are chosen to pin the three things that actually differ per row:
+
+   1. `timestamp` is AMBIGUOUS. For a row the engine logged it is the entry
+      time; for one synced from a closed MT5 out-deal it is the exit. The
+      original table was a *closed* list and named the column "Closed", so the
+      renderer must show `closed_at` where it exists and mark the rows that have
+      none. Row 70001 has an entry of 09-10 and a close of 09-14, so a renderer
+      showing `timestamp` is distinguishable from one showing `closed_at`.
+   2. Rows synced from MT5 carry `timestamp === closed_at` (row 70003) — the
+      close time is the only time known.
+   3. P&L arrives as `realized_pnl` for journal rows and as `profit` for synced
+      ones (row 70005), which is the fallback historyPnl() exists to cover. */
+const HISTORY_ROWS = [
+  { ticket: 70001, symbol: 'XAUUSD', action: 'BUY', executor: 'BOT (AI)',
+    volume: 0.25, entry_price: 2380.5, sl: 2370.0, tp: 2400.0,
+    realized_pnl: 124.75, timestamp: '2026-09-10T08:15:00+00:00',
+    closed_at: '2026-09-14T18:30:00+00:00' },
+  { ticket: 70002, symbol: 'EURUSD', action: 'SELL', executor: 'MANUAL',
+    volume: 0.10, entry_price: 1.0925, sl: 0, tp: 0,
+    realized_pnl: null, timestamp: '2026-09-16T11:05:00+00:00',
+    closed_at: null },
+  { ticket: 70003, symbol: 'GBPUSD', action: 'SELL', executor: 'MT5 BROKER',
+    volume: 0.30, entry_price: 1.2710, sl: 0, tp: 0,
+    realized_pnl: -58.20, timestamp: '2026-09-15T13:45:00+00:00',
+    closed_at: '2026-09-15T13:45:00+00:00' },
+  { ticket: 70004, symbol: 'XAUUSD', action: 'BUY', executor: 'SL EXIT',
+    volume: 0.15, entry_price: 2395.0, sl: 2390.0, tp: 2420.0,
+    realized_pnl: -75.00, timestamp: '2026-09-12T09:00:00+00:00',
+    closed_at: '2026-09-12T14:20:00+00:00' },
+  { ticket: 70005, symbol: 'USDJPY', action: 'BUY', executor: 'TP EXIT',
+    volume: 0.20, entry_price: 147.20, sl: 146.5, tp: 148.5,
+    profit: 92.40, timestamp: '2026-09-13T07:30:00+00:00',
+    closed_at: '2026-09-13T16:00:00+00:00' },
+  { ticket: 70006, symbol: 'AUDUSD', action: 'BUY', executor: 'MANUAL_AI_ASSISTED',
+    volume: 0.12, entry_price: 0.6680, sl: 0, tp: 0,
+    realized_pnl: 0, timestamp: '2026-09-11T10:00:00+00:00',
+    closed_at: '2026-09-11T12:00:00+00:00' }
+];
+
 const fetchCalls = [];
 function fetchStub(url) {
   fetchCalls.push(url);
@@ -818,6 +864,9 @@ function fetchStub(url) {
       ticket: 90001, symbol: 'XAUUSD', type: 2, volume: 0.20,
       price: 98.5, sl: 96, tp: 104, comment: 'limit', time_setup: 1700000000
     }];
+  } else if (url.indexOf('/api/history') >= 0) {
+    // Bare array, exactly as server.py sends it.
+    body = HISTORY_ROWS;
   } else if (url.indexOf('/api/intelligence/reliability') >= 0) {
     body = { status: 'OK', styles: [] };
   } else if (url.indexOf('/api/backtest/meta') >= 0) {
@@ -970,6 +1019,32 @@ function captureBacktestEmpty() {
   const host = registry.get('bt-results');
   wiring.btEmptyHtml = deepHtml(host);
   wiring.btEmptyState = host ? host.getAttribute('data-state') : 'no-element';
+}
+
+/* ── History ────────────────────────────────────────────────────────────────
+   The panel is loaded on boot (loadHistory() is on the boot path because the
+   chart's exit markers need the closed trades), so a realistic fixture alone
+   exercises the table. The four local filters re-render without a refetch and
+   the window select refetches, and both go through the bindings in bind(), so
+   they are driven by setting the select's value and firing the same event a
+   user's click fires. */
+function setHistoryFilter(id, value) {
+  const el = registry.get(id);
+  if (!el) return false;
+  el.value = value;
+  return el.fire('change') > 0;
+}
+
+function captureHistory(key) {
+  const body = registry.get('hist-body');
+  wiring.histViews = wiring.histViews || {};
+  wiring.histViews[key] = {
+    html: deepHtml(body),
+    state: body ? body.getAttribute('data-state') : 'no-element',
+    rows: body ? body.querySelectorAll('tr').length : 0,
+    count: (registry.get('hist-count') || {}).textContent,
+    summary: (registry.get('hist-summary') || {}).textContent
+  };
 }
 
 function readTvFailure() {
@@ -1410,6 +1485,76 @@ function report() {
   ok('the empty report does not leave the previous job\'s table on screen',
     btEmpty.indexOf('Per style') < 0, btEmpty.replace(/\s+/g, ' ').slice(0, 200));
 
+  console.log('\nclosed-trade history');
+  const hv = wiring.histViews || {};
+  const H = (k) => (hv[k] || {});
+  const allH = String(H('all').html || '');
+
+  ok('the history table renders the rows the server sent',
+    H('all').rows === 6 && H('all').count === '6',
+    'rows=' + H('all').rows + ' count=' + H('all').count);
+  ok('a populated table clears the loading state',
+    H('all').state === null, 'data-state=' + H('all').state);
+  ok('no cell renders NaN, undefined or null',
+    !/NaN|undefined|null/.test(allH),
+    (allH.match(/.{0,40}(NaN|undefined|null).{0,40}/) || [''])[0]);
+  ok('side is rendered with its direction class',
+    allH.indexOf('tt-dir--buy') >= 0 && allH.indexOf('tt-dir--sell') >= 0);
+  ok('volume is formatted to two decimals',
+    allH.indexOf('0.25') >= 0 && allH.indexOf('0.10') >= 0);
+
+  /* The column is "Closed", so it must show the CLOSE time. Row 70001 was
+     opened 09-10 and closed 09-14; a renderer that shows `timestamp` prints the
+     entry and fails here. This is the check that pins the disambiguation. */
+  ok('a closed row shows its close time, not its entry time',
+    allH.indexOf('2026-09-14 18:30:00') >= 0 && allH.indexOf('2026-09-10 08:15:00') < 0,
+    allH.indexOf('2026-09-10 08:15:00') >= 0 ? 'rendered the entry time' : 'close time missing');
+  ok('a row with no close time is marked rather than passed off as closed',
+    allH.indexOf('(open)') >= 0 && allH.indexOf('2026-09-16 11:05:00') >= 0);
+  ok('an MT5-synced row shows the close time it does have',
+    allH.indexOf('2026-09-15 13:45:00') >= 0);
+
+  ok('the summary totals the realised P&L and the win/loss split',
+    H('all').summary === '6 trades · net +83.95 · 2W / 2L · win rate 40%',
+    H('all').summary);
+  ok('a row with no realised P&L is excluded from the win rate, not counted as a loss',
+    H('all').summary.indexOf('2W / 2L') >= 0, H('all').summary);
+
+  /* Each filter is driven through its real binding. The counts are chosen so a
+     filter that is silently inert (or one that ignores a dimension) shows up as
+     the wrong number rather than as a plausible-looking table. */
+  ok('the side filter narrows the table',
+    H('sell').rows === 2 && H('sell').summary.indexOf('2 of 6 trades') === 0,
+    'rows=' + H('sell').rows + ' summary=' + H('sell').summary);
+  ok('the side filter keeps the losing row it should',
+    H('sell').summary === '2 of 6 trades · net -58.20 · 0W / 1L · win rate 0%',
+    H('sell').summary);
+  ok('the outcome filter narrows the table',
+    H('win').rows === 2, 'rows=' + H('win').rows);
+  /* 70005 carries only `profit`, no `realized_pnl`. If historyPnl() stopped
+     falling back, this row would count as null and the net would be +124.75. */
+  ok('a row whose P&L arrives as `profit` is counted, not skipped',
+    H('win').summary === '2 of 6 trades · net +217.15 · 2W / 0L · win rate 100%',
+    H('win').summary);
+  ok('the source filter separates AI trades from manually executed ones',
+    H('ai').rows === 1, 'rows=' + H('ai').rows);
+  ok('the symbol filter matches on the symbol prefix',
+    H('xau').rows === 2, 'rows=' + H('xau').rows);
+
+  ok('changing the window refetches rather than filtering in place',
+    fetchCalls.some((u) => u.indexOf('/api/history') >= 0 && /[?&]days=7(&|$)/.test(u)),
+    fetchCalls.filter((u) => u.indexOf('/api/history') >= 0).join(' | '));
+  ok('the window selection is sent to the server, not dropped',
+    fetchCalls.some((u) => u.indexOf('/api/history') >= 0 && /[?&]limit=\d+/.test(u)),
+    fetchCalls.filter((u) => u.indexOf('/api/history') >= 0).join(' | '));
+
+  /* The column holds a close time, so it has to be called one. The label and the
+     data are asserted together because a rename that drifts from the data is
+     exactly how this column became ambiguous in the first place. */
+  ok('the time column is labelled as a close time',
+    /scope="col">Closed</.test(html) && !/Execution time/.test(html),
+    'header drift');
+
   console.log('\ntemplate wiring');
   const missing = Array.from(new Set(requestedIds))
     .filter((id) => !templateIds.has(id) && !prelinked.has(id));
@@ -1460,6 +1605,18 @@ function drain() {
   // at this point (that happens in report()), so re-entering news recomputes
   // the same skew the tick-14 entry did and the advancement is still visible.
   if (ticks === 25) fireDocument('keydown', { key: '2', target: { tagName: 'DIV' } });
+  // History filters. Each capture follows its own drive by one tick so the
+  // re-render (synchronous) and the refetch (a promise) are both settled.
+  if (ticks === 27) captureHistory('all');
+  if (ticks === 28) setHistoryFilter('hist-filter-side', 'SELL');
+  if (ticks === 29) captureHistory('sell');
+  if (ticks === 30) { setHistoryFilter('hist-filter-side', 'ALL'); setHistoryFilter('hist-filter-outcome', 'WIN'); }
+  if (ticks === 31) captureHistory('win');
+  if (ticks === 32) { setHistoryFilter('hist-filter-outcome', 'ALL'); setHistoryFilter('hist-filter-source', 'AI'); }
+  if (ticks === 33) captureHistory('ai');
+  if (ticks === 34) { setHistoryFilter('hist-filter-source', 'ALL'); setHistoryFilter('hist-filter-symbol', 'XAU'); }
+  if (ticks === 35) captureHistory('xau');
+  if (ticks === 36) { setHistoryFilter('hist-filter-symbol', ''); setHistoryFilter('hist-filter-days', '7'); }
   setImmediate(drain);
 }
 drain();

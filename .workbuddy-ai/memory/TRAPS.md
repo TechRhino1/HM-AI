@@ -321,6 +321,31 @@ in a way that no error message explains.
   form turned **16** checks red with the user's own words in the detail (`No results in this job`);
   reverting the number grouping turned exactly **1** red. "Exactly the right checks, no more" is
   the evidence that a check is pinned to the behaviour rather than to the suite's mood.
+* **The backtest was not the only renderer with no fixture.** `/api/history` had no branch in the
+  stub at all, so it fell through to `{}` and `renderHistory()` rendered zero rows — meaning the ten
+  columns, the four filters, the summary line and the `closed_at` handling of the *trade history the
+  user asked to restore* were all untested. **Sweep the stub, not just the endpoint you are working
+  on**: list every `apiGet`/`apiPost` path in the controller, then check the stub has a branch whose
+  body has the real shape. Two of the six features in this work stream had the gap; assume there are
+  more until the sweep says otherwise.
+* **A filter applied to one of N merged sources is silently half-inert.** `/api/history` merges
+  journal rows (`TRADE_DB.fetch_recent_trades`) with MT5 out-deals, but the route passed `days` only
+  to `history_deals_get` — `fetch_recent_trades` had no `days` parameter at all. So the Window
+  dropdown looked like it worked (the MT5 half responded) while every journal row ignored it:
+  measured, `?days=1` returned **185 rows whose oldest was 24 days old**, 117 outside the window.
+  When a handler concatenates sources, **enumerate every source and check the filter reaches each
+  one**. And when adding the parameter, default it to "no window" so callers that never passed one
+  (here the classic terminal and the console) keep their behaviour — then assert that default
+  explicitly, because "I added a filter" and "I changed what three other callers see" are one
+  keyword argument apart.
+* **Restoring a feature from git history: diff the *label* against the data, not just the column
+  list.** The original history table's first column was literally `Closed`, rendering
+  `t.time || t.close_time`. The restoration kept the column count and renamed it "Execution time"
+  over `t.timestamp` — which is the **entry** time for a journal row and the **exit** time for a
+  synced MT5 deal, so one unlabelled column carried two meanings and the header was false for half
+  the rows. `git show <old-sha>:<file>` gives the original in one command. A column list that matches
+  hides a meaning that does not, and the server already emitted `closed_at` for exactly this
+  disambiguation — the renderer just ignored it.
 
 ## Data integrity
 

@@ -292,12 +292,42 @@ class SQLiteTradeDB:
         except Exception as e:
             logger.error(f"Failed to sync MT5 history: {e}")
 
-    def fetch_recent_trades(self, limit=100):
+    def fetch_recent_trades(self, limit=100, days=None):
+        """Most recent journal rows, newest first.
+
+        `days` narrows the window. It defaults to None — no window — so the
+        callers that predate it (the classic terminal, the console) keep exactly
+        the behaviour they have always had.
+
+        The dashboard passes the user's Window selection here. Until it did, the
+        selection reached only the MT5 half of /api/history and left journal rows
+        unfiltered, so a "1 day" window answered with a month of trades: measured
+        2026-09-17, `days=1` returned 185 rows whose oldest was 24 days old.
+        The column is `timestamp` because that is the field the existing sort
+        orders by, and filtering on the same field the sort uses keeps the two
+        consistent.
+
+        Note the internal sync still uses its own 30-day budget: it decides how
+        much history to *populate*, which is a different question from how much
+        to *display*.
+        """
         self.sync_mt5_history(days=30, limit=limit)
         conn = self._get_conn()
         try:
             cur = conn.cursor()
-            cur.execute("SELECT * FROM executed_trades ORDER BY datetime(timestamp) DESC, id DESC LIMIT ?", (limit,))
+            if days is None:
+                cur.execute(
+                    "SELECT * FROM executed_trades ORDER BY datetime(timestamp) DESC, id DESC LIMIT ?",
+                    (limit,))
+            else:
+                # Stored timestamps carry a +00:00 offset; SQLite's datetime()
+                # parses that and normalises to UTC, which is what datetime('now')
+                # returns too, so the comparison is apples to apples.
+                cur.execute(
+                    "SELECT * FROM executed_trades "
+                    "WHERE datetime(timestamp) >= datetime('now', ?) "
+                    "ORDER BY datetime(timestamp) DESC, id DESC LIMIT ?",
+                    (f"-{max(1, int(days))} days", limit))
             columns = [description[0] for description in cur.description]
             return [dict(zip(columns, row)) for row in cur.fetchall()]
         except Exception as e:

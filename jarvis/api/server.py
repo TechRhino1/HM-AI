@@ -558,7 +558,11 @@ class JarvisRequestHandler(BaseHTTPRequestHandler):
                         days = 60
                     days = max(1, min(days, 3650))
 
-                    trades = TRADE_DB.fetch_recent_trades(limit=limit) or []
+                    # `days` has to reach the journal query as well as the MT5
+                    # fetch below. It used to reach only MT5, so the Window
+                    # filter left every journal row unfiltered — a "1 day"
+                    # window answered with a month of trades.
+                    trades = TRADE_DB.fetch_recent_trades(limit=limit, days=days) or []
 
                     # Also fetch live closed deals from MT5 broker account
                     if hasattr(self, "mt5_client") and self.mt5_client and getattr(self.mt5_client, "is_connected", False):
