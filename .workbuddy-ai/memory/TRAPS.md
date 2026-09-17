@@ -363,6 +363,16 @@ in a way that no error message explains.
   because the fix was wrong, but because the old re-anchor had been silently absorbing cross-test
   equity jumps. When a correct fix turns a suite red, suspect **shared state the bug was masking**
   before suspecting the fix. Isolate first, then re-measure.
+* **Ordering tests need TWO valid candidates.** Two `broker_symbols` mutations survived because each
+  fixture made only one candidate resolvable: dropping the canonical name or reversing the alias list
+  changed nothing, since the fuzzy scan returned the single match either way. Same class as the
+  "third value" rule — an ordering assertion is only real when the order decides the outcome.
+* **When a module exists to fix a bug class, grep for other code doing the same job.** Symbol
+  resolution is implemented **three** times; the hardened one (`broker_symbols`, prefix-only fuzzy,
+  returns None on failure) serves the *live* path, while `mt5_history` still does a **substring**
+  scan (the COPPER→SouthernCopper bug verbatim) and `MT5Client.resolve_symbol_name` returns the
+  canonical name **in paper mode**, so `historical/acquisition.py` cannot download real bars unless
+  running live. One `grep -rn "def resolve_" --include=*.py jarvis/` finds all of them.
 * **A mutant survives when the fixture never contains the value the mutation changes.** The one miss
   in the 36-mutant `ai_dissector` battery was `v == "BULLISH"` → `v != "BEARISH"`: every alignment
   fixture used only BULLISH/BEARISH, where the two are identical. Adding a **third, unrecognised
