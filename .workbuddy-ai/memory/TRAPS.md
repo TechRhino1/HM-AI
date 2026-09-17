@@ -446,6 +446,14 @@ in a way that no error message explains.
   the user never typed. The check failed and looked like a frontend defect. In a real DOM **every form
   control's `value` is a string**, so the stub defaults to `''`. Same family as the missing `.options`
   above: when a check fails, first ask whether the *stub* is faithful before believing the app is wrong.
+* **A bare `lib/` in `.gitignore` silently ignores `tools/lib/`.** `.gitignore:17` is `lib/`, which
+  matches at *any* depth, so a shared helper placed at `tools/lib/dom_stub.js` worked locally and was
+  absent from the repo — `git status` did not list it and nothing warned. The refactored
+  `verify_dashboard_render.js` would have `require`d a file that never reached a clone: a green suite
+  locally, a crash for everyone else. `git check-ignore -v <path>` is the one-command check, and it must
+  be run for **every new file a tracked file depends on**, not just the file being added. The shared DOM
+  stub now lives at `tools/dom_stub.js`, outside the ignored path. (`git add -f` would also work, but a
+  file that every future tool has to remember to force-add is a trap of its own.)
 * **`curl -s -o /dev/null -w '%{http_code}'` exits 23**, so a `cmd && next` chain silently skips
   `next` and you get an empty result that reads like the second command produced nothing. Separate the
   probe from the command it guards, or use `;`.

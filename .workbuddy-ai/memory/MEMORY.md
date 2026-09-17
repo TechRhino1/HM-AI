@@ -51,7 +51,14 @@ no engine, 46 with one) ·
 auto-selection + regime-policy 22, the order path 15, the copilot panel 15) ·
 `verify_copilot_render.js` (**23** — the copilot answer renderer exists in **two** front ends and this
 evaluates both and asserts they agree; it exists because they had already drifted into a formatting bug
-in one and an XSS in the other). Assert against markup **as rendered** — never
+in one and an XSS in the other) ·
+`verify_terminal_render.js` (**53** + 5 FIND/CLEAR measurements — the classic terminal, which had **zero**
+renderer coverage before it; `terminal.js` registers `fetchHistory` *only* inside `setInterval`, so an
+inert `setInterval` stub makes the history table — and every assertion on it — a silent no-op. Capture
+the intervals and tick them) ·
+**`tools/lib/dom_stub.js`** holds the stubbed DOM both render harnesses share
+(`createDom({templateIds, docRoots, templateTree})`); a copy per harness would drift invisibly. Assert
+against markup **as rendered** — never
 `html.replace(/\s+/g,'')`, which eats the space in `<span class="…">` and makes a correct string fail;
 bind a value to its own label via `metricValue(html, label)` or a swapped counter passes) · `verify_dashboard_nav.js` (31) · `verify_ui_layout.js`
 (**~229** — the total is *not* fixed: it counts controls per viewport, so hiding a control lowers it.
@@ -85,7 +92,14 @@ into 45s navigation timeouts, which read exactly like a regression.
   sends `reason`, the server's own validation sends `error` with HTTP 400. `tests/test_action_response_contract.py`
   keeps the UI's refusal set and the backend's emitted set in step.
 * `executed_trades.timestamp` is **ambiguous** (entry for an engine-logged trade, exit for an
-  MT5-synced one). Use `closed_at`, which is null unless the row really is closed.
+  MT5-synced one). Use `closed_at`, which is null unless the row really is closed. **Fixed in the
+  dashboard only** — the classic terminal (`terminal.js`) never reads `closed_at` and still renders
+  `timestamp` as an unlabelled column. Two front ends, one fix: when a defect is shared, grep the other
+  front end before calling it done (`verify_terminal_render.js` guards the pair).
+* **A fetcher registered inside `setInterval` is invisible to a stubbed clock.** `terminal.js` fetches
+  telemetry/radar/news/candles at boot but registers history only as `setInterval(fetchHistory, 5000)`,
+  so a no-op `setInterval` leaves the history table empty and every assertion about it passes vacuously.
+  Capture the intervals and tick them.
 
 ## Signal quality
 
