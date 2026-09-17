@@ -1,16 +1,40 @@
 """
 HM Algo 2.0 — Drawdown & Daily Loss Monitoring Engine.
 Enforces hard daily loss caps and maximum portfolio drawdown limits to guarantee capital preservation.
+
+A loss is NEVER re-anchored away
+--------------------------------
+This guard previously treated any single observation more than 33.3% below a
+recorded baseline as a withdrawal and re-anchored to it (`baseline > current * 1.5`).
+That is indistinguishable from a crash, so the worse the loss the safer the guard
+thought things were: a 40% intraday drop reported `daily_loss_pct == 0.0` and
+`passed == True`, and the same re-anchor also erased `peak_equity`, cancelling the
+portfolio circuit breaker. `risk_engine` gates three separate checks on `passed`,
+the last of which returns `authorized: True`, so the account kept opening new
+positions through a 40% drawdown.
+
+No single-instant test can separate the two cases: a flat account that REALISED a
+40% loss has equity == balance and looks exactly like one that had a withdrawal.
+So this guard no longer guesses. A big drop is reported as the breach it is, and a
+genuine withdrawal or deposit is re-anchored explicitly via `reset_baselines()`.
+Failing closed costs a day of trading; failing open costs the account.
 """
 import sqlite3
 import os
-from typing import Dict, Any
+from typing import Dict, Any, Optional, Callable
 from datetime import datetime, timezone
 
 from jarvis.config.paths import resolve_db_path
 
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
 class DrawdownGuard:
-    def __init__(self, max_daily_loss_pct: float = 4.0, max_total_drawdown_pct: float = 10.0, db_path: str = "jarvis_drawdown_state.db"):
+    def __init__(self, max_daily_loss_pct: float = 4.0, max_total_drawdown_pct: float = 10.0, db_path: str = "jarvis_drawdown_state.db", clock: Optional[Callable[[], datetime]] = None):
+        # Injectable clock, same convention as circuit_breaker: live trading uses
+        # the real wall clock, a backtest advances on bar time. NOTE the day
+        # boundary below is UTC, not the broker's trading day — see set_clock().
+        self._now = clock if clock is not None else _utc_now
         # Anchored on the repo data dir — see jarvis.config.paths.
         db_path = resolve_db_path(db_path)
         # Hermetic backtesting: in memory, nothing persisted. A backtest that
@@ -30,9 +54,23 @@ class DrawdownGuard:
         self.daily_start_equity: float = 0.0
         self.peak_equity: float = 0.0
         self.db_path = db_path
+        # Day the in-memory baselines belong to; a change rolls the daily cap over.
+        self._last_seen_date = self._today()
         if self.db_path:
             self._init_db()
             self._load_state()
+
+    def set_clock(self, clock: Optional[Callable[[], datetime]]) -> None:
+        """Inject the source of "today" (backtests pass bar time; live passes None -> UTC).
+
+        The daily-loss cap resets on a UTC date change, which is NOT the broker's
+        trading day — a server on GMT+2/+3 rolls over two or three hours into the
+        session. Pass a broker-day clock here to align them.
+        """
+        self._now = clock if clock is not None else _utc_now
+
+    def _today(self) -> str:
+        return self._now().date().isoformat()
 
     def _init_db(self):
         if not self.db_path:
@@ -63,13 +101,12 @@ class DrawdownGuard:
                     self.daily_start_equity, self.peak_equity, last_saved_date_str = row
                     
                     # Check for daily reset
-                    current_date = datetime.now(timezone.utc).date().isoformat()
-                    if last_saved_date_str != current_date:
+                    if last_saved_date_str != self._today():
                         self.daily_start_equity = 0.0
                         self._save_state()
                 else:
                     conn.execute('INSERT INTO drawdown_state (id, daily_start_equity, peak_equity, last_saved_date) VALUES (1, 0.0, 0.0, ?)',
-                                (datetime.now(timezone.utc).date().isoformat(),))
+                                (self._today(),))
         finally:
             conn.close()
 
@@ -79,38 +116,59 @@ class DrawdownGuard:
         conn = sqlite3.connect(self.db_path)
         try:
             with conn:
-                current_date = datetime.now(timezone.utc).date().isoformat()
                 conn.execute('''
                     UPDATE drawdown_state
                     SET daily_start_equity = ?, peak_equity = ?, last_saved_date = ?
                     WHERE id = 1
-                ''', (self.daily_start_equity, self.peak_equity, current_date))
+                ''', (self.daily_start_equity, self.peak_equity, self._today()))
         finally:
             conn.close()
 
+    def reset_baselines(self, current_equity: float) -> None:
+        """Re-anchor both baselines to `current_equity` after a real deposit/withdrawal.
+
+        This is the ONLY supported way to move a baseline down. See the module
+        docstring: the guard cannot tell a withdrawal from a crash, so it does not
+        try, and an operator who just moved money must say so explicitly.
+        """
+        self.daily_start_equity = float(current_equity)
+        self.peak_equity = float(current_equity)
+        self._save_state()
+
     def update_equity_benchmarks(self, current_equity: float, current_balance: float):
         changed = False
-        
-        # True daily reset check in case process stays open across midnight
-        current_date = datetime.now(timezone.utc).date().isoformat()
-        if self.db_path:
-            conn = sqlite3.connect(self.db_path)
-            try:
-                with conn:
-                    cursor = conn.execute('SELECT last_saved_date FROM drawdown_state WHERE id = 1')
-                    row = cursor.fetchone()
-                    if row and row[0] != current_date:
-                        self.daily_start_equity = 0.0
-                        changed = True
-            finally:
-                conn.close()
+
+        # True daily reset check in case process stays open across midnight.
+        #
+        # This used to be gated on `if self.db_path:` and read `last_saved_date`
+        # back out of SQLite, which meant an IN-MEMORY guard — the documented
+        # hermetic-backtest path (`is_offline()` forces db_path="") — never reset
+        # its daily baseline at all, however far the clock advanced. A backtest
+        # spanning many days would therefore measure every day's loss against
+        # day one's equity, and once the cap tripped it stayed tripped for the
+        # rest of the run. Tracking the day in memory fixes that and removes a
+        # SQLite round-trip from a path risk_engine calls three times a decision.
+        current_date = self._today()
+        if current_date != self._last_seen_date:
+            self._last_seen_date = current_date
+            self.daily_start_equity = 0.0
+            changed = True
 
         # Daily-loss baseline must be tracked on EQUITY consistently (not balance),
         # otherwise open positions make the daily-loss figure wrong.
-        if self.daily_start_equity <= 0 or self.daily_start_equity > current_equity * 1.5:
+        #
+        # Both baselines move UP only (or from an unset/zeroed state). They are
+        # deliberately never lowered on a large drop: `daily_start_equity >
+        # current_equity * 1.5` used to re-anchor here on the assumption that only
+        # a withdrawal could move equity that far, but a 33.4%+ intraday loss moves
+        # it just as far, and re-anchoring reports that loss as 0% and lets the
+        # account keep trading. A crash must look like a crash. `current_balance`
+        # cannot separate the cases (a REALISED loss lowers balance identically to
+        # a withdrawal), which is why this no longer tries — use reset_baselines().
+        if self.daily_start_equity <= 0:
             self.daily_start_equity = current_equity
             changed = True
-        if self.peak_equity <= 0 or current_equity > self.peak_equity or self.peak_equity > current_equity * 1.5:
+        if self.peak_equity <= 0 or current_equity > self.peak_equity:
             self.peak_equity = current_equity
             changed = True
             
