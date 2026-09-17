@@ -345,8 +345,13 @@ class JarvisCopilot:
                         for r in rows if float(r.get("realized_pnl") or 0.0) != 0.0]
             if realised:
                 wins = [p for p in realised if p > 0]
+                # "over the last N closed trade(s)" was a claim about the
+                # journal that the journal contradicted: `realised` holds only
+                # the trades with a NON-ZERO result, so a break-even trade made
+                # this say "1 closed trade" while the history answer listed two.
+                # The count is honest about what it counted instead.
                 parts.append(
-                    f"- Realised over the last {len(realised)} closed trade(s): "
+                    f"- Realised on {len(realised)} trade(s) with a recorded result: "
                     f"**{sum(realised):+.2f}** · {len(wins)}W / {len(realised) - len(wins)}L "
                     f"· win rate {len(wins) / len(realised) * 100:.0f}%"
                 )

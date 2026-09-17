@@ -779,7 +779,41 @@ def main():
                 f"{type(exc).__name__}: {exc}",
             )
 
-        # ── 9. Unknown route still 404s ────────────────────────────────────
+        # ── 9. Copilot: the route answers, and dispatches by intent ────────
+        # This endpoint had no probe and its module had no tests, so a routing
+        # regression reached the trader unchallenged. A plain answer and the
+        # intent dispatch are both checked, because the failure this endpoint
+        # has actually shipped was a wrong-but-plausible answer rather than an
+        # error: "how are my trades doing?" returned one instrument's position
+        # status.
+        status, body = request("/api/copilot/ask", {"query": ""})
+        try:
+            payload = json.loads(body)
+        except ValueError:
+            payload = {}
+        answer = payload.get("response") or ""
+        record(
+            "POST /api/copilot/ask answers with a response body",
+            status == 200 and len(answer) > 40,
+            f"status={status} chars={len(answer)}",
+        )
+
+        status, body = request(
+            "/api/copilot/ask",
+            {"query": "how are my trades doing?", "context": {"symbol": "XAUUSD"}},
+        )
+        try:
+            payload = json.loads(body)
+        except ValueError:
+            payload = {}
+        answer = payload.get("response") or ""
+        record(
+            "the copilot answers a book-level question about the book",
+            status == 200 and "How you stand" in answer and "no open position" not in answer,
+            f"status={status} book_answer={'How you stand' in answer}",
+        )
+
+        # ── 10. Unknown route still 404s ───────────────────────────────────
         status, _ = request("/api/backtest/nonsense")
         record("unknown backtest route 404s", status == 404, f"status={status}")
 

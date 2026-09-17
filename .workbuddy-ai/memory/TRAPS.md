@@ -346,6 +346,30 @@ in a way that no error message explains.
   the rows. `git show <old-sha>:<file>` gives the original in one command. A column list that matches
   hides a meaning that does not, and the server already emitted `closed_at` for exactly this
   disambiguation — the renderer just ignored it.
+* **Sweep the stub, and check for logic modules that simply have no test file.** The sweep found
+  three more untested surfaces (copilot, auto-selection, regime-policy) — and the copilot turned out
+  to be worse than a frontend gap: `jarvis/api/copilot.py` is 391 lines of intent dispatch with **no
+  test file at all**, and both bugs it has ever had were found by hand-probing a live session. Before
+  adding coverage to a panel, run `ls tests/ | grep -i <module>` and
+  `grep -rln "<module>" tests/` — "no test imports this" is invisible in every dashboard.
+* **A routing module's failure mode is a wrong-but-plausible answer, so assert the handler, not the
+  topic.** The copilot answered *"how are my trades doing?"* with *"you have no open position on
+  XAUUSD"* — true, and not what was asked. Pin each phrasing to a **marker string only the intended
+  handler emits** (`**How you stand**`, `Working orders`, `no broker client is attached`); asserting
+  on the subject matter ("the answer mentions XAUUSD") passes for both the right and the wrong
+  handler. Keep the historical bugs as named regressions, and test the **discriminator** rather than
+  the example: here, a *named* instrument routes to that position while the on-screen **focus alone
+  must not** flip a book-level question back to one instrument.
+* **A help text is a promise about the router — test it as one.** Extract every quoted example from
+  the help reply (`re.findall(r"\*'([^']+)'\*", help_text)`) and assert each reaches a handler. Not
+  hypothetical: the copilot's help suggested *"how is my symbol doing?"* while that exact sentence
+  fell through to the help text. The test now keeps the two in step automatically.
+* **A count that names a category must count that category.** `_performance_answer` said "Realised
+  over the last N **closed trade(s)**", where N counted only trades with a **non-zero** result — so
+  with a break-even trade present it said "1 closed trade" while the history answer listed two rows
+  for the same journal. Fix the label to match what was counted ("N trade(s) with a recorded result")
+  rather than widening the filter, because widening it also feeds break-even trades into
+  `len(realised) - len(wins)` and silently reclassifies them as losses.
 
 ## Data integrity
 
