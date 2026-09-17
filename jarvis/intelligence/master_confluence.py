@@ -21,19 +21,58 @@ class MasterConfluenceEngine:
     def __init__(self):
         self.fvg_engine = FairValueGapEngine()
 
+    @staticmethod
+    def _regime_name(regime: Any) -> str:
+        """Upper-cased regime label, tolerating None, a plain str or an enum.
+
+        The old one-liner reached into ``regime.primary_regime`` directly, so a
+        ``regime`` of ``None`` raised — see the note in ``score`` for why that
+        mattered far more than it looks.
+        """
+        raw = getattr(regime, "primary_regime", "RANGE")
+        if not isinstance(raw, str):
+            raw = getattr(raw, "value", "RANGE")
+        return str(raw).upper()
+
+    @staticmethod
+    def _primary_frame(mtf_data: Any):
+        """The primary DataFrame from mtf_data, or any non-empty one."""
+        if not isinstance(mtf_data, dict):
+            return None
+        df = mtf_data.get("primary")
+        if isinstance(df, pd.DataFrame) and not df.empty:
+            return df
+        for v in mtf_data.values():
+            if isinstance(v, pd.DataFrame) and not v.empty:
+                return v
+        return None
+
     def score(self, context, regime, rr_ratio: float, ai_score: float, mtf_data: Dict[str, Any] = None) -> Dict[str, Any]:
+        """Score the five confluence stacks, 0-20 each, 100 total.
+
+        ``ai_score`` is accepted for signature compatibility with the other
+        scorers and is not part of any stack here.
+        """
         breakdown: Dict[str, float] = {}
         details: Dict[str, str] = {}
-        
-        df = None
-        if mtf_data and "primary" in mtf_data:
-            df = mtf_data["primary"]
-            
+
+        # Resolved once, *outside* the per-block try/excepts. `reg`, `st`, `liq`,
+        # `mo`, `vol` and `df` are each read by more than one block; binding them
+        # inside the first try meant that one failure there (an unreadable
+        # `regime`, most likely) left them unbound, and every later block then
+        # died with a NameError that its own handler swallowed. A single bad
+        # input silently scored 0/100 — WEAK — and `decision_engine` gates the
+        # trade on this number, so it blocked the order rather than reporting a
+        # fault. Now a failure costs one component, not all five.
+        reg = self._regime_name(regime)
+        st = getattr(context, "structure", None)
+        liq = getattr(context, "liquidity", None)
+        mo = getattr(context, "momentum", None)
+        vol = getattr(context, "volatility", None)
+        sess = getattr(context, "session", None)
+        df = self._primary_frame(mtf_data)
+
         try:
-            reg = str(getattr(regime, "primary_regime", "RANGE"))
-            reg = reg.upper() if isinstance(regime.primary_regime, str) else getattr(regime.primary_regime, "value", "RANGE").upper()
-            st = getattr(context, "structure", None)
-            liq = getattr(context, "liquidity", None)
             wyck = 0
             if "TREND_BULL" in reg and getattr(liq, "sweep_detected", False):
                 wyck += 8
@@ -48,11 +87,11 @@ class MasterConfluenceEngine:
             if getattr(st, "choch", False): wyck += 4
             if getattr(st, "bias", "NEUTRAL") != "NEUTRAL": wyck += 2
         except Exception:
+            logger.warning("master_confluence: wyckoff/ICT scoring failed; scored 0", exc_info=True)
             wyck = 0
         wyck = min(20, wyck)
         breakdown["wyckoff_ict_fusion"] = wyck
         try:
-            mo = getattr(context, "momentum", None)
             ts = float(getattr(mo, "trend_score", 0) or 0)
             adx = float(getattr(mo, "adx", 0) or 0)
             trend = 0
@@ -64,19 +103,11 @@ class MasterConfluenceEngine:
             elif "TREND_BEAR" in reg and ts <= -20: trend += 4
             if getattr(st, "bos", False) and abs(ts) >= 20: trend += 4
         except Exception:
+            logger.warning("master_confluence: Minervini trend template failed; scored 0", exc_info=True)
             trend = 0
         trend = min(20, trend)
         breakdown["minervini_trend_template"] = trend
         try:
-            import pandas as pd
-            df = None
-            if mtf_data and isinstance(mtf_data, dict):
-                df = mtf_data.get("primary", None)
-                if df is None:
-                    for v in mtf_data.values():
-                        if isinstance(v, pd.DataFrame) and not v.empty:
-                            df = v
-                            break
             vcp = 0
             if df is not None and len(df) >= 30:
                 closes = df["close"].values[-30:]
@@ -93,16 +124,15 @@ class MasterConfluenceEngine:
                         details["vcp"] = f"soft VCP {ranges[0]:.2f}→{ranges[1]:.2f}→{ranges[2]:.2f}"
                     if vcp > 0 and getattr(st, "bos", False): vcp += 4
                     if vcp > 0 and rr_ratio >= 2.0: vcp += 4
-            vol = getattr(context, "volatility", None)
             if vcp == 0 and vol and str(getattr(vol, "state", "")) == "COMPRESSION":
                 vcp += 6
                 details["vcp"] = "COMPRESSION proxy for VCP"
         except Exception:
+            logger.warning("master_confluence: VCP scoring failed; scored 0", exc_info=True)
             vcp = 0
         vcp = min(20, vcp)
         breakdown["vcp"] = vcp
         try:
-            sess = getattr(context, "session", None)
             hour = int(getattr(sess, "utc_hour", 12) or 12)
             is_prime = bool(getattr(sess, "is_prime_session", False))
             kz_info = SessionEngine.get_active_killzone(getattr(context, "timestamp", None))
@@ -113,15 +143,14 @@ class MasterConfluenceEngine:
             elif is_prime:
                 kill += 6
                 details["killzone"] = f"prime hour={hour}"
-            
-            liq = getattr(context, "liquidity", None)
-            mo = getattr(context, "momentum", None)
+
             disp = False
             if mo and float(getattr(mo, "adx", 0) or 0) >= 22 and getattr(st, "bos", False):
                 disp = True
             if getattr(liq, "sweep_detected", False) and disp:
                 kill += 8
         except Exception:
+            logger.warning("master_confluence: killzone/AMD scoring failed; scored 0", exc_info=True)
             kill = 0
         kill = min(20, kill)
         breakdown["ict_killzone_amd"] = kill
@@ -164,6 +193,7 @@ class MasterConfluenceEngine:
             if max(bullish, bearish) >= 3 and (has_fvg or has_ob): triple += 4
             if has_fvg and has_ob and has_breaker: triple = 20
         except Exception:
+            logger.warning("master_confluence: triple confluence scoring failed; scored 0", exc_info=True)
             triple = 0
         triple = min(20, triple)
         breakdown["triple_confluence"] = triple
