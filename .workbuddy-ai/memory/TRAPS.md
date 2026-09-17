@@ -607,6 +607,15 @@ in a way that no error message explains.
   and confirm it stays green everywhere else.
 * **`audit_endpoints.py` probes `http://127.0.0.1:8501` by default — the live engine.** Two brand-new
   routes reported DEAD with an HTML 404 purely because that process predated the code. Use
-  `--base http://127.0.0.1:8599` against a server started from the current tree before believing a
-  route is broken. Same run, same code: **2 dead against the stale process, 0 dead against a fresh
-  one.** A stale process is the first hypothesis for any "route vanished" result.
+  `--base http://127.0.0.1:8611` against `.scratch/srv8611.py` (started from the current tree) before
+  believing a route is broken. Same run, same code: **2 dead against the stale process, 0 dead against a
+  fresh one.** A stale process is the first hypothesis for any "route vanished" result. Use **8611**, not
+  8599 — `verify_ui_live.py` binds 8599 for itself.
+* **Python's `read_text()`/`write_text()` round-trip converts CRLF → LF silently.** Restoring a file after
+  a mutation therefore left `git status` reporting it modified while `git diff` was **empty**
+  (`git ls-files --eol` → `i/lf w/crlf`). `git checkout -- <file>` clears it. Never conclude a file is
+  changed — or unchanged — from `git status` alone in this repo.
+* **A no-op method in a stub makes a whole renderer unobservable, and every check still passes.**
+  `verify_dashboard_render.js`'s chart stub had `setMarkers() {}`, so `drawTradeMarkers` was never seen:
+  183 checks passed without asking whether any marker was drawn. When adding a stub, make every method the
+  code under test calls *record*, and confirm by mutating the renderer that some check fails.

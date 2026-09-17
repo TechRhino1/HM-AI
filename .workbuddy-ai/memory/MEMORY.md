@@ -49,8 +49,9 @@ branch test; 657 when this skill was written). `tools/`:
 nothing may be listening there, or its probes hit the engine-less scratch server and read as
 `attached=False` / `503`, which looks exactly like a regression. Run the browser suites against
 **`.scratch/srv8611.py` on :8611** instead. Its total is *conditional*: 45 with no engine, 46 with one) ·
-`verify_dashboard_render.js` (**183** — was 88; the backtest fixture added 23, the history fixture 19,
-auto-selection + regime-policy 22, the order path 15, the copilot panel 15) ·
+`verify_dashboard_render.js` (**191** — was 88; the backtest fixture added 23, the history fixture 19,
+auto-selection + regime-policy 22, the order path 15, the copilot panel 15, trade markers 8. Its chart
+  stub records `setMarkers`; a no-op stub there made `drawTradeMarkers` wholly unobservable) ·
 `verify_copilot_render.js` (**23** — the copilot answer renderer exists in **two** front ends and this
 evaluates both and asserts they agree; it exists because they had already drifted into a formatting bug
 in one and an XSS in the other) ·
@@ -148,6 +149,15 @@ into 45s navigation timeouts, which read exactly like a regression.
   `carried['_cached']`, a key nothing ever sets, so the mutated code never ran and the suite stayed green.
   Always confirm the mutation actually **fails** the suite — if it doesn't, the mutation is dead, not the
   guard.
+* **An assertion that cannot fail is worse than none.** "markers are sorted by time" passed with the
+  `.sort()` deleted, because every event in that fixture fell after the loaded window and all snapped to
+  the same bar — the order carried no information. Mutation-test the assertion; if it survives, delete it
+  and say why in a comment. Corollary: **a mutation that passes may never have executed** — mutating
+  `utcSeconds(t.closed_at)` to fall back to `timestamp` still passed because an earlier `closed_at` guard
+  returned first; only removing both exposed it.
+* **Python's `read_text()`/`write_text()` round-trip converts CRLF → LF silently.** After restoring a file
+  from a mutation, `git status` said modified while `git diff` was *empty* (`git ls-files --eol` →
+  `i/lf w/crlf`). `git checkout -- <file>` clears it. Never infer "changed" from `git status` alone here.
 * **`curl -s -o /dev/null -w '%{http_code}'` exits 23**, so an `&&` chain built on it silently skips every
   later step while still printing the code — it looks like the probe worked and the following commands just
   produced nothing. Use `;` to separate probes. And **`--noproxy '*'`** is mandatory here.

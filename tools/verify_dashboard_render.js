@@ -129,13 +129,20 @@ const drawn = {
   volumeData: null,
   updates: 0,
   fitContent: 0,
-  candleOptions: []
+  candleOptions: [],
+  /* `setMarkers` used to be a no-op here, which made drawTradeMarkers() wholly
+     unobservable: "the renderer was never called" and "the renderer works" look
+     identical from outside, and every assertion about trade markers would have
+     passed vacuously. Each call is recorded, newest last. */
+  markers: [],
+  lastMarkers: []
 };
 
 function makeSeries(kind) {
   return {
     kind,
     _lines: [],
+    _markers: [],
     applyOptions(o) { if (kind === 'candles') drawn.candleOptions.push(o); },
     setData(d) {
       if (kind === 'candles') drawn.candleData = d;
@@ -145,7 +152,12 @@ function makeSeries(kind) {
     createPriceLine(o) { drawn.priceLines.push(o); return { o }; },
     removePriceLine(l) { this._lines = this._lines.filter((x) => x !== l); },
     priceScale() { return { applyOptions() {} }; },
-    setMarkers() {}
+    setMarkers(list) {
+      const arr = Array.isArray(list) ? list.slice() : [];
+      this._markers = arr;
+      drawn.markers.push(arr);
+      drawn.lastMarkers = arr;
+    }
   };
 }
 
@@ -598,7 +610,25 @@ const HISTORY_ROWS = [
   { ticket: 70006, symbol: 'AUDUSD', action: 'BUY', executor: 'MANUAL_AI_ASSISTED',
     volume: 0.12, entry_price: 0.6680, sl: 0, tp: 0,
     realized_pnl: 0, timestamp: '2026-09-11T10:00:00+00:00',
-    closed_at: '2026-09-11T12:00:00+00:00' }
+    closed_at: '2026-09-11T12:00:00+00:00' },
+  /* The next two exist for the chart's exit markers, which need two cases the
+     first six rows cannot supply:
+     - 70007 is a closed XAUUSD **SELL**, so the exit marker must point the other
+       way (closing a short buys) — every other XAUUSD exit in this fixture is a
+       long, so the `wasBuy === false` branch was unreachable.
+     - 70008 is XAUUSD with `closed_at: null`: a journal row whose `timestamp` is
+       when it was logged, not when the trade closed. It must produce NO exit
+       marker. Without it the closed_at filter is untestable — every XAUUSD row
+       already had a closed_at, so deleting the filter changed nothing (proved by
+       mutation: "drop the closed_at filter" left all checks green). */
+  { ticket: 70007, symbol: 'XAUUSD', action: 'SELL', executor: 'MANUAL',
+    volume: 0.10, entry_price: 2400.0, sl: 2410.0, tp: 2380.0,
+    realized_pnl: -40.00, timestamp: '2026-09-16T08:00:00+00:00',
+    closed_at: '2026-09-16T10:30:00+00:00' },
+  { ticket: 70008, symbol: 'XAUUSD', action: 'BUY', executor: 'BOT (AI)',
+    volume: 0.05, entry_price: 2390.0, sl: 2385.0, tp: 2405.0,
+    realized_pnl: null, timestamp: '2026-09-16T12:00:00+00:00',
+    closed_at: null }
 ];
 
 /* ── Auto-selection fixture ─────────────────────────────────────────────────
@@ -1114,6 +1144,67 @@ function report() {
     ['12345', 'BUY', '0.10L', '100', '95', '110', '12.50'].every((t) => hudHtml.indexOf(t) >= 0),
     hudHtml.replace(/\s+/g, ' ').slice(0, 200));
 
+  /* ── Trade markers ───────────────────────────────────────────────────────
+     `setMarkers()` was a no-op in the chart stub until this section existed, so
+     drawTradeMarkers() could not be observed at all — and "the renderer was
+     never called" is indistinguishable from "the renderer works" from outside
+     the module. Every earlier assertion about the chart passed without ever
+     checking whether a marker was drawn.
+
+     This fixture expects exactly three: one entry for the open XAUUSD BUY, and
+     two exits — only the two XAUUSD rows carrying a real `closed_at`. The
+     GBPUSD, USDJPY and AUDUSD rows are excluded by symbol, and the EURUSD row
+     is excluded because `closed_at` is null, which is the honest rule: a
+     journal row's `timestamp` is when it was logged, not when the trade closed.
+  */
+  console.log('\ntrade markers (entry / exit on the price chart)');
+  const marks = drawn.lastMarkers || [];
+  const barTimes = (drawn.candleData || []).map((b) => Number(b.time));
+
+  ok('the chart was handed trade markers', marks.length === 4, 'markers=' + marks.length);
+
+  const entry = marks.find((m) => /^BUY /.test(String(m.text || '')));
+  ok('an open BUY is marked below the bar, pointing up',
+    !!entry && entry.position === 'belowBar' && entry.shape === 'arrowUp',
+    entry ? entry.position + '/' + entry.shape : 'no entry marker');
+  ok('the entry marker names side, size and price',
+    !!entry && /^BUY 0\.10L @ 100\.00$/.test(String(entry.text)),
+    entry ? entry.text : 'no entry marker');
+
+  const exits = marks.filter((m) => /^EXIT/.test(String(m.text || '')));
+  /* Three XAUUSD rows carry a real closed_at (70001, 70004, 70007). 70008 is
+     XAUUSD with closed_at null and must NOT appear — that is the rule this
+     count exists to pin, and it is only testable because 70008 was added: with
+     every XAUUSD row already closed, deleting the filter changed nothing. */
+  ok('only the three XAUUSD rows carrying closed_at get an exit marker',
+    exits.length === 3,
+    'exits=' + exits.length + ' -> ' + exits.map((m) => m.text).join(' | '));
+  ok('a closed long is marked as a sell (above the bar, pointing down)',
+    !!exits.find((m) => /\+124\.75/.test(String(m.text)) && m.position === 'aboveBar'
+      && m.shape === 'arrowDown') &&
+    !!exits.find((m) => /-75\.00/.test(String(m.text)) && m.position === 'aboveBar'
+      && m.shape === 'arrowDown'),
+    exits.map((m) => m.text + ' ' + m.position + '/' + m.shape).join(' | '));
+  ok('a closed short is marked as a buy (below the bar, pointing up)',
+    !!exits.find((m) => /-40\.00/.test(String(m.text)) && m.position === 'belowBar'
+      && m.shape === 'arrowUp'),
+    exits.map((m) => m.text + ' ' + m.position + '/' + m.shape).join(' | '));
+  ok('a winner is green and the losers are red',
+    !!exits.find((m) => /\+124\.75/.test(String(m.text)) && m.color === '#00ff88') &&
+    !!exits.find((m) => /-75\.00/.test(String(m.text)) && m.color === '#ff0055') &&
+    !!exits.find((m) => /-40\.00/.test(String(m.text)) && m.color === '#ff0055'),
+    exits.map((m) => m.text + ' ' + m.color).join(' | '));
+  ok('every marker snaps to a bar the series actually contains',
+    marks.length > 0 && barTimes.length > 0 &&
+    marks.every((m) => barTimes.indexOf(Number(m.time)) >= 0),
+    'off-grid: ' + marks.filter((m) => barTimes.indexOf(Number(m.time)) < 0)
+      .map((m) => m.time).join(', '));
+  /* Deliberately NOT asserting that markers are sorted by time. Every event in
+     this fixture falls after the loaded window, so all of them snap to the last
+     bar and the order carries no information: deleting the `.sort()` call left
+     all checks green. An assertion that cannot fail is worse than none, so it
+     was removed rather than left as decoration. */
+
   console.log('\nheader');
   const price = registry.get('chart-live-price');
   ok('live price rendered from the last close', !!price && price.textContent === '100.00',
@@ -1487,7 +1578,7 @@ function report() {
   const allH = String(H('all').html || '');
 
   ok('the history table renders the rows the server sent',
-    H('all').rows === 6 && H('all').count === '6',
+    H('all').rows === 8 && H('all').count === '8',
     'rows=' + H('all').rows + ' count=' + H('all').count);
   ok('a populated table clears the loading state',
     H('all').state === null, 'data-state=' + H('all').state);
@@ -1511,31 +1602,35 @@ function report() {
     allH.indexOf('2026-09-15 13:45:00') >= 0);
 
   ok('the summary totals the realised P&L and the win/loss split',
-    H('all').summary === '6 trades · net +83.95 · 2W / 2L · win rate 40%',
+    H('all').summary === '8 trades · net +43.95 · 2W / 3L · win rate 33%',
     H('all').summary);
+  /* 70008 has realized_pnl null. Counted as a loss the split would read 2W/4L;
+     counted in the denominator at all it would read 25% (2/8) rather than 33%
+     (2/6 — the six rows that actually carry a P&L). */
   ok('a row with no realised P&L is excluded from the win rate, not counted as a loss',
-    H('all').summary.indexOf('2W / 2L') >= 0, H('all').summary);
+    H('all').summary.indexOf('2W / 3L') >= 0 && H('all').summary.indexOf('33%') >= 0,
+    H('all').summary);
 
   /* Each filter is driven through its real binding. The counts are chosen so a
      filter that is silently inert (or one that ignores a dimension) shows up as
      the wrong number rather than as a plausible-looking table. */
   ok('the side filter narrows the table',
-    H('sell').rows === 2 && H('sell').summary.indexOf('2 of 6 trades') === 0,
+    H('sell').rows === 3 && H('sell').summary.indexOf('3 of 8 trades') === 0,
     'rows=' + H('sell').rows + ' summary=' + H('sell').summary);
   ok('the side filter keeps the losing row it should',
-    H('sell').summary === '2 of 6 trades · net -58.20 · 0W / 1L · win rate 0%',
+    H('sell').summary === '3 of 8 trades · net -98.20 · 0W / 2L · win rate 0%',
     H('sell').summary);
   ok('the outcome filter narrows the table',
     H('win').rows === 2, 'rows=' + H('win').rows);
   /* 70005 carries only `profit`, no `realized_pnl`. If historyPnl() stopped
      falling back, this row would count as null and the net would be +124.75. */
   ok('a row whose P&L arrives as `profit` is counted, not skipped',
-    H('win').summary === '2 of 6 trades · net +217.15 · 2W / 0L · win rate 100%',
+    H('win').summary === '2 of 8 trades · net +217.15 · 2W / 0L · win rate 100%',
     H('win').summary);
   ok('the source filter separates AI trades from manually executed ones',
-    H('ai').rows === 1, 'rows=' + H('ai').rows);
+    H('ai').rows === 2, 'rows=' + H('ai').rows);
   ok('the symbol filter matches on the symbol prefix',
-    H('xau').rows === 2, 'rows=' + H('xau').rows);
+    H('xau').rows === 4, 'rows=' + H('xau').rows);
 
   ok('changing the window refetches rather than filtering in place',
     fetchCalls.some((u) => u.indexOf('/api/history') >= 0 && /[?&]days=7(&|$)/.test(u)),
