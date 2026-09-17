@@ -43,9 +43,17 @@ plainly that closing the window stops it.
 
 **pytest 883 passed / 20 deselected** (was 874; the P0 audit commit added
 `test_deflated_sharpe.py` + `test_sample_uniqueness.py`). `tools/`: `verify_ui_live.py` (44) ·
-`verify_dashboard_render.js` (88) · `verify_dashboard_nav.js` (31) · `verify_ui_layout.js` (238) ·
-`audit_endpoints.py` (44) · `audit_wiring.py`. Screenshots: `.scratch/shot_one.js <tag> <page>`
-(**`agent-browser` does not support Windows**).
+`verify_dashboard_render.js` (88) · `verify_dashboard_nav.js` (31) · `verify_ui_layout.js`
+(**~229** — the total is *not* fixed: it counts controls per viewport, so hiding a control lowers it.
+238 → 229 is the ticket's pending row correctly disappearing, not a lost check. Read the FAIL lines,
+never the total) · `audit_endpoints.py` (**46** — rises when a new route is added; add POST-only
+routes to its `POST_ONLY` set or they report DEAD, and **probe with `--base` against a server built
+from the current tree** or a stale engine makes new routes look dead) · `audit_wiring.py` (135
+modules, 0 broken refs).
+Screenshots: `.scratch/shot_one.js <tag> <page>` — honours `JARVIS_PORT` to point at the standalone
+`:8599` instance instead of the user's engine (**`agent-browser` does not support Windows**).
+Run the browser suites **one at a time**: three in parallel plus a probe starved `forex`/`options`
+into 45s navigation timeouts, which read exactly like a regression.
 
 ## Rules worth repeating
 
@@ -55,7 +63,13 @@ plainly that closing the window stops it.
 * **The UI has no request timeout anywhere** — an empty result must still repaint, and a first-paint
   watchdog must state a stall.
 * **MT5 times are BROKER-SERVER time, not UTC.** Never hardcode the offset; use
-  `jarvis/data/broker_time.py`.
+  `jarvis/data/broker_time.py`. Local probes: **`curl --noproxy '*'`** (a proxy is configured and
+  otherwise answers "upstream connect failed" for a healthy server).
+* **A frontend that reads a key the server never sends renders the empty state on success** — three
+  instances now (backtest `per_symbol`, `/api/history` read as an object, `grid_dimensions` never
+  whitelisted). Read the real payload before writing its reader.
+* `executed_trades.timestamp` is **ambiguous** (entry for an engine-logged trade, exit for an
+  MT5-synced one). Use `closed_at`, which is null unless the row really is closed.
 
 ## Signal quality
 

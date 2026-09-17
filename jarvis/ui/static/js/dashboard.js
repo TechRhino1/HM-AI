@@ -35,7 +35,8 @@
     jobs: 4000,
     pending: 15000,
     chart: 20000,
-    analytics: 20000
+    analytics: 20000,
+    news: 120000
   };
 
   // Per-request budgets in ms. Chosen from measured behaviour: local endpoints
@@ -71,10 +72,12 @@
     reliability: [],
     jobs: [],
     activeJob: null,
+    backtestMeta: null,   // /api/backtest/meta — dimensions + defaults from the server
     selection: null,
     radar: [],            // orchestrator's ranked candidates (telemetry)
     radarFilter: 'ALL',   // style filter for the scanner radar
     pending: [],          // working orders from /api/pending_orders
+    editingTicket: null,  // ticket of the pending order loaded into the ticket
     chart: null,          // {host, chart, candles, volume, lines, tradeLines}
     chartCandles: [],     // bars currently drawn — source for level maths
     chartLevels: null,    // {r1,r2,s1,s2}; null when no swing pivot exists
@@ -93,6 +96,7 @@
     newsCurrency: 'ALL',  // currency filter
     newsSelected: null,   // key of the event open in the detail panel
     newsHeroKey: null,    // event the "next release" panel is featuring
+    context: 'why',       // which strip is showing beside the ticket
     equities: null,       // /api/stocks/screener payload
     equityRows: [],
     heatmap: null,        // /api/stocks/heatmap payload
@@ -605,6 +609,7 @@
     prefillTicket();
     loadChart();
     loadSelection();
+    updateCopilotFocus();
   }
 
   /* ── Auto-selection ───────────────────────────────────────────────────── */
@@ -756,10 +761,25 @@
 
   /* ── Pending orders ───────────────────────────────────────────────────── */
   /* MT5 reports the order type as a numeric enum; rendering "2" in a column
-     headed Type tells the user nothing. */
+     headed Type tells the user nothing.
+
+     These are MT5's ORDER_TYPE_* codes and they start at BUY=0 / SELL=1, so
+     the pending types begin at 2. An earlier mapping here started the pending
+     types at 0, which labelled every live LIMIT as a STOP and vice versa. */
   var PENDING_TYPES = {
-    0: 'BUY LIMIT', 1: 'SELL LIMIT', 2: 'BUY STOP',
-    3: 'SELL STOP', 4: 'BUY STOP LIMIT', 5: 'SELL STOP LIMIT'
+    0: 'BUY', 1: 'SELL',
+    2: 'BUY LIMIT', 3: 'SELL LIMIT',
+    4: 'BUY STOP', 5: 'SELL STOP',
+    6: 'BUY STOP LIMIT', 7: 'SELL STOP LIMIT'
+  };
+
+  /* Inverse of PENDING_TYPES, for turning a broker enum back into the value the
+     placement endpoint expects. Numeric 0/1 are market fills, not pendings. */
+  var PENDING_TO_NAME = {
+    2: 'BUY_LIMIT', 3: 'SELL_LIMIT', 4: 'BUY_STOP', 5: 'SELL_STOP'
+  };
+  var NAME_TO_PENDING = {
+    BUY_LIMIT: 2, SELL_LIMIT: 3, BUY_STOP: 4, SELL_STOP: 5
   };
 
   function pendingTypeName(t) {
@@ -784,6 +804,21 @@
     });
   }
 
+  /* The stored type is a numeric MT5 enum on a live terminal and a plain string
+     in paper mode. Normalising here keeps the Edit button from offering to
+     modify an order the placement endpoint would reject. */
+  function pendingOrderName(o) {
+    var raw = o && o.type;
+    if (raw === null || raw === undefined || raw === '') return null;
+    var s = String(raw);
+    if (/^\d+$/.test(s)) {
+      var n = Number(s);
+      return PENDING_TO_NAME[n] || PENDING_TYPES[n] || null;
+    }
+    var upper = s.toUpperCase();
+    return NAME_TO_PENDING[upper] ? upper : null;
+  }
+
   function renderPendingOrders() {
     var body = $('pending-body');
     var list = state.pending || [];
@@ -797,15 +832,163 @@
     body.removeAttribute('data-state');
     body.innerHTML = list.map(function (o) {
       var sym = o.symbol || '';
-      return '<tr>' +
+      var ticket = o.ticket;
+      var editable = pendingOrderName(o);
+      return '<tr data-pending="' + esc(String(ticket)) + '">' +
         '<td><span class="tt-symbol">' + esc(sym) + '</span></td>' +
         '<td class="tt-muted">' + esc(pendingTypeName(o.type)) + '</td>' +
         '<td class="tt-num">' + num(o.volume, 2) + '</td>' +
         '<td class="tt-num">' + formatPrice(o.price, sym) + '</td>' +
         '<td class="tt-num">' + (Number(o.sl) > 0 ? formatPrice(o.sl, sym) : '—') + '</td>' +
         '<td class="tt-num">' + (Number(o.tp) > 0 ? formatPrice(o.tp, sym) : '—') + '</td>' +
+        '<td class="tt-row" style="gap:var(--hm-space-2)">' +
+          (editable
+            ? '<button class="tt-btn tt-btn--sm" data-pending-edit="' + esc(String(ticket)) + '">Edit</button>'
+            : '<span class="tt-muted">—</span>') +
+          '<button class="tt-btn tt-btn--sm" data-pending-cancel="' + esc(String(ticket)) + '">Cancel</button>' +
+        '</td>' +
         '</tr>';
     }).join('');
+
+    Array.prototype.forEach.call(body.querySelectorAll('[data-pending-edit]'), function (btn) {
+      btn.addEventListener('click', function () {
+        editPendingOrder(Number(btn.getAttribute('data-pending-edit')));
+      });
+    });
+    Array.prototype.forEach.call(body.querySelectorAll('[data-pending-cancel]'), function (btn) {
+      btn.addEventListener('click', function () {
+        cancelPendingOrder(Number(btn.getAttribute('data-pending-cancel')));
+      });
+    });
+  }
+
+  function findPending(ticket) {
+    var list = state.pending || [];
+    for (var i = 0; i < list.length; i++) {
+      if (Number(list[i].ticket) === Number(ticket)) return list[i];
+    }
+    return null;
+  }
+
+  /* Mirror the ticket's controls onto the selected order type. Market keeps the
+     BUY/SELL pair; a pending type carries its own direction, so it gets one
+     button, and the price field becomes required rather than optional. */
+  function syncTicketMode() {
+    var sel = $('ticket-type');
+    var type = sel ? String(sel.value || 'MARKET').toUpperCase() : 'MARKET';
+    var isPending = type !== 'MARKET';
+    var marketRow = $('ticket-market-row');
+    var pendingRow = $('ticket-pending-row');
+    if (marketRow) marketRow.hidden = isPending;
+    if (pendingRow) pendingRow.hidden = !isPending;
+
+    var hint = $('ticket-type-hint');
+    if (hint) {
+      hint.textContent = isPending
+        ? 'Fills when price reaches ' + (type.indexOf('STOP') >= 0 ? 'or breaks ' : '')
+          + 'the level — a limit waits for a better price, a stop waits for a breakout.'
+        : "A market order fills now at the broker's quote.";
+    }
+
+    var price = $('ticket-price');
+    if (price) {
+      price.placeholder = isPending ? 'required' : 'market';
+      if (isPending) price.setAttribute('required', 'required');
+      else price.removeAttribute('required');
+    }
+
+    var place = $('ticket-place');
+    if (place) place.textContent = state.editingTicket ? 'Update order' : 'Place order';
+    var editCancel = $('ticket-edit-cancel');
+    if (editCancel) editCancel.hidden = !state.editingTicket;
+  }
+
+  function editPendingOrder(ticket) {
+    var order = findPending(ticket);
+    if (!order) { toast('That order is no longer open', 'warn'); return; }
+    var name = pendingOrderName(order);
+    if (!name) { toast('Only limit and stop orders can be modified here', 'warn'); return; }
+
+    state.editingTicket = Number(ticket);
+    if ($('ticket-symbol')) $('ticket-symbol').value = order.symbol || '';
+    if ($('ticket-type')) $('ticket-type').value = name;
+    if ($('ticket-volume')) $('ticket-volume').value = order.volume !== undefined ? order.volume : '';
+    if ($('ticket-price')) $('ticket-price').value = order.price || '';
+    if ($('ticket-sl')) $('ticket-sl').value = Number(order.sl) > 0 ? order.sl : '';
+    if ($('ticket-tp')) $('ticket-tp').value = Number(order.tp) > 0 ? order.tp : '';
+    syncTicketMode();
+    toast('Editing #' + ticket + ' — change any field, then Update order');
+  }
+
+  function exitPendingEdit() {
+    state.editingTicket = null;
+    if ($('ticket-type')) $('ticket-type').value = 'MARKET';
+    if ($('ticket-price')) $('ticket-price').value = '';
+    if ($('ticket-sl')) $('ticket-sl').value = '';
+    if ($('ticket-tp')) $('ticket-tp').value = '';
+    syncTicketMode();
+  }
+
+  function submitPendingOrder() {
+    var sym = ($('ticket-symbol').value || '').trim().toUpperCase();
+    var type = String($('ticket-type').value || '').toUpperCase();
+    var vol = Number($('ticket-volume').value || 0);
+    var price = Number($('ticket-price').value);
+
+    if (!sym) { toast('Enter a symbol', 'warn'); return; }
+    if (!(vol > 0)) { toast('Enter a volume greater than zero', 'warn'); return; }
+    if (!isFinite(price) || price <= 0) { toast('A pending order needs a price', 'warn'); return; }
+
+    var body = { symbol: sym, order_type: type, price: price, volume: vol };
+    var slEl = $('ticket-sl');
+    var tpEl = $('ticket-tp');
+    // Empty means "leave as it is" on an update and "none" on a new order, so
+    // only send a level that was actually typed.
+    if (slEl && slEl.value !== '') body.sl = Number(slEl.value);
+    if (tpEl && tpEl.value !== '') body.tp = Number(tpEl.value);
+
+    var editing = state.editingTicket;
+    if (editing) {
+      body.ticket = editing;
+      delete body.symbol;
+      delete body.order_type;
+      delete body.volume;
+      apiPost('/api/action/modify_pending_order', body, TIMEOUT.normal).then(function (res) {
+        if (res.ok && (res.data || {}).status !== 'FAILED') {
+          toast('Order #' + editing + ' updated');
+          exitPendingEdit();
+          loadPendingOrders();
+        } else {
+          toast('Update failed: ' + (((res.data || {}).error) || ((res.data || {}).reason) || res.error || ('HTTP ' + res.status)), 'error');
+        }
+      });
+      return;
+    }
+
+    apiPost('/api/action/place_pending_order', body, TIMEOUT.normal).then(function (res) {
+      var data = res.data || {};
+      if (res.ok && data.status !== 'FAILED') {
+        toast(type.replace('_', ' ').toLowerCase() + ' ' + vol + ' ' + sym + ' @ ' + price + ' placed');
+        loadPendingOrders();
+      } else {
+        toast('Order rejected: ' + (data.error || data.reason || res.error || ('HTTP ' + res.status)), 'error');
+      }
+    });
+  }
+
+  function cancelPendingOrder(ticket) {
+    if (!ticket) return;
+    if (!window.confirm('Cancel working order #' + ticket + '?')) return;
+    apiPost('/api/action/cancel_pending_order', { ticket: ticket }, TIMEOUT.normal).then(function (res) {
+      var data = res.data || {};
+      if (res.ok && data.status !== 'FAILED') {
+        toast('Order #' + ticket + ' cancelled');
+        if (state.editingTicket === Number(ticket)) exitPendingEdit();
+        loadPendingOrders();
+      } else {
+        toast('Cancel failed: ' + (data.error || data.reason || res.error || ('HTTP ' + res.status)), 'error');
+      }
+    });
   }
 
   /* ── Positions ────────────────────────────────────────────────────────── */
@@ -926,6 +1109,9 @@
         '</div>';
       host.appendChild(bar);
     }
+
+    // The context strip reads the same decision, so it follows this render.
+    renderContextAnalyst();
   }
 
   /* ── Ticket prefill ───────────────────────────────────────────────────── */
@@ -1355,6 +1541,93 @@
     el.setAttribute('data-state', 'ready');
   }
 
+  /* ── Entry / exit markers ───────────────────────────────────────────── */
+  /* Timestamps on this page are UTC. "2026-09-11 08:09:50" carries no zone
+     marker and Date.parse reads a zoneless string as *local* time, which would
+     shift every marker by the machine's UTC offset. Force UTC unless the string
+     already says otherwise. */
+  function utcSeconds(value) {
+    if (value === null || value === undefined || value === '') return null;
+    if (typeof value === 'number') return isFinite(value) ? Math.round(value) : null;
+    var s = String(value).trim();
+    if (!s) return null;
+    var hasZone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(s);
+    if (s.indexOf('T') < 0) s = s.replace(' ', 'T');
+    if (!hasZone) s += 'Z';
+    var ms = Date.parse(s);
+    return isFinite(ms) ? Math.round(ms / 1000) : null;
+  }
+
+  /* A marker can only sit on a bar the series actually contains, so an event is
+     snapped to the last bar at or before it. An event older than the whole
+     loaded window returns null rather than being clamped onto the first bar —
+     drawing it there would state a time that is not true. */
+  function barTimeAt(seconds) {
+    var bars = state.chartCandles || [];
+    if (!bars.length || !isFinite(seconds)) return null;
+    var found = null;
+    for (var i = 0; i < bars.length; i++) {
+      var t = Number(bars[i].time);
+      if (!isFinite(t)) continue;
+      if (t <= seconds) found = t;
+      else break;
+    }
+    return found;
+  }
+
+  function drawTradeMarkers(sym, digits) {
+    if (!state.chart || !state.chart.candles) return;
+    var series = state.chart.candles;
+    if (typeof series.setMarkers !== 'function') return;
+
+    var symU = String(sym || '').toUpperCase();
+    var markers = [];
+
+    if (state.showLevels) {
+      (state.positions || []).forEach(function (pos) {
+        if (String(pos.symbol || '').toUpperCase() !== symU) return;
+        var seconds = utcSeconds(pos.open_time);
+        var bar = seconds === null ? null : barTimeAt(seconds);
+        if (bar === null) return;
+        var side = String(pos.type || pos.side || '').toUpperCase();
+        var isBuy = side === 'BUY' || side === 'LONG';
+        var lots = Number(pos.volume || 0);
+        markers.push({
+          time: bar,
+          position: isBuy ? 'belowBar' : 'aboveBar',
+          color: isBuy ? CHART_COLORS.entryBuy : CHART_COLORS.entrySell,
+          shape: isBuy ? 'arrowUp' : 'arrowDown',
+          text: (isBuy ? 'BUY ' : 'SELL ') + (isFinite(lots) ? lots.toFixed(2) : '?') + 'L @ '
+                + num(pos.open_price, digits)
+        });
+      });
+
+      // Only rows that carry a real `closed_at` get an exit marker. A journal
+      // row's `timestamp` is when it was logged, which is not a close time.
+      (state.history || []).forEach(function (t) {
+        if (!t.closed_at) return;
+        if (String(t.symbol || '').toUpperCase() !== symU) return;
+        var seconds = utcSeconds(t.closed_at);
+        var bar = seconds === null ? null : barTimeAt(seconds);
+        if (bar === null) return;
+        var pnl = historyPnl(t);
+        var wasBuy = /BUY|LONG/.test(String(t.action || t.type || '').toUpperCase());
+        markers.push({
+          time: bar,
+          // Closing a long sells, closing a short buys — the marker points the
+          // way the closing transaction went.
+          position: wasBuy ? 'aboveBar' : 'belowBar',
+          color: pnl === null ? '#8b93a7' : (pnl > 0 ? CHART_COLORS.target : CHART_COLORS.stopAtRisk),
+          shape: wasBuy ? 'arrowDown' : 'arrowUp',
+          text: 'EXIT ' + (pnl === null ? '' : (pnl > 0 ? '+' : '') + num(pnl, 2))
+        });
+      });
+    }
+
+    markers.sort(function (a, b) { return a.time - b.time; });
+    try { series.setMarkers(markers); } catch (e) { /* series replaced mid-draw */ }
+  }
+
   /* Redraw the decorations against the candles already on screen. Called after
      the position list changes so an overlay follows a fill or a close without
      waiting for the next candle poll. */
@@ -1365,6 +1638,7 @@
     var digits = priceDigits(sym, last.close);
     drawLevels(sym, digits);
     drawTradeOverlays(sym, digits);
+    drawTradeMarkers(sym, digits);
   }
 
   function renderChart(sym, candles) {
@@ -1853,6 +2127,106 @@
       'The engine did not state what would prove this idea wrong.');
   }
 
+  /* ── Context strip beside the ticket ────────────────────────────────── */
+  /* The analyst and news views keep their own tabs. This strip shows a compact
+     read of each next to the ticket; it renders from the same `state` the full
+     panels use, so the two can never disagree, and it writes to its own
+     containers so no element id is shared with them. */
+  function setContext(tab) {
+    if (['why', 'analyst', 'news'].indexOf(tab) === -1) tab = 'why';
+    state.context = tab;
+    Array.prototype.forEach.call(document.querySelectorAll('[data-ctx]'), function (btn) {
+      btn.setAttribute('aria-pressed', String(btn.getAttribute('data-ctx') === tab));
+    });
+    var map = { why: 'reason-body', analyst: 'ctx-analyst', news: 'ctx-news' };
+    Object.keys(map).forEach(function (k) {
+      var el = $(map[k]);
+      if (el) el.hidden = (k !== tab);
+    });
+    if (tab === 'analyst') renderContextAnalyst();
+    if (tab === 'news') renderContextNews();
+  }
+
+  function renderContextAnalyst() {
+    var host = $('ctx-analyst');
+    if (!host || host.hidden) return;
+    var d = state.symbol ? state.decisions[state.symbol] : null;
+    if (!d) {
+      setState(host, 'empty', 'No setup selected', 'Pick an instrument to see the analyst view.');
+      return;
+    }
+
+    var v = devilVerdict(d);
+    var gate = d.quality_gate || null;
+    var gatePass = gate ? String(gate.passed === true ? 'pass' : (gate.passed === false ? 'block' : '—')) : '—';
+
+    var threats = [];
+    ['risk_factors', 'bear_case', 'threats'].forEach(function (k) {
+      (d[k] || []).forEach(function (t) {
+        var text = typeof t === 'string' ? t : (t.text || t.reason || t.description || '');
+        if (text) threats.push(text);
+      });
+    });
+
+    host.removeAttribute('data-state');
+    host.innerHTML =
+      '<div class="tt-row" style="gap:var(--hm-space-2);margin-bottom:var(--hm-space-2)">' +
+        '<span class="tt-chip tt-chip--' + v.cls + '">' + esc(v.label) + '</span>' +
+        '<span class="tt-chip tt-chip--none">gate ' + esc(gatePass) + '</span>' +
+        '<span class="tt-chip tt-chip--none">' +
+          esc(d.master_confluence_tier || '—') + ' · ' +
+          (d.master_confluence_score !== undefined ? d.master_confluence_score : '—') +
+        '</span>' +
+      '</div>' +
+      '<div class="tt-subhead"><span class="tt-panel__title">Case against</span></div>' +
+      (threats.length
+        ? '<ul class="tt-reasons">' + threats.slice(0, 6).map(function (t) {
+            return '<li><span>' + esc(t) + '</span></li>';
+          }).join('') + '</ul>'
+        : '<p class="tt-hint">The engine reported no threats. That is not the same as the setup being safe.</p>') +
+      '<p class="tt-hint" style="margin-top:var(--hm-space-2)">' +
+        'Full bull/bear cases, gate detail and objections are on the Analyst tab.' +
+      '</p>';
+  }
+
+  function renderContextNews() {
+    var host = $('ctx-news');
+    if (!host || host.hidden) return;
+    var all = state.news || [];
+    if (!all.length) {
+      setState(host, 'empty', 'No calendar loaded', 'Open the News tab to fetch the macro calendar.');
+      return;
+    }
+
+    var withTimes = all.map(function (ev) {
+      return { ev: ev, rem: newsRemaining(ev) };
+    }).filter(function (row) {
+      // 'past' and 'unknown' are excluded: a release that already happened is
+      // not something the trader can still position for.
+      return row.rem !== null && ['live', 'soon', 'upcoming'].indexOf(newsPhase(row.ev, row.rem)) >= 0;
+    }).sort(function (a, b) { return a.rem - b.rem; }).slice(0, 6);
+
+    var upcoming = withTimes.map(function (row) { return row.ev; });
+
+    if (!upcoming.length) {
+      setState(host, 'empty', 'Nothing scheduled', 'No upcoming releases in the loaded calendar.');
+      return;
+    }
+
+    host.removeAttribute('data-state');
+    host.innerHTML = '<ul class="tt-reasons">' + withTimes.map(function (row) {
+      var ev = row.ev;
+      var impact = String(ev.impact || '').toUpperCase();
+      var cls = impact === 'HIGH' ? 'tt-chip--sell' : impact === 'MEDIUM' ? 'tt-chip--medium' : 'tt-chip--none';
+      return '<li>' +
+        '<span class="tt-chip ' + cls + '">' + esc(impact || '—') + '</span> ' +
+        '<b>' + esc(ev.currency || '') + '</b> ' + esc(ev.event || '—') +
+        ' <span class="tt-muted">· ' + esc(countdownLabel(newsPhase(ev, row.rem), row.rem)) + '</span>' +
+        '</li>';
+    }).join('') + '</ul>' +
+    '<p class="tt-hint" style="margin-top:var(--hm-space-2)">Full calendar and impact analysis are on the News tab.</p>';
+  }
+
   function renderQualityGate() {
     var host = $('gate-body');
     var d = state.symbol ? state.decisions[state.symbol] : null;
@@ -2188,6 +2562,9 @@
     rows.forEach(function (ev) { tbody.appendChild(newsRow(ev)); });
     table.appendChild(tbody);
     host.appendChild(table);
+
+    // The context strip reads the same cached calendar.
+    renderContextNews();
   }
 
   function renderNewsHero() {
@@ -3090,7 +3467,7 @@
     loadReliability();
     loadRegimePolicy();
     renderAnalyticsMetrics();
-    renderHistory();
+    loadHistory();
     renderRisk();
   }
 
@@ -3159,25 +3536,119 @@
     });
   }
 
+  /* ── Trade history ──────────────────────────────────────────────────── */
+  /* Closed trades come from /api/history, which merges the SQLite journal with
+     the broker's own deal history. `state.history` used to be written by
+     nothing at all, so this table could only ever render its empty state. */
+  function loadHistory() {
+    var days = ($('hist-filter-days') || {}).value || '60';
+    var body = $('hist-body');
+    if (body) body.setAttribute('data-state', 'loading');
+    apiGet('/api/history?limit=1000&days=' + encodeURIComponent(days), TIMEOUT.slow).then(function (res) {
+      var rows = Array.isArray(res.data) ? res.data : ((res.data && (res.data.trades || res.data.history)) || []);
+      state.history = rows;
+      renderHistory();
+      // Closed-trade exit markers live on the price chart, so the chart has to
+      // be repainted once history arrives — not only when the tab is open.
+      refreshChartDecorations();
+    });
+  }
+
+  function historyPnl(t) {
+    var v = t.realized_pnl;
+    if (v === null || v === undefined || v === '') v = t.profit;
+    var n = Number(v);
+    return isFinite(n) ? n : null;
+  }
+
+  function historyFilters() {
+    return {
+      symbol: String(($('hist-filter-symbol') || {}).value || '').trim().toUpperCase(),
+      side: String(($('hist-filter-side') || {}).value || 'ALL').toUpperCase(),
+      source: String(($('hist-filter-source') || {}).value || 'ALL').toUpperCase(),
+      outcome: String(($('hist-filter-outcome') || {}).value || 'ALL').toUpperCase()
+    };
+  }
+
+  function filterHistory(rows) {
+    var f = historyFilters();
+    return (rows || []).filter(function (t) {
+      if (f.symbol && String(t.symbol || '').toUpperCase().indexOf(f.symbol) < 0) return false;
+      if (f.side !== 'ALL' && String(t.action || t.type || t.side || '').toUpperCase() !== f.side) return false;
+      if (f.source !== 'ALL') {
+        var exec = String(t.executor || '').toUpperCase();
+        var isManual = /MANUAL|SL EXIT|TP EXIT|BROKER/.test(exec) || String(t.regime || '').toUpperCase() === 'MANUAL_EXECUTION';
+        if (f.source === 'MANUAL' && !isManual) return false;
+        if (f.source === 'AI' && isManual) return false;
+      }
+      if (f.outcome !== 'ALL') {
+        var pnl = historyPnl(t);
+        if (f.outcome === 'OPEN') { if (pnl !== null) return false; }
+        else if (pnl === null) return false;
+        else if (f.outcome === 'WIN' && pnl <= 0) return false;
+        else if (f.outcome === 'LOSS' && pnl >= 0) return false;
+        else if (f.outcome === 'FLAT' && pnl !== 0) return false;
+      }
+      return true;
+    });
+  }
+
   function renderHistory() {
     var body = $('hist-body');
-    var rows = state.history || [];
+    if (!body) return;
+    var all = state.history || [];
+    var rows = filterHistory(all);
     setText($('hist-count'), String(rows.length));
+
+    var summary = $('hist-summary');
+    if (summary) {
+      var net = 0, wins = 0, losses = 0, counted = 0;
+      rows.forEach(function (t) {
+        var p = historyPnl(t);
+        if (p === null) return;
+        net += p; counted++;
+        if (p > 0) wins++; else if (p < 0) losses++;
+      });
+      var text = rows.length === all.length
+        ? rows.length + ' trades'
+        : rows.length + ' of ' + all.length + ' trades';
+      if (counted) {
+        text += ' · net ' + (net > 0 ? '+' : '') + num(net, 2)
+          + ' · ' + wins + 'W / ' + losses + 'L'
+          + ' · win rate ' + num(counted ? (wins / counted) * 100 : 0, 0) + '%';
+      } else {
+        text += ' · no realised P&L recorded';
+      }
+      setText(summary, text);
+    }
+
     if (!rows.length) {
-      setState(body, 'empty', 'No closed trades', 'History is empty for this session.');
+      setState(body, 'empty', all.length ? 'No trades match these filters' : 'No closed trades',
+        all.length ? 'Widen the filters above.' : 'Nothing has been closed in this window yet.');
       return;
     }
+
     body.removeAttribute('data-state');
     body.innerHTML = rows.map(function (t) {
-      var profit = Number(t.profit || 0);
-      var side = String(t.type || t.side || '').toUpperCase();
+      var sym = t.symbol || '';
+      var side = String(t.action || t.type || t.side || '').toUpperCase();
       var dirCls = /BUY|LONG/.test(side) ? 'tt-dir--buy' : 'tt-dir--sell';
+      var pnl = historyPnl(t);
+      var exec = String(t.executor || '—');
+      var manual = /MANUAL|SL EXIT|TP EXIT|BROKER/.test(exec.toUpperCase());
+      var when = t.timestamp ? String(t.timestamp).replace('T', ' ').replace(/\.\d+.*$/, '').slice(0, 19) : '—';
       return '<tr>' +
-        '<td class="tt-muted">' + esc(t.time || t.close_time || '—') + '</td>' +
-        '<td><span class="tt-symbol">' + esc(t.symbol) + '</span></td>' +
-        '<td><span class="tt-dir ' + dirCls + '">' + esc(side) + '</span></td>' +
+        '<td class="tt-muted">' + esc(t.ticket || t.id || '—') + '</td>' +
+        '<td><span class="tt-symbol">' + esc(sym) + '</span></td>' +
+        '<td><span class="tt-dir ' + dirCls + '">' + esc(side || '—') + '</span></td>' +
+        '<td class="' + (manual ? 'tt-muted' : '') + '">' + esc(exec) + '</td>' +
         '<td class="tt-num">' + num(t.volume, 2) + '</td>' +
-        '<td class="tt-num ' + signClass(profit) + '">' + (profit > 0 ? '+' : '') + num(profit, 2) + '</td>' +
+        '<td class="tt-num">' + formatPrice(t.entry_price, sym) + '</td>' +
+        '<td class="tt-num tt-down">' + (Number(t.sl) > 0 ? formatPrice(t.sl, sym) : '—') + '</td>' +
+        '<td class="tt-num tt-up">' + (Number(t.tp) > 0 ? formatPrice(t.tp, sym) : '—') + '</td>' +
+        '<td class="tt-num ' + (pnl === null ? 'tt-muted' : signClass(pnl)) + '">' +
+          (pnl === null ? '—' : (pnl > 0 ? '+' : '') + num(pnl, 2)) + '</td>' +
+        '<td class="tt-muted">' + esc(when) + '</td>' +
         '</tr>';
     }).join('');
   }
@@ -3346,10 +3817,68 @@
   }
 
   /* ── Backtest ─────────────────────────────────────────────────────────── */
+  /* The value each axis collapses to when its box is unticked. Kept identical to
+     the console's own defaults so both front ends submit the same grid. */
+  var COLLAPSED_SPACE = {
+    tp_r: [2.5],
+    be_trigger_r: [null],
+    fast_cash_r: [null],
+    trail_atr: [null],
+    min_score_quantiles: [0.0, 0.97]
+  };
+
+  /* Used only if /api/backtest/meta has not arrived yet. Mirrors
+     jarvis.backtesting.optimizer.GeometrySpace — the full product is 1920. */
+  var FALLBACK_SPACE = {
+    tp_r: [1.0, 1.5, 2.0, 2.5, 3.0],
+    be_trigger_r: [null, 0.5, 1.0, 1.5],
+    fast_cash_r: [null, 0.75, 1.0, 1.5],
+    trail_atr: [null, 1.0, 1.5, 2.0],
+    min_score_quantiles: [0.0, 0.5, 0.75, 0.9, 0.97, 0.99]
+  };
+
+  function dimensions() {
+    var m = state.backtestMeta;
+    return (m && m.default_space && Object.keys(m.default_space).length)
+      ? m.default_space : FALLBACK_SPACE;
+  }
+
+  /* Tick a box to search that axis; leave it unticked to pin it to one value.
+     The old code sent only the *names* of the ticked axes as `grid_dimensions`,
+     a key the server never read, so every run silently searched all 1920. */
+  function buildSpace() {
+    var dims = dimensions();
+    var space = {};
+    var total = 1;
+    Object.keys(dims).forEach(function (dim) {
+      var values = dims[dim];
+      if (!Array.isArray(values) || !values.length) return;
+      var box = document.querySelector('[data-grid-dim="' + dim + '"]');
+      var used = (box && !box.checked) ? (COLLAPSED_SPACE[dim] || [values[0]]) : values;
+      space[dim] = used.slice();
+      total *= used.length;
+    });
+    return { space: space, count: total };
+  }
+
+  function updateGridHint() {
+    var hint = $('bt-grid-hint');
+    if (!hint) return;
+    var built = buildSpace();
+    var names = Object.keys(built.space).filter(function (d) {
+      var box = document.querySelector('[data-grid-dim="' + d + '"]');
+      return box && box.checked;
+    });
+    setText(hint, built.count.toLocaleString() + ' geometries per mode'
+      + (names.length ? ' — searching ' + names.length + ' of ' + Object.keys(built.space).length + ' axes'
+                      : ' — all axes pinned'));
+  }
+
   function loadBacktestMeta() {
     apiGet('/api/backtest/meta', TIMEOUT.normal).then(function (res) {
       if (!res.ok || !res.data) return;
       var meta = res.data;
+      state.backtestMeta = meta;
 
       var eng = $('bt-engine');
       if (eng) {
@@ -3390,6 +3919,10 @@
             '<span class="tt-muted">(' + count + ')</span>';
           grid.appendChild(label);
         });
+        grid.addEventListener('change', function (ev) {
+          if (ev.target && ev.target.hasAttribute('data-grid-dim')) updateGridHint();
+        });
+        updateGridHint();
       }
 
       var hint = $('bt-universe-hint');
@@ -3403,9 +3936,8 @@
   function collectSpec() {
     var modes = Array.prototype.filter.call($('bt-modes').options, function (o) { return o.selected; })
       .map(function (o) { return o.value; });
-    var rawSymbols = ($('bt-symbols').value || '').split(/[\s,]+/).filter(Boolean);
-    var grid = Array.prototype.filter.call(document.querySelectorAll('[data-grid-dim]'), function (c) { return c.checked; })
-      .map(function (c) { return c.getAttribute('data-grid-dim'); });
+    var rawSymbols = ($('bt-symbols').value || '').split(/[\s,]+/).filter(Boolean)
+      .map(function (s) { return s.toUpperCase(); });
 
     return {
       label: 'dashboard',
@@ -3417,7 +3949,7 @@
       passes: Number($('bt-passes').value || 3),
       max_evaluations: Number($('bt-evals').value || 400),
       walk_forward_split: Number($('bt-split').value || 70) / 100,
-      grid_dimensions: grid
+      space: buildSpace().space
     };
   }
 
@@ -3427,7 +3959,7 @@
     if (btn) btn.setAttribute('aria-disabled', 'true');
     setText($('bt-status'), 'queued');
     var log = $('bt-log');
-    if (log) log.textContent = 'Submitting…';
+    if (log) log.textContent = 'Submitting… (' + buildSpace().count.toLocaleString() + ' geometries per mode)';
 
     apiPost('/api/backtest/run', collectSpec(), TIMEOUT.slow).then(function (res) {
       if (btn) btn.removeAttribute('aria-disabled');
@@ -3508,51 +4040,144 @@
     });
   }
 
+  /* The optimiser's report is per *trading style*, not per symbol — one row per
+     mode carrying the pooled in-sample / out-of-sample split, plus a separate
+     `series` list describing what data each symbol-mode contributed. Older code
+     looked for `per_symbol` / `symbols`, which this report never produces, so a
+     perfectly good run always rendered as "no results". */
+  function unwrapReport(payload) {
+    if (!payload || typeof payload !== 'object') return {};
+    var candidates = [
+      payload.report, payload.result,
+      payload.job && payload.job.result,
+      payload.job && payload.job.report,
+      payload.job, payload
+    ];
+    for (var i = 0; i < candidates.length; i++) {
+      var c = candidates[i];
+      if (c && typeof c === 'object' && (c.modes || c.series || c.per_symbol)) return c;
+    }
+    return payload || {};
+  }
+
+  function geometryLabel(g) {
+    if (!g || typeof g !== 'object') return '—';
+    var bits = ['tp ' + (g.tp_r !== null && g.tp_r !== undefined ? num(g.tp_r, 2) : '—')];
+    bits.push('be ' + (g.be_trigger_r === null || g.be_trigger_r === undefined ? 'off' : num(g.be_trigger_r, 2)));
+    bits.push('pc ' + (g.fast_cash_r === null || g.fast_cash_r === undefined ? 'off' : num(g.fast_cash_r, 2)));
+    bits.push('trail ' + (g.trail_atr === null || g.trail_atr === undefined ? 'off' : num(g.trail_atr, 2)));
+    return bits.join(' · ');
+  }
+
   function renderBacktestResult(payload) {
     var host = $('bt-results');
-    var report = payload.report || payload.result || payload;
     if (!host) return;
+    var report = unwrapReport(payload);
 
-    var perSymbol = report.per_symbol || report.symbols || null;
+    var modes = report.modes || null;
+    var series = report.series || null;
+    var legacy = report.per_symbol || (Array.isArray(report.symbols) ? report.symbols : null);
+
     var meta = $('bt-result-meta');
     if (meta) {
+      var spec = report.spec || {};
       var bits = [];
-      if (report.objective) bits.push('objective ' + report.objective);
-      if (report.feasible !== undefined) bits.push(report.feasible ? 'feasible' : 'infeasible');
-      if (report.symbols_positive !== undefined && report.symbols_total !== undefined) {
-        bits.push(report.symbols_positive + '/' + report.symbols_total + ' positive');
-      }
+      if (spec.objective) bits.push('objective ' + spec.objective);
+      if (modes) bits.push(modes.length + (modes.length === 1 ? ' mode' : ' modes'));
+      if (series) bits.push(series.length + ' series');
+      if (report.elapsed_seconds !== undefined) bits.push(num(report.elapsed_seconds, 1) + 's');
+      if (report.evaluations !== undefined) bits.push(report.evaluations + ' evals');
+      if (report.cache_hit_rate !== undefined) bits.push('cache ' + num(report.cache_hit_rate * 100, 0) + '%');
       meta.textContent = bits.join(' · ') || '—';
     }
 
-    if (!perSymbol || !perSymbol.length) {
-      setState(host, 'empty', 'No per-symbol results',
-        'The job completed without a per-symbol breakdown.');
+    if (!modes && !series && !legacy) {
+      setState(host, 'empty', 'No results in this job',
+        'The job finished but produced no report body. Check the progress log.');
       return;
     }
 
+    var html = '';
+
+    if (modes && modes.length) {
+      html += '<div class="tt-subhead"><span class="tt-panel__title">Per style</span></div>';
+      html += '<table class="tt-table"><thead><tr>' +
+        '<th scope="col">Style</th><th scope="col">TF</th>' +
+        '<th scope="col" class="tt-num">Series</th>' +
+        '<th scope="col" class="tt-num">IS trades</th><th scope="col" class="tt-num">IS exp (R)</th>' +
+        '<th scope="col" class="tt-num">OOS trades</th><th scope="col" class="tt-num">OOS exp (R)</th>' +
+        '<th scope="col" class="tt-num">PF</th><th scope="col" class="tt-num">DD (R)</th>' +
+        '<th scope="col">Best geometry</th><th scope="col">Verdict</th>' +
+        '</tr></thead><tbody>' +
+        modes.map(function (m) {
+          var is_ = m.in_sample || {};
+          var oos = m.out_of_sample || {};
+          var wf = m.walk_forward || {};
+          var verdict, vCls;
+          if (m.feasible && wf.generalises) { verdict = 'generalisable'; vCls = 'tt-up'; }
+          else if (m.feasible) { verdict = 'in-sample only'; vCls = 'tt-muted'; }
+          else { verdict = 'no feasible geometry'; vCls = 'tt-down'; }
+          var isExp = is_.expectancy_r, oosExp = oos.expectancy_r;
+          return '<tr>' +
+            '<td><span class="tt-symbol">' + esc(m.style || '—') + '</span></td>' +
+            '<td class="tt-muted">' + esc(m.primary_timeframe || '—') + '</td>' +
+            '<td class="tt-num">' + num(m.series_count, 0) + '</td>' +
+            '<td class="tt-num">' + (is_.trades !== undefined ? is_.trades : '—') + '</td>' +
+            '<td class="tt-num ' + signClass(isExp) + '">' + (isExp !== undefined ? num(isExp, 4) : '—') + '</td>' +
+            '<td class="tt-num">' + (oos.trades !== undefined ? oos.trades : '—') + '</td>' +
+            '<td class="tt-num ' + signClass(oosExp) + '">' + (oosExp !== undefined ? num(oosExp, 4) : '—') + '</td>' +
+            '<td class="tt-num">' + num((m.full_window || {}).profit_factor, 3) + '</td>' +
+            '<td class="tt-num">' + num((m.full_window || {}).max_dd_r, 2) + '</td>' +
+            '<td class="tt-truncate tt-muted" style="max-width:210px" title="' +
+              esc(m.best_geometry_key || '') + '">' + esc(geometryLabel(m.best_geometry)) + '</td>' +
+            '<td class="' + vCls + '">' + esc(verdict) + '</td>' +
+            '</tr>';
+        }).join('') + '</tbody></table>';
+    }
+
+    if (series && series.length) {
+      html += '<div class="tt-subhead"><span class="tt-panel__title">Data coverage</span></div>';
+      html += '<table class="tt-table"><thead><tr>' +
+        '<th scope="col">Symbol</th><th scope="col">Style</th><th scope="col">TF</th>' +
+        '<th scope="col" class="tt-num">Bars</th><th scope="col" class="tt-num">Candidates</th>' +
+        '</tr></thead><tbody>' +
+        series.map(function (s) {
+          return '<tr>' +
+            '<td><span class="tt-symbol">' + esc(s.symbol) + '</span></td>' +
+            '<td class="tt-muted">' + esc(s.style || '—') + '</td>' +
+            '<td class="tt-muted">' + esc(s.timeframe || '—') + '</td>' +
+            '<td class="tt-num">' + num(s.bars, 0) + '</td>' +
+            '<td class="tt-num">' + num(s.candidates, 0) + '</td>' +
+            '</tr>';
+        }).join('') + '</tbody></table>';
+    }
+
+    if (legacy && legacy.length && !modes) {
+      html += '<table class="tt-table"><thead><tr>' +
+        '<th scope="col">Symbol</th><th scope="col">Style</th>' +
+        '<th scope="col" class="tt-num">Trades</th><th scope="col" class="tt-num">Exp (R)</th>' +
+        '<th scope="col" class="tt-num">Total R</th><th scope="col" class="tt-num">PF</th>' +
+        '<th scope="col" class="tt-num">DD (R)</th><th scope="col">Validated</th>' +
+        '</tr></thead><tbody>' +
+        legacy.map(function (row) {
+          var exp = Number(row.expectancy_r || 0);
+          var validated = row.generalises === true ? 'yes' : (row.generalises === false ? 'no' : '—');
+          var vCls = row.generalises === true ? 'tt-up' : (row.generalises === false ? 'tt-down' : 'tt-muted');
+          return '<tr>' +
+            '<td><span class="tt-symbol">' + esc(row.symbol) + '</span></td>' +
+            '<td class="tt-muted">' + esc(row.style || '—') + '</td>' +
+            '<td class="tt-num">' + (row.trades !== undefined ? row.trades : '—') + '</td>' +
+            '<td class="tt-num ' + signClass(exp) + '">' + num(exp, 4) + '</td>' +
+            '<td class="tt-num ' + signClass(row.total_r) + '">' + num(row.total_r, 2) + '</td>' +
+            '<td class="tt-num">' + num(row.profit_factor, 3) + '</td>' +
+            '<td class="tt-num">' + num(row.max_dd_r, 2) + '</td>' +
+            '<td class="' + vCls + '">' + esc(validated) + '</td>' +
+            '</tr>';
+        }).join('') + '</tbody></table>';
+    }
+
     host.removeAttribute('data-state');
-    host.innerHTML = '<table class="tt-table"><thead><tr>' +
-      '<th scope="col">Symbol</th><th scope="col">Style</th>' +
-      '<th scope="col" class="tt-num">Trades</th><th scope="col" class="tt-num">Exp (R)</th>' +
-      '<th scope="col" class="tt-num">Total R</th><th scope="col" class="tt-num">PF</th>' +
-      '<th scope="col" class="tt-num">DD (R)</th><th scope="col">Validated</th>' +
-      '</tr></thead><tbody>' +
-      perSymbol.map(function (row) {
-        var exp = Number(row.expectancy_r || 0);
-        var validated = row.generalises === true ? 'yes' : (row.generalises === false ? 'no' : '—');
-        var vCls = row.generalises === true ? 'tt-up' : (row.generalises === false ? 'tt-down' : 'tt-muted');
-        return '<tr>' +
-          '<td><span class="tt-symbol">' + esc(row.symbol) + '</span></td>' +
-          '<td class="tt-muted">' + esc(row.style || '—') + '</td>' +
-          '<td class="tt-num">' + (row.trades !== undefined ? row.trades : '—') + '</td>' +
-          '<td class="tt-num ' + signClass(exp) + '">' + num(exp, 4) + '</td>' +
-          '<td class="tt-num ' + signClass(row.total_r) + '">' + num(row.total_r, 2) + '</td>' +
-          '<td class="tt-num">' + num(row.profit_factor, 3) + '</td>' +
-          '<td class="tt-num">' + num(row.max_dd_r, 2) + '</td>' +
-          '<td class="' + vCls + '">' + esc(validated) + '</td>' +
-          '</tr>';
-      }).join('') + '</tbody></table>';
+    host.innerHTML = html;
   }
 
   function loadJobs() {
@@ -3574,8 +4199,10 @@
         return '<tr data-clickable="true" data-job="' + esc(j.job_id || j.id) + '">' +
           '<td class="tt-muted tt-truncate" style="max-width:150px">' + esc(j.label || j.job_id || j.id) + '</td>' +
           '<td><span class="tt-chip ' + cls + '">' + esc(status.toLowerCase()) + '</span></td>' +
-          '<td class="tt-num">' + num(j.progress, 0) + '%</td>' +
-          '<td class="tt-muted">' + esc(j.created_utc || j.started_utc || '—') + '</td>' +
+          // `progress` is the log list, not a percentage — showing it as a
+          // percentage rendered "—%" on every row.
+          '<td class="tt-num">' + (status === 'DONE' ? 'done' : num(j.progress_lines, 0) + ' steps') + '</td>' +
+          '<td class="tt-muted">' + esc(clockTime(j.started_utc || j.created_utc)) + '</td>' +
           '</tr>';
       }).join('');
 
@@ -3620,6 +4247,85 @@
     });
   }
 
+  /* ── Copilot ─────────────────────────────────────────────────────────── */
+  /* The copilot answers in a trimmed-down markdown: **bold**, "- " bullets and
+     newlines. It is escaped *before* those are applied, so a symbol name or a
+     broker comment containing markup can never inject HTML. */
+  function copilotHtml(text) {
+    var safe = esc(String(text === null || text === undefined ? '' : text));
+    var lines = safe.split('\n');
+    var out = [];
+    var inList = false;
+    lines.forEach(function (line) {
+      if (/^\s*-\s+/.test(line)) {
+        if (!inList) { out.push('<ul>'); inList = true; }
+        out.push('<li>' + line.replace(/^\s*-\s+/, '') + '</li>');
+        return;
+      }
+      if (inList) { out.push('</ul>'); inList = false; }
+      out.push(line
+        .replace(/\*\*(.+?)\*\*/g, '<b>$1</b>')
+        // Single-asterisk italics only where the text was not already consumed
+        // by the bold pass above.
+        .replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<i>$2</i>'));
+    });
+    if (inList) out.push('</ul>');
+    return out.join('<br>').replace(/<br>(<ul>|<\/ul>)/g, '$1');
+  }
+
+  function copilotSay(cls, html) {
+    var log = $('copilot-log');
+    if (!log) return null;
+    var div = document.createElement('div');
+    div.className = 'tt-copilot__msg tt-copilot__msg--' + cls;
+    div.innerHTML = html;
+    log.appendChild(div);
+    log.scrollTop = log.scrollHeight;
+    return div;
+  }
+
+  function toggleCopilot(open) {
+    var panel = $('copilot-panel');
+    var fab = $('copilot-fab');
+    if (!panel) return;
+    var show = open === undefined ? panel.hidden : !!open;
+    panel.hidden = !show;
+    if (fab) fab.setAttribute('aria-expanded', String(show));
+    if (show) {
+      var input = $('copilot-input');
+      if (input) input.focus();
+    }
+  }
+
+  function askCopilot(query) {
+    query = String(query || '').trim();
+    if (!query) return;
+    copilotSay('user', copilotHtml(query));
+    var input = $('copilot-input');
+    if (input) input.value = '';
+
+    var pending = copilotSay('pending', 'Thinking…');
+    apiPost('/api/copilot/ask', {
+      query: query,
+      // What the trader is looking at, so a bare "why?" is answerable.
+      context: { symbol: state.symbol || null, view: state.view || 'trade' }
+    }, TIMEOUT.normal).then(function (res) {
+      if (pending) pending.parentNode.removeChild(pending);
+      if (!res.ok) {
+        copilotSay('error', '<b>Unavailable</b> (HTTP ' + res.status + ') — '
+          + esc(String(((res.data || {}).error) || res.error || 'request refused')));
+        return;
+      }
+      var text = (res.data || {}).response;
+      copilotSay('bot', copilotHtml(text || 'No response.'));
+    });
+  }
+
+  function updateCopilotFocus() {
+    var chip = $('copilot-focus');
+    if (chip) chip.textContent = state.symbol ? state.symbol : 'no symbol';
+  }
+
   /* ── Scheduler ────────────────────────────────────────────────────────── */
   function schedule() {
     function tick(fn, base) {
@@ -3636,6 +4342,9 @@
     tick(function () { if (state.view === 'trade') loadChart(); }, POLL.chart)();
     tick(function () { if (state.view === 'analytics') loadReliability(); }, POLL.analytics)();
     tick(loadPendingOrders, POLL.pending)();
+    // The calendar is slow-moving; it only needs refetching every couple of
+    // minutes, and the context strip re-renders from whatever is cached.
+    tick(function () { loadNews(); }, POLL.news)();
   }
 
   /* ── Boot ─────────────────────────────────────────────────────────────── */
@@ -3743,6 +4452,56 @@
     var sell = $('ticket-sell');
     if (sell) sell.addEventListener('click', function () { submitTrade('SELL'); });
 
+    var orderType = $('ticket-type');
+    if (orderType) {
+      orderType.addEventListener('change', function () {
+        // Switching away from the type being edited would silently post an
+        // update against the wrong order definition.
+        if (state.editingTicket) exitPendingEdit();
+        syncTicketMode();
+      });
+    }
+    var place = $('ticket-place');
+    if (place) place.addEventListener('click', submitPendingOrder);
+    var editCancel = $('ticket-edit-cancel');
+    if (editCancel) editCancel.addEventListener('click', exitPendingEdit);
+    syncTicketMode();
+
+    // History filters re-render locally; only a window change refetches.
+    ['hist-filter-symbol', 'hist-filter-side', 'hist-filter-source', 'hist-filter-outcome']
+      .forEach(function (id) {
+        var el = $(id);
+        if (!el) return;
+        el.addEventListener('input', renderHistory);
+        el.addEventListener('change', renderHistory);
+      });
+    var histDays = $('hist-filter-days');
+    if (histDays) histDays.addEventListener('change', loadHistory);
+    var histRefresh = $('hist-refresh');
+    if (histRefresh) histRefresh.addEventListener('click', loadHistory);
+
+    Array.prototype.forEach.call(document.querySelectorAll('[data-ctx]'), function (btn) {
+      btn.addEventListener('click', function () { setContext(btn.getAttribute('data-ctx')); });
+    });
+
+    var copFab = $('copilot-fab');
+    if (copFab) copFab.addEventListener('click', function () { toggleCopilot(true); });
+    var copClose = $('copilot-close');
+    if (copClose) copClose.addEventListener('click', function () { toggleCopilot(false); });
+    var copClear = $('copilot-clear');
+    if (copClear) copClear.addEventListener('click', function () {
+      var log = $('copilot-log');
+      if (log) log.innerHTML = '';
+    });
+    var copForm = $('copilot-form');
+    if (copForm) {
+      copForm.addEventListener('submit', function (ev) {
+        ev.preventDefault();
+        askCopilot($('copilot-input') ? $('copilot-input').value : '');
+      });
+    }
+    updateCopilotFocus();
+
     var form = $('bt-form');
     if (form) form.addEventListener('submit', runBacktest);
     var cancel = $('bt-cancel');
@@ -3758,6 +4517,8 @@
 
     // Keyboard: 1-6 switch views, [ ] cycle panes on phone widths.
     document.addEventListener('keydown', function (ev) {
+      var panel = $('copilot-panel');
+      if (ev.key === 'Escape' && panel && !panel.hidden) { toggleCopilot(false); return; }
       if (ev.target && /INPUT|TEXTAREA|SELECT/.test(ev.target.tagName)) return;
       if (ev.key === '1') setView('trade');
       if (ev.key === '2') setView('news');
@@ -3790,6 +4551,12 @@
       loadChart();
     });
     loadPendingOrders();
+    // Closed-trade history feeds the chart's exit markers, so it is loaded for
+    // the trade view too, not only when the analytics tab is opened.
+    loadHistory();
+    copilotSay('bot', 'I can read your open book, the closed-trade journal and the '
+      + "engine's own decision record. Try <b>“what positions do I have open?”</b> "
+      + 'or <b>“how is my ' + esc(state.symbol || 'symbol') + ' doing?”</b>');
     schedule();
 
     if (window.HMUI && typeof window.HMUI.announce === 'function') {

@@ -104,7 +104,13 @@ class SQLiteTradeDB:
                 "spread_pips": "REAL DEFAULT 0.0",
                 "mtf_alignment": "TEXT DEFAULT ''",
                 "threats_json": "TEXT DEFAULT '[]'",
-                "features_json": "TEXT DEFAULT '{}'"
+                "features_json": "TEXT DEFAULT '{}'",
+                # `timestamp` means different things depending on where the row
+                # came from — entry time for an engine-logged trade, exit time
+                # for one synced from a closed broker deal. `closed_at` is
+                # unambiguous: null unless the row really is a closed trade, so
+                # a chart can draw an exit marker without guessing.
+                "closed_at": "TEXT"
             }
             for col_name, col_def in new_cols.items():
                 if col_name not in cols:
@@ -262,18 +268,25 @@ class SQLiteTradeDB:
                 if not row:
                     regime_str = "TREND_BULL" if side == "BUY" else "TREND_BEAR"
                     conn.execute('''
-                        INSERT INTO executed_trades (ticket, symbol, action, entry_price, sl, tp, volume, timestamp, ai_score, regime, expected_value, realized_pnl, executor)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ''', (pid, clean_sym, side, entry_p, sl_val, tp_val, vol, dt_str, 85.0, regime_str, pnl, pnl, exec_label))
+                        INSERT INTO executed_trades (ticket, symbol, action, entry_price, sl, tp, volume, timestamp, ai_score, regime, expected_value, realized_pnl, executor, closed_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (pid, clean_sym, side, entry_p, sl_val, tp_val, vol, dt_str, 85.0, regime_str, pnl, pnl, exec_label,
+                          dt_str if exit_deal else None))
                 else:
-                    # Update realized PnL, executor, and close timestamp for completed positions
+                    # Update realized PnL, executor, and close timestamp for completed positions.
+                    # `closed_at` is only ever written when there really is an exit
+                    # deal — rewriting it to null on a later sync would erase a
+                    # close time we already knew.
                     conn.execute('''
                         UPDATE executed_trades 
                         SET realized_pnl = ?, expected_value = ?, executor = ?, timestamp = ?, 
+                            closed_at = CASE WHEN ? IS NOT NULL THEN ? ELSE closed_at END,
                             sl = CASE WHEN ? > 0 THEN ? ELSE sl END, 
                             tp = CASE WHEN ? > 0 THEN ? ELSE tp END
                         WHERE ticket = ?
-                    ''', (pnl, pnl, exec_label, dt_str, sl_val, sl_val, tp_val, tp_val, pid))
+                    ''', (pnl, pnl, exec_label, dt_str,
+                          dt_str if exit_deal else None, dt_str if exit_deal else None,
+                          sl_val, sl_val, tp_val, tp_val, pid))
             conn.commit()
 
         except Exception as e:

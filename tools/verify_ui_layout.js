@@ -233,6 +233,32 @@ async function main() {
           //   - .tt-sr-only             visually-hidden screen-reader text
           //   - form controls           scroll their own value when focused
           //   - #chart / #chart-tv      lightweight-charts' own generated DOM
+          //
+          // VERTICAL is checked too, and `overflow:auto` counts. A flex child
+          // carrying `min-height:0` can be squashed below a fraction of its own
+          // content while the document width stays perfectly legal - the
+          // trade-history filter toolbar sat at 38px of its 116px, so the
+          // filters rendered as an unlabelled sliver of a scrollbar. `auto`
+          // conceals that as completely as `hidden` does, which is why
+          // restricting this to hidden/clip let it through.
+          //
+          // The vertical rule is deliberately narrow: a box that cannot show
+          // even ONE of the controls it contains. Scrolling a list is normal -
+          // #selection-body is 35px over 442px of rows on a phone and that is
+          // accepted - but a control taller than its own clipping box can never
+          // be shown in full at any scroll offset. Sizing a first child against
+          // the box was tried first and flagged every one of those lists, which
+          // is how a check stops being read.
+          const tallestControl = (el) => {
+            let h = 0;
+            el.querySelectorAll('input,select,textarea,button,[role="button"]')
+              .forEach((c) => {
+                if (c.closest('.tt-sr-only')) return;
+                const r = c.getBoundingClientRect();
+                if (r.height > h) h = r.height;
+              });
+            return Math.ceil(h);
+          };
           out.clip = [];
           if (viewEl) {
             for (const el of viewEl.querySelectorAll('*')) {
@@ -246,9 +272,28 @@ async function main() {
                 out.clip.push({
                   tag: el.tagName.toLowerCase(),
                   id: el.id || '',
+                  kind: 'h',
                   scroll: el.scrollWidth,
                   client: el.clientWidth,
+                  need: el.clientWidth,
                 });
+                continue;
+              }
+              const oy = cs.overflowY;
+              if (el.clientHeight > 0 && el.scrollHeight > el.clientHeight + 1 &&
+                  (oy === 'auto' || oy === 'scroll' ||
+                   oy === 'hidden' || oy === 'clip')) {
+                const need = tallestControl(el);
+                if (need > 0 && el.clientHeight < need - 1) {
+                  out.clip.push({
+                    tag: el.tagName.toLowerCase(),
+                    id: el.id || '',
+                    kind: 'v',
+                    scroll: el.scrollHeight,
+                    client: el.clientHeight,
+                    need,
+                  });
+                }
               }
             }
           }
@@ -291,8 +336,10 @@ async function main() {
 
           const clips = probe.clip || [];
           ok(`${label}: no silently clipped content`, clips.length === 0,
-            clips.slice(0, 3).map(c =>
-              `${c.tag}${c.id ? '#' + c.id : ''} ${c.scroll}>${c.client}`).join(', '));
+            clips.slice(0, 3).map(c => c.kind === 'v'
+              ? `${c.tag}${c.id ? '#' + c.id : ''} squashed to ${c.client}px, ` +
+                `needs ${c.need}px (content ${c.scroll}px)`
+              : `${c.tag}${c.id ? '#' + c.id : ''} ${c.scroll}>${c.client}`).join(', '));
         }
 
         if (SHOTS_DIR) {

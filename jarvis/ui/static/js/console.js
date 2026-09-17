@@ -676,7 +676,9 @@
     var body = $('cx-an-hist-body');
     return getJSON('/api/history?limit=100')
       .then(function (data) {
-        var rows = (data && (data.trades || data.history)) || [];
+        // The route returns a bare array. Reading `data.trades` off it made
+        // every load render empty, so accept both shapes.
+        var rows = Array.isArray(data) ? data : ((data && (data.trades || data.history)) || []);
         state.history = rows;
         setText('cx-an-hist-count', rows.length + ' trades');
         if (!body) return;

@@ -684,6 +684,107 @@ class MT5Client:
         err_msg = result.comment if result else str(mt5.last_error())
         return {"status": "FAILED", "reason": err_msg}
 
+    def modify_pending_order(
+        self,
+        ticket: int,
+        price: Optional[float] = None,
+        sl: Optional[float] = None,
+        tp: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """Modifies the price / SL / TP of a working pending order.
+
+        ``TRADE_ACTION_MODIFY`` replaces the whole order definition, so a field
+        the caller leaves as ``None`` is re-sent at its *current broker value*.
+        Sending 0.0 would silently delete the stop rather than preserve it,
+        which is the failure mode this signature exists to prevent. Pass an
+        explicit ``0`` to clear a level.
+        """
+        if self.mode not in {"live", "demo", "paper"}:
+            return {"status": "BLOCKED", "reason": f"Execution is disabled (mode={self.mode})"}
+        if price is None and sl is None and tp is None:
+            return {"status": "FAILED", "reason": "nothing to modify — supply price, sl or tp"}
+
+        if self.mode == "paper" or not MT5_AVAILABLE or not self.is_connected:
+            with self._lock:
+                order = self._paper_pending_orders.get(int(ticket))
+                if order is None:
+                    return {"status": "FAILED", "reason": f"Order #{ticket} not found in paper orders"}
+                if price is not None:
+                    order["price"] = float(price)
+                if sl is not None:
+                    order["sl"] = float(sl)
+                if tp is not None:
+                    order["tp"] = float(tp)
+                logger.info(
+                    "[PAPER] Pending order MODIFIED: #%s -> price=%s sl=%s tp=%s",
+                    ticket, order["price"], order["sl"], order["tp"],
+                )
+                return {
+                    "status": "MODIFIED", "ticket": int(ticket),
+                    "price": order["price"], "sl": order["sl"], "tp": order["tp"],
+                }
+
+        def _modify_pending():
+            with self._lock:
+                orders = mt5.orders_get(ticket=int(ticket))
+                if not orders:
+                    return {"status": "FAILED", "reason": f"Order #{ticket} not found on MT5"}
+                pending = orders[0]
+
+                sym_info = mt5.symbol_info(pending.symbol)
+                if not sym_info:
+                    return {"status": "FAILED", "reason": f"Symbol metadata unavailable for {pending.symbol}"}
+                digits = sym_info.digits
+
+                new_price = float(price) if price is not None else float(pending.price_open)
+                new_sl = float(sl) if sl is not None else float(pending.sl)
+                new_tp = float(tp) if tp is not None else float(pending.tp)
+
+                request = {
+                    "action": getattr(mt5, "TRADE_ACTION_MODIFY", 7),
+                    "order": int(ticket),
+                    "symbol": pending.symbol,
+                    "volume": float(pending.volume_initial),
+                    "type": int(pending.type),
+                    "price": round(new_price, digits),
+                    "sl": round(new_sl, digits) if new_sl > 0 else 0.0,
+                    "tp": round(new_tp, digits) if new_tp > 0 else 0.0,
+                    "type_time": getattr(mt5, "ORDER_TIME_GTC", 0),
+                    "type_filling": getattr(mt5, "ORDER_FILLING_IOC", 1),
+                }
+
+                result = mt5.order_send(request)
+                # 10030 = unsupported filling, 10031 = no quotes to process.
+                # Brokers disagree about which mode a pending order accepts, so
+                # walk the three modes rather than failing on the first.
+                for fallback in ("ORDER_FILLING_FOK", "ORDER_FILLING_RETURN"):
+                    if not (result and result.retcode in (10030, 10031)):
+                        break
+                    request["type_filling"] = getattr(mt5, fallback, 0)
+                    result = mt5.order_send(request)
+
+                done = getattr(mt5, "TRADE_RETCODE_DONE", 10009)
+                placed = getattr(mt5, "TRADE_RETCODE_PLACED", 10008)
+                if result is None or result.retcode not in (done, placed):
+                    err_msg = result.comment if result else str(mt5.last_error())
+                    logger.error("MT5 Pending Modify Failed for #%s: %s", ticket, err_msg)
+                    return {"status": "FAILED", "reason": err_msg}
+
+                logger.info(
+                    "PENDING ORDER MODIFIED: #%s -> price=%s sl=%s tp=%s",
+                    ticket, request["price"], request["sl"], request["tp"],
+                )
+                return {
+                    "status": "MODIFIED", "ticket": int(ticket),
+                    "price": request["price"], "sl": request["sl"], "tp": request["tp"],
+                }
+
+        return TimeoutGuard.run_sync(
+            _modify_pending, timeout_sec=5.0,
+            default={"status": "FAILED", "reason": "Timeout"},
+            task_name=f"MT5_ModifyPending_{ticket}",
+        )
+
     def close_position(self, ticket: int, volume: Optional[float] = None) -> Dict[str, Any]:
         """Closes a specific open MT5 position (full or partial) by ticket."""
         if self.mode == "paper" or not MT5_AVAILABLE or not self.is_connected:

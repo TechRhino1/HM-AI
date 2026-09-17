@@ -32,7 +32,9 @@ class JarvisRequestHandler(BaseHTTPRequestHandler):
     state_manager: StateManager = GLOBAL_STATE
     mt5_client: MT5Client = MT5Client(mode="live")
     data_feed: DataFeedEngine = DataFeedEngine(mt5_client=mt5_client)
-    copilot: JarvisCopilot = JarvisCopilot(GLOBAL_STATE)
+    # The copilot answers questions about working orders, which only the broker
+    # knows, so it is handed the same client rather than opening its own.
+    copilot: JarvisCopilot = JarvisCopilot(GLOBAL_STATE, mt5_client=mt5_client)
     # The live orchestrator, attached by whichever entry point owns it.
     #
     # This was the root of a real bug: the handler only ever received the broker
@@ -538,12 +540,30 @@ class JarvisRequestHandler(BaseHTTPRequestHandler):
             elif path == "/api/history":
                 try:
                     from jarvis.data.database import TRADE_DB
-                    trades = TRADE_DB.fetch_recent_trades(limit=50) or []
-                    
+
+                    # The route answers with a bare array — both existing
+                    # consumers (the classic terminal and the console) read it
+                    # that way — so query params narrow the result rather than
+                    # wrapping it. Callers already send `limit` and `symbol`;
+                    # until now both were ignored and the cap was hardcoded.
+                    try:
+                        limit = int((query.get("limit") or ["200"])[0])
+                    except (TypeError, ValueError):
+                        limit = 200
+                    limit = max(1, min(limit, 2000))
+
+                    try:
+                        days = int((query.get("days") or ["60"])[0])
+                    except (TypeError, ValueError):
+                        days = 60
+                    days = max(1, min(days, 3650))
+
+                    trades = TRADE_DB.fetch_recent_trades(limit=limit) or []
+
                     # Also fetch live closed deals from MT5 broker account
                     if hasattr(self, "mt5_client") and self.mt5_client and getattr(self.mt5_client, "is_connected", False):
                         import MetaTrader5 as _mt5
-                        mt5_deals = _mt5.history_deals_get(datetime.now() - timedelta(days=60), datetime.now())
+                        mt5_deals = _mt5.history_deals_get(datetime.now() - timedelta(days=days), datetime.now())
                         if mt5_deals:
                             existing_tickets = {int(t.get("ticket", 0)) for t in trades if t.get("ticket")}
                             for d in reversed(list(mt5_deals)):
@@ -570,14 +590,25 @@ class JarvisRequestHandler(BaseHTTPRequestHandler):
                                             "type": orig_action,
                                             "entry_price": float(d.price),
                                             "volume": float(d.volume),
+                                            # The merge only keeps out-deals
+                                            # (entry == 1), so this moment
+                                            # really is the close — unlike a
+                                            # journal row, whose `timestamp` is
+                                            # the time it was logged.
                                             "timestamp": datetime.fromtimestamp(d.time, tz=timezone.utc).isoformat(),
+                                            "closed_at": datetime.fromtimestamp(d.time, tz=timezone.utc).isoformat(),
                                             "executor": exec_tag,
                                             "realized_pnl": round(float(d.profit), 2),
                                             "profit": round(float(d.profit), 2)
                                         })
                     # Sort newest first
                     trades.sort(key=lambda x: str(x.get("timestamp", "")), reverse=True)
-                    self._send_json(trades[:50])
+
+                    symbol_filter = str((query.get("symbol") or [""])[0]).strip().upper()
+                    if symbol_filter:
+                        trades = [t for t in trades if str(t.get("symbol", "")).upper() == symbol_filter]
+
+                    self._send_json(trades[:limit])
                 except Exception as e:
                     logger.error(f"Error fetching trade history: {e}")
                     self._send_json({"error": str(e)})
@@ -752,7 +783,12 @@ class JarvisRequestHandler(BaseHTTPRequestHandler):
 
             if path == "/api/copilot/ask":
                 query = data.get("query", "")
-                response_text = self.copilot.ask(query)
+                # The page tells us which instrument the trader is looking at so
+                # "why?" is answered about the chart on screen. Extra keys are
+                # ignored rather than rejected — this endpoint must stay usable
+                # from a one-line curl.
+                context = data.get("context") if isinstance(data.get("context"), dict) else None
+                response_text = self.copilot.ask(query, context=context)
                 self._send_json({"query": query, "response": response_text})
             elif path == "/api/action/auto-select" or path.startswith("/api/backtest/") or path.startswith("/api/intelligence/"):
                 from jarvis.api.intelligence_api import INTELLIGENCE
@@ -838,6 +874,68 @@ class JarvisRequestHandler(BaseHTTPRequestHandler):
                     self._send_json({"status": "FAILED", "error": "Invalid ticket number"}, status_code=400)
                     return
                 res = self.mt5_client.cancel_pending_order(ticket)
+                self._send_json(res)
+            elif path == "/api/action/place_pending_order":
+                sym = str(data.get("symbol", "") or "").strip().upper()
+                otype = str(data.get("order_type", data.get("type", "")) or "").strip().upper()
+                valid_types = {"BUY_LIMIT", "SELL_LIMIT", "BUY_STOP", "SELL_STOP"}
+                if otype not in valid_types:
+                    self._send_json({"status": "FAILED", "error": f"order_type must be one of {sorted(valid_types)}"}, status_code=400)
+                    return
+                if not sym:
+                    self._send_json({"status": "FAILED", "error": "symbol is required"}, status_code=400)
+                    return
+                try:
+                    price = float(data.get("price", 0.0))
+                    lots = float(data.get("lots", data.get("volume", 0.01)))
+                except (TypeError, ValueError):
+                    self._send_json({"status": "FAILED", "error": "price and volume must be numbers"}, status_code=400)
+                    return
+                if not math.isfinite(price) or price <= 0:
+                    self._send_json({"status": "FAILED", "error": "a pending order needs a positive price"}, status_code=400)
+                    return
+                if not math.isfinite(lots) or lots <= 0:
+                    self._send_json({"status": "FAILED", "error": "volume must be a positive finite number"}, status_code=400)
+                    return
+                # A pending order without a stop is legal — unlike a market
+                # order, which the desk requires to carry one — so 0 here means
+                # "none" rather than "invalid".
+                sl = float(data.get("sl", data.get("sl_price", 0.0)) or 0.0)
+                tp = float(data.get("tp", data.get("tp_price", 0.0)) or 0.0)
+                res = self.mt5_client.place_pending_order(
+                    symbol=sym,
+                    order_type=otype,
+                    price=price,
+                    volume=lots,
+                    sl_price=sl if math.isfinite(sl) and sl > 0 else 0.0,
+                    tp_price=tp if math.isfinite(tp) and tp > 0 else 0.0,
+                    comment=str(data.get("comment", "HMAlgo2_Pending"))[:26] or "HMAlgo2_Pending",
+                )
+                self._send_json(res)
+            elif path == "/api/action/modify_pending_order":
+                ticket = int(data.get("ticket", 0) or 0)
+                if ticket <= 0:
+                    self._send_json({"status": "FAILED", "error": "Invalid ticket number"}, status_code=400)
+                    return
+
+                def _level(key: str, *aliases: str) -> Optional[float]:
+                    """None = leave alone; a number = set it (0 clears it)."""
+                    for k in (key,) + aliases:
+                        if k in data and data[k] not in (None, "", "null"):
+                            try:
+                                v = float(data[k])
+                            except (TypeError, ValueError):
+                                return None
+                            return v if math.isfinite(v) and v >= 0 else None
+                    return None
+
+                price = _level("price")
+                sl = _level("sl", "sl_price")
+                tp = _level("tp", "tp_price")
+                if price is None and sl is None and tp is None:
+                    self._send_json({"status": "FAILED", "error": "supply at least one of price, sl, tp"}, status_code=400)
+                    return
+                res = self.mt5_client.modify_pending_order(ticket, price=price, sl=sl, tp=tp)
                 self._send_json(res)
             elif path in ("/api/action/manual_trade", "/api/action/place_order"):
                 sym = data.get("symbol", "XAUUSD")

@@ -288,10 +288,28 @@
           </div>
 
           <div class="tt-field">
+            <label class="tt-field__label" for="ticket-type">Order type</label>
+            <select class="tt-select" id="ticket-type">
+              <option value="MARKET" selected>Market</option>
+              <option value="BUY_LIMIT">Buy limit</option>
+              <option value="SELL_LIMIT">Sell limit</option>
+              <option value="BUY_STOP">Buy stop</option>
+              <option value="SELL_STOP">Sell stop</option>
+            </select>
+            <span class="tt-hint" id="ticket-type-hint">A market order fills now at the broker's quote.</span>
+          </div>
+
+          <div class="tt-field">
             <span class="tt-field__label">Direction</span>
-            <div class="tt-row">
+            <!-- Market orders keep a BUY/SELL pair. A pending type already
+                 encodes its own direction, so it gets a single button. -->
+            <div class="tt-row" id="ticket-market-row">
               <button class="tt-btn tt-btn--buy tt-grow" id="ticket-buy">BUY</button>
               <button class="tt-btn tt-btn--sell tt-grow" id="ticket-sell">SELL</button>
+            </div>
+            <div class="tt-row" id="ticket-pending-row" hidden>
+              <button class="tt-btn tt-btn--primary tt-grow" id="ticket-place">Place order</button>
+              <button class="tt-btn tt-btn--sm" id="ticket-edit-cancel" hidden>Cancel edit</button>
             </div>
           </div>
 
@@ -345,18 +363,35 @@
               <th scope="col" class="tt-num">Price</th>
               <th scope="col" class="tt-num">SL</th>
               <th scope="col" class="tt-num">TP</th>
+              <th scope="col">Actions</th>
             </tr>
           </thead>
           <tbody id="pending-body" data-state="loading"></tbody>
         </table>
       </div>
 
+      <!-- Context column. The analyst and news views stay available as their
+           own tabs; this strip puts a compact read of each beside the ticket so
+           a decision and the calendar that could wreck it are on one screen.
+           It is an addition, not a move — nothing below renders twice. -->
       <div class="tt-panel__head">
-        <h2 class="tt-panel__title">Why this trade</h2>
-        <span class="tt-panel__spacer"></span>
+        <h2 class="tt-panel__title">Context</h2>
         <span class="tt-chip tt-chip--none" id="reason-tier">—</span>
+        <span class="tt-panel__spacer"></span>
+        <div class="tt-seg" role="group" aria-label="Context source">
+          <button class="tt-seg__btn" id="ctx-btn-why" type="button"
+                  data-ctx="why" aria-pressed="true">Why</button>
+          <button class="tt-seg__btn" id="ctx-btn-analyst" type="button"
+                  data-ctx="analyst" aria-pressed="false">Analyst</button>
+          <button class="tt-seg__btn" id="ctx-btn-news" type="button"
+                  data-ctx="news" aria-pressed="false">News</button>
+        </div>
       </div>
-      <div class="tt-panel__body" id="reason-body" data-state="loading" style="flex:1 1 auto"></div>
+      <div class="tt-panel__body" id="ctx-body">
+        <div id="reason-body" data-state="loading"></div>
+        <div id="ctx-analyst" data-state="loading" hidden></div>
+        <div id="ctx-news" data-state="loading" hidden></div>
+      </div>
     </div>
   </section>
 
@@ -576,16 +611,73 @@
       <div class="tt-panel__head">
         <h2 class="tt-panel__title">Trade history</h2>
         <span class="tt-panel__count" id="hist-count">0</span>
+        <span class="tt-panel__spacer"></span>
+        <button class="tt-btn tt-btn--sm" id="hist-refresh" title="Reload closed trades">Refresh</button>
       </div>
+
+      <!-- Filters run client-side over the rows already fetched, so changing
+           one is instant and never re-queries the database. -->
+      <div class="tt-panel__body">
+        <div class="tt-pad">
+          <div class="tt-row tt-wrap" style="gap:var(--hm-space-3)">
+            <div class="tt-field tt-grow" style="margin:0;min-width:110px">
+              <label class="tt-field__label" for="hist-filter-symbol">Symbol</label>
+              <input class="tt-input" id="hist-filter-symbol" placeholder="All" autocomplete="off" spellcheck="false">
+            </div>
+            <div class="tt-field tt-grow" style="margin:0;min-width:100px">
+              <label class="tt-field__label" for="hist-filter-side">Side</label>
+              <select class="tt-select" id="hist-filter-side">
+                <option value="ALL" selected>All</option>
+                <option value="BUY">Buy</option>
+                <option value="SELL">Sell</option>
+              </select>
+            </div>
+            <div class="tt-field tt-grow" style="margin:0;min-width:110px">
+              <label class="tt-field__label" for="hist-filter-source">Executor</label>
+              <select class="tt-select" id="hist-filter-source">
+                <option value="ALL" selected>All</option>
+                <option value="AI">Bot (AI)</option>
+                <option value="MANUAL">Manual</option>
+              </select>
+            </div>
+            <div class="tt-field tt-grow" style="margin:0;min-width:100px">
+              <label class="tt-field__label" for="hist-filter-outcome">Outcome</label>
+              <select class="tt-select" id="hist-filter-outcome">
+                <option value="ALL" selected>All</option>
+                <option value="WIN">Win</option>
+                <option value="LOSS">Loss</option>
+                <option value="FLAT">Break-even</option>
+                <option value="OPEN">Unrealised</option>
+              </select>
+            </div>
+            <div class="tt-field tt-grow" style="margin:0;min-width:100px">
+              <label class="tt-field__label" for="hist-filter-days">Window</label>
+              <select class="tt-select" id="hist-filter-days">
+                <option value="7">7 days</option>
+                <option value="30">30 days</option>
+                <option value="60" selected>60 days</option>
+                <option value="365">1 year</option>
+              </select>
+            </div>
+          </div>
+          <span class="tt-hint" id="hist-summary">—</span>
+        </div>
+      </div>
+
       <div class="tt-panel__body tt-panel__body--flush">
         <table class="tt-table">
           <thead>
             <tr>
-              <th scope="col">Closed</th>
+              <th scope="col">Ticket</th>
               <th scope="col">Symbol</th>
-              <th scope="col">Side</th>
-              <th scope="col" class="tt-num">Vol</th>
-              <th scope="col" class="tt-num">P&amp;L</th>
+              <th scope="col">Action</th>
+              <th scope="col">Executor</th>
+              <th scope="col" class="tt-num">Lots</th>
+              <th scope="col" class="tt-num">Entry</th>
+              <th scope="col" class="tt-num">SL</th>
+              <th scope="col" class="tt-num">TP</th>
+              <th scope="col" class="tt-num">Realized PnL</th>
+              <th scope="col">Execution time</th>
             </tr>
           </thead>
           <tbody id="hist-body" data-state="loading"></tbody>
@@ -694,6 +786,7 @@
           <fieldset style="border:1px solid var(--hm-border);border-radius:var(--hm-radius-sm);padding:var(--hm-space-2) var(--hm-space-3);margin:0 0 var(--hm-space-3)">
             <legend class="tt-field__label">Search grid</legend>
             <div class="tt-row tt-wrap" id="bt-grid"></div>
+            <span class="tt-hint" id="bt-grid-hint">Loading dimensions…</span>
           </fieldset>
 
           <div class="tt-row">
@@ -747,7 +840,7 @@
             <tr>
               <th scope="col">Job</th>
               <th scope="col">Status</th>
-              <th scope="col" class="tt-num">Progress</th>
+              <th scope="col" class="tt-num">Steps</th>
               <th scope="col">Started</th>
             </tr>
           </thead>
@@ -768,6 +861,30 @@
   <span class="tt-rail__spacer"></span>
   <span class="tt-status__item" id="status-version">—</span>
 </footer>
+
+<!-- ── Copilot ───────────────────────────────────────────────────────── -->
+<!-- Talks about the book in front of the trader: the open positions, the
+     closed journal and the engine's own decision record. The focused symbol is
+     sent with every question so "why?" means "why this chart". -->
+<button class="tt-copilot__fab" id="copilot-fab" type="button"
+        aria-expanded="false" aria-controls="copilot-panel" title="Ask JARVIS">🤖</button>
+
+<aside class="tt-copilot" id="copilot-panel" aria-label="Copilot" hidden>
+  <div class="tt-copilot__head">
+    <h2 class="tt-panel__title">Ask JARVIS</h2>
+    <span class="tt-panel__spacer"></span>
+    <span class="tt-chip tt-chip--muted" id="copilot-focus">—</span>
+    <button class="tt-btn tt-btn--sm" id="copilot-clear" type="button">Clear</button>
+    <button class="tt-btn tt-btn--sm" id="copilot-close" type="button" aria-label="Close copilot">✕</button>
+  </div>
+  <div class="tt-copilot__log" id="copilot-log" aria-live="polite"></div>
+  <form class="tt-copilot__bar" id="copilot-form">
+    <label class="tt-sr-only" for="copilot-input">Ask JARVIS</label>
+    <input class="tt-input" id="copilot-input" type="text" autocomplete="off"
+           placeholder="Ask about your trades, a symbol, or the market…">
+    <button class="tt-btn tt-btn--primary" type="submit" id="copilot-send">Send</button>
+  </form>
+</aside>
 
 <div class="tt-toasts" id="toasts" aria-live="assertive" aria-atomic="false"></div>
 

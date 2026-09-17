@@ -92,6 +92,21 @@
 /* ── Reset scoped to the dashboard ──────────────────────────────────────── */
 .tt-app *, .tt-app *::before, .tt-app *::after { box-sizing: border-box; }
 
+/* `hidden` has to actually hide. The UA rule for it is `[hidden]{display:none}`
+   at the weakest specificity there is, so ANY class that declares a `display`
+   silently beats it and leaves the element on screen: a closed dropdown, a
+   dismissed drawer, a ticket row that is not the active order type. This has
+   now bitten three times in this file (the dropdown panel, the copilot dock,
+   and the order ticket's pending row - which showed "Place order" next to the
+   BUY/SELL pair while the type was still Market), so it is stated once, here,
+   rather than re-derived per component. `!important` is deliberate: it has to
+   outrank the component's own `display`, and nothing in this file should be
+   setting `hidden` while expecting it not to apply.
+   The per-component restatements further down (.tt-dropdown__panel, .tt-copilot,
+   .tt-chart__hud, .tt-chart__tooltip) are now redundant but harmless, and each
+   still carries the note explaining what went wrong there. */
+.tt-app [hidden] { display: none !important; }
+
 .tt-app {
   margin: 0;
   /* A DEFINITE height, not `min-height`. With `min-height: 100vh` the grid
@@ -768,7 +783,86 @@
 .tt-status__item { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
 .tt-status__item b { color: var(--hm-text-secondary); font-weight: var(--hm-weight-medium); }
 
-/* ── Toast ──────────────────────────────────────────────────────────────── */
+/* ── Copilot dock ────────────────────────────────────────────────────────── */
+/* A slide-over rather than a modal: the trader keeps the chart in view while
+   asking about it. It is anchored bottom-right, so it DOES sit over the lower
+   half of the right rail - the order ticket. That is the trade-off of a drawer
+   in an app whose right rail is the ticket; closing it restores the ticket.
+   What it must not do is be see-through. `--hm-bg-panel` was a token that does
+   not exist, so the declaration was dropped, the panel rendered fully
+   transparent, and the ticket's stop-loss / take-profit fields showed straight
+   through the chat log. Opaque overlay, like the dropdowns and toasts. */
+.tt-copilot {
+  position: fixed;
+  right: var(--hm-space-4);
+  bottom: calc(var(--hm-space-4) + 26px);
+  width: min(400px, calc(100vw - var(--hm-space-6)));
+  height: min(560px, calc(100vh - 120px));
+  display: flex; flex-direction: column;
+  background: var(--hm-bg-overlay);
+  border: 1px solid var(--hm-border-strong);
+  border-radius: var(--hm-radius-lg);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.45);
+  z-index: var(--hm-z-toast);
+  overflow: hidden;
+}
+/* `[hidden]` is a UA rule and loses to the `display: flex` above, so the panel
+   would render open on load and cover the order ticket. It has to be restated
+   with the class attached. */
+.tt-copilot[hidden] { display: none; }
+.tt-copilot__head {
+  display: flex; align-items: center; gap: var(--hm-space-2);
+  padding: var(--hm-space-3) var(--hm-space-4);
+  border-bottom: 1px solid var(--hm-border-subtle);
+  background: var(--hm-bg-raised);
+  flex: 0 0 auto;
+}
+.tt-copilot__log {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: var(--hm-space-3) var(--hm-space-4);
+  display: flex; flex-direction: column; gap: var(--hm-space-3);
+}
+.tt-copilot__msg { font-size: var(--hm-text-sm); line-height: 1.5; }
+.tt-copilot__msg--user {
+  align-self: flex-end;
+  max-width: 88%;
+  padding: var(--hm-space-2) var(--hm-space-3);
+  background: var(--hm-bg-hover);
+  border: 1px solid var(--hm-border-subtle);
+  border-radius: var(--hm-radius-sm);
+  white-space: pre-wrap;
+}
+.tt-copilot__msg--bot { align-self: stretch; color: var(--hm-text-primary); }
+.tt-copilot__msg--bot ul { margin: var(--hm-space-2) 0; padding-left: var(--hm-space-5); }
+.tt-copilot__msg--bot li { margin-bottom: 2px; }
+.tt-copilot__msg--error { color: var(--tt-down); }
+.tt-copilot__msg--pending { color: var(--hm-text-dim); }
+.tt-copilot__bar {
+  display: flex; gap: var(--hm-space-2);
+  padding: var(--hm-space-3);
+  border-top: 1px solid var(--hm-border-subtle);
+  background: var(--hm-bg-raised);
+  flex: 0 0 auto;
+}
+.tt-copilot__bar .tt-input { flex: 1 1 auto; min-width: 0; }
+.tt-copilot__fab {
+  position: fixed;
+  right: var(--hm-space-4);
+  bottom: calc(var(--hm-space-4) + 26px);
+  z-index: var(--hm-z-toast);
+  width: 46px; height: 46px;
+  border-radius: 50%;
+  border: 1px solid var(--hm-border-strong);
+  background: var(--hm-bg-overlay);
+  color: var(--hm-text-primary);
+  font-size: 20px; line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.4);
+}
+.tt-copilot__fab:hover { background: var(--hm-bg-hover); }
+.tt-copilot__fab[aria-expanded="true"] { display: none; }
+
 .tt-toasts {
   position: fixed;
   right: var(--hm-space-4);
@@ -1680,10 +1774,28 @@
 .tt-panel--chart > .tt-panel__body--flush { flex: 0 0 auto; max-height: 34%; }
 
 /* Order ticket: the form takes what it needs, pending orders are capped, and
-   the reasoning fills whatever is left. */
-.tt-panel--ticket > .tt-panel__body { flex: 0 1 auto; }
+   the reasoning fills whatever is left.
+
+   The form is NOT negotiable. The panel stacks three regions - the order form,
+   the pending-orders table and the context strip - whose natural heights sum to
+   far more than the panel holds (526 + 144 + 668 against ~834px). Letting them
+   flex-compete squashed the FORM to 252px of its 526px, which cut the BUY/SELL
+   row in half and pushed the volume / stop-loss / take-profit fields entirely
+   out of sight: the primary action of the whole app, behind a 252px scroll box.
+   Each region now keeps its natural height and the PANEL scrolls as one column,
+   so the form is whole at rest and the context strip is a scroll below it. */
+.tt-panel--ticket { overflow-y: auto; }
+.tt-panel--ticket > .tt-panel__body { flex: 0 0 auto; }
 .tt-panel--ticket > .tt-panel__body--flush { flex: 0 0 auto; max-height: 32%; }
-.tt-panel--ticket > #reason-body { flex: 1 1 auto; min-height: 0; }
+.tt-panel--ticket > #ctx-body { flex: 0 0 auto; }
+
+/* Trade history: the filter toolbar is a fixed strip and the table takes the
+   rest. `.tt-panel__body` is `flex: 1 1 auto` with `min-height: 0`, so with two
+   bodies in one panel the table won the space and squashed the toolbar to 38px
+   of its 116px - the filters rendered, but clipped to an unreadable sliver.
+   A toolbar is not a scroll region, so it must not flex. `--flush` is the
+   table body and keeps the default. */
+.tt-slot--hist > .tt-panel__body:not(.tt-panel__body--flush) { flex: 0 0 auto; }
 
 
 /* ── Heading hierarchy ───────────────────────────────────────────────────── */

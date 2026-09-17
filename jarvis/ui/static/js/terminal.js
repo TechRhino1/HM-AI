@@ -2355,20 +2355,43 @@
         el.copilotInput.value = "";
         el.copilotMessages.scrollTop = el.copilotMessages.scrollHeight;
 
+        const headers = { "Content-Type": "application/json" };
+        // The session cookie is HttpOnly, so it is sent automatically — but a
+        // remote session authenticates with a bearer token instead, and without
+        // this header every remote ask came back 401 and rendered as a blank
+        // bubble with the error only in the console.
+        try {
+            const t = window.getAuthToken ? window.getAuthToken() : "";
+            if (t) headers["Authorization"] = "Bearer " + t;
+        } catch (e) { /* token is optional for local sessions */ }
+
+        const bubble = (html, isErr) => {
+            const b = document.createElement("div");
+            b.className = "copilot-bubble" + (isErr ? " copilot-bubble--error" : "");
+            b.innerHTML = html;
+            el.copilotMessages.appendChild(b);
+            el.copilotMessages.scrollTop = el.copilotMessages.scrollHeight;
+        };
+
         try {
             const res = await fetch("/api/copilot/ask", {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ query })
+                headers: headers,
+                credentials: "same-origin",
+                body: JSON.stringify({
+                    query,
+                    context: { symbol: state.symbol || null, view: "classic" }
+                })
             });
-            const data = await res.json();
-            const aiBubble = document.createElement("div");
-            aiBubble.className = "copilot-bubble";
-            aiBubble.innerHTML = `🤖 <b>HM Algo 2.0:</b><br>${data.response || 'No response.'}`;
-            el.copilotMessages.appendChild(aiBubble);
-            el.copilotMessages.scrollTop = el.copilotMessages.scrollHeight;
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                bubble(`🤖 <b>Copilot unavailable</b> (HTTP ${res.status})<br>${data.error || "Authentication required or server refused the request."}`, true);
+                return;
+            }
+            bubble(`🤖 <b>HM Algo 2.0:</b><br>${data.response || "No response."}`);
         } catch (err) {
             console.error("Copilot error:", err);
+            bubble(`🤖 <b>Could not reach the copilot.</b><br>${err.message || err}`, true);
         }
     };
 

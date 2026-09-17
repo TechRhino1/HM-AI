@@ -901,8 +901,14 @@ function report() {
   console.log('\npending orders');
   const pend = registry.get('pending-body');
   const pendHtml = pend ? pend.innerHTML : '';
-  ok('numeric MT5 order type is mapped to a readable name',
-    pendHtml.indexOf('BUY STOP') >= 0,
+  /* MT5's ORDER_TYPE_* enum starts at BUY=0 / SELL=1, so the pending types begin
+     at 2: BUY_LIMIT. The fixture below is type 2 with comment 'limit', and the
+     backend's own place_pending_order maps "BUY_LIMIT" to the literal 2. An
+     earlier assertion here expected 'BUY STOP', which encoded an off-by-two in
+     the frontend's map rather than catching it — every live LIMIT was labelled
+     a STOP. Assert the exact label AND that the neighbouring type is absent. */
+  ok('numeric MT5 order type 2 renders as BUY LIMIT',
+    pendHtml.indexOf('BUY LIMIT') >= 0 && pendHtml.indexOf('BUY STOP') < 0,
     pendHtml.replace(/\s+/g, ' ').slice(0, 200));
   ok('pending order shows price, stop and target at symbol precision',
     ['98.50', '96.00', '104.00'].every((t) => pendHtml.indexOf(t) >= 0),

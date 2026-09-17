@@ -38,6 +38,8 @@ POST_ONLY = {
     "/api/action/close_all_positions",
     "/api/action/close_position",
     "/api/action/manual_trade",
+    "/api/action/modify_pending_order",
+    "/api/action/place_pending_order",
     "/api/action/set_mode",
     "/api/action/set_trade_style",
     "/api/action/toggle_safe_mode",

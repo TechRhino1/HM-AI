@@ -41,6 +41,21 @@ in a way that no error message explains.
 * **A short screenshot wait measures the provider timeout, not the page.** `.scratch/shot_one.js` waits
   2.5s, which is well inside the 30s `provider` budget, so the screener photographs as "Loading…" while
   the API has already returned 40 rows. Wait past the timeout before concluding a panel is empty.
+* **`curl` to a local port can fail with "upstream connect failed".** `http_proxy`/`https_proxy` are
+  set in this shell (`http://127.0.0.1:15838`), so curl routes even `127.0.0.1` through it and the
+  error text names a proxy, not the server. **Use `curl --noproxy '*'` for any local probe** — the
+  "connection refused" story it tells is otherwise entirely fictitious.
+* **A background process started with `&` inside a Bash call dies when that call returns.** It looks
+  alive for the rest of the same invocation (the first probe can succeed) and is gone by the next, so
+  the failure reads as a server that crashed on request. Use the tool's own
+  `run_in_background: true`, then verify with `netstat -ano | grep <port> | grep LISTENING`.
+* **The live server holds the *old* Python.** `/api/*` behaviour must be verified against a
+  **second** instance on another port (`JARVIS_PORT` is honoured; `.scratch/verify_server.py` boots a
+  standalone UI+REST server on :8599 with a paper client) rather than by killing the engine the user
+  is running. `verify_ui_live.py` binds :8599 itself, so it needs that port free.
+* **`data/jarvis_history.db` is the live journal; `jarvis_history.db` at the repo root is a stale
+  copy.** `TRADE_DB.db_path` names the real one. Inspecting the root file gives you old rows and a
+  missing `closed_at` column that makes a working migration look broken.
 
 ## Frontend
 
@@ -68,6 +83,25 @@ in a way that no error message explains.
   positioned `::before` (a positioned pseudo-element paints *above* non-positioned in-flow text); and
   an `@supports not (backdrop-filter…)` fallback must be declared **after** the rules it overrides, or
   it loses on source order and ships a translucent, unblurred panel.
+* **An enum map that starts at the wrong index is invisible until you read the broker's own literal.**
+  `dashboard.js`'s `PENDING_TYPES` mapped `0:'BUY LIMIT', 1:'SELL LIMIT', 2:'BUY STOP'` — but MT5's
+  `ORDER_TYPE_*` starts at **BUY=0 / SELL=1**, so the pending types begin at **2**. Every live LIMIT
+  was labelled a STOP and vice versa. The repo already held the truth
+  (`mt5_client.place_pending_order`: `"BUY_LIMIT": getattr(mt5, "ORDER_TYPE_BUY_LIMIT", 2)`) — check
+  the placement code before writing a display map. Worse, `verify_dashboard_render.js` *asserted* the
+  bug (`type: 2` expected to render `'BUY STOP'`), so the test was the thing keeping it alive.
+* **A frontend that reads a key the server never sends renders the empty state on success.** Two of
+  these in one day, both looking like "the feature is broken":
+  * `renderBacktestResult` looked for `report.per_symbol || report.symbols`. The optimiser's report is
+    `{modes[], series[]}` — **per trading style** — so a good run always said "no results". It also
+    never unwrapped `payload.job.result` (the result is nested one level deeper than the wrapper).
+    Rule: read the *report file* on disk before writing the reader.
+  * `console.js` did `data.trades || data.history` against `/api/history`, which returns a **bare
+    array**. Accept both shapes.
+* **`Date.parse` reads a zoneless string as LOCAL time.** `"2026-09-11 08:09:50"` (the shape
+  `PositionSnapshot.open_time` uses, and the broker's own UTC stamp) parses as machine-local unless a
+  zone is appended. Any marker or countdown built from one lands hours off. Normalise: if there is no
+  trailing `Z`/`±HH:MM`, insert `T` for the space and append `Z`.
 * **`apiRequest` never rejects.** Its `.catch` normalises every transport failure — including
   `Failed to fetch` and aborts — into a **resolved** `{ok:false, status:0, error}`. So a missing
   `.catch` on a caller is *not* a bug and adding one is dead code. The real defect was that `error`
@@ -224,10 +258,34 @@ in a way that no error message explains.
   legitimately. Fix: `monkeypatch.setattr(client, "_reconnect_if_needed", lambda: None)` **and** pin
   `client.mode = "live"` after construction. Ask "would this fail for the right reason here?" — a
   signature change alone makes a test fail, which proves nothing about the behaviour.
+* **A test can assert the bug rather than catch it.** `verify_dashboard_render.js` asserted that
+  MT5 order type `2` renders `'BUY STOP'` — encoding the off-by-two rather than exposing it, so
+  fixing the map turned the suite red and the "correct" move looked like reverting. When a fix breaks
+  a test, check whether the *fixture* agrees with the spec (here: `type: 2`, `comment: 'limit'`, and
+  the backend's own `ORDER_TYPE_BUY_LIMIT = 2`) before believing the test. Rewrite it to assert the
+  exact label **and** the absence of the neighbouring one, so it cannot pass by accident again.
+* **`audit_endpoints.py` probes everything with GET.** A new `POST`-only action therefore reports
+  **DEAD** with an HTML 404 even though it works — add it to the `POST_ONLY` set in that file. The
+  count of discovered endpoints also rises, so "46/46" replacing "44/44" is the fix landing, not a
+  regression.
 * **A pre-existing test can depend on the absence of a validation you are adding.**
   `test_a2_paper_modify_and_close_status` passed incoherent SL/TP and a positional `1.0950` that landed
   in `comment` instead of `tp_price`; it only "worked" because nothing checked. When adding a guard,
   grep the suite for callers that relied on it not existing.
+* **The three browser suites take three different env vars, and the obvious name is not one of
+  them.** `verify_ui_layout.js` reads `JARVIS_BASE`; `verify_dashboard_nav.js` reads `DASH_URL`;
+  `verify_dashboard_render.js` reads neither because it is **file-based** (it loads `dashboard.js`
+  and `dashboard.html` from disk into a `vm`, so it needs no server at all). Setting `JARVIS_PORT`
+  — the name the `.scratch/` screenshot helpers use — is silently ignored by all three, and every
+  run quietly targets the default `http://127.0.0.1:8501`: **the user's live engine.** Frontend
+  results are still valid there (CSS/JS/templates are re-read per request, unlike Python), but you
+  are hammering the user's process, and once it gets busy a single-threaded dev server starts
+  refusing connections — `net::ERR_CONNECTION_REFUSED` against a port that `netstat` still shows as
+  LISTENING. Point them at a scratch server explicitly:
+  `JARVIS_BASE=http://127.0.0.1:8599 node tools/verify_ui_layout.js`.
+* **Run the browser suites one at a time.** Three suites plus a probe in parallel starved the
+  `forex` and `options` pages into 45s navigation timeouts, which report identically to a real
+  regression. Two "failures" that vanish on a solo re-run were contention, not code.
 
 ## Data integrity
 
@@ -344,3 +402,40 @@ in a way that no error message explains.
   stores `spread_pips`; a tool that instead multiplied the bars' raw `spread` by `pip_size` reported
   AUDUSD at 1.91R per trade when it costs 0.19R. **Consume the stored column.** If a stored value and
   a recomputed one disagree, suspect the recomputation — the scanner had it right.
+
+## CSS: visibility and flex starvation
+
+* **`[hidden]` loses to any class that declares `display`.** The UA rule is `[hidden]{display:none}`
+  at the lowest specificity there is, so `.tt-row { display: flex }` beats it and a row that is
+  *supposed* to be gone stays on screen at full height. This has now bitten three times in
+  `theme_terminal.css` (the dropdown panel, the copilot dock, the ticket's pending row — which showed
+  "Place order" beside the BUY/SELL pair while the type was still Market). Fixed once for all with
+  `.tt-app [hidden] { display: none !important; }` in the reset block. **Assert the computed
+  `display`, not the attribute** — the attribute was correct the whole time. `#ticket-pending-row`
+  had `hidden` and still measured 44px.
+* **In a flex column, two `flex: 1 1 auto; min-height: 0` siblings starve the first one.** The
+  history panel stacks a filter toolbar and a table, both `.tt-panel__body`; the table won and the
+  toolbar was squashed to **38px of its 116px** — controls rendered, clipped to an unlabelled sliver.
+  `verify_ui_layout.js` reported "no silently clipped content" throughout, because that check only
+  compared `scrollWidth > clientWidth` and only accepted `overflowX: hidden|clip`. **`overflow: auto`
+  conceals a squashed box exactly as well as `hidden` does.** A toolbar is not a scroll region: it
+  needs `flex: 0 0 auto`.
+* **A panel can be over-subscribed and no flex setting fixes it.** The ticket holds the order form
+  (526px), the pending table (144px) and the context strip (668px) in ~834px. Flex-competing cut the
+  **form** to 252px, halving BUY/SELL and hiding volume/SL/TP entirely — the primary action of the
+  app behind a scroll box. The form is not negotiable, so every region keeps its natural height and
+  the panel scrolls as one column. Before adding a region to a panel, **sum the natural heights**;
+  if they exceed the panel, decide which one scrolls rather than letting flex decide.
+* **Designing a new guard: measure the thing that cannot be satisfied, not the thing that usually
+  is.** The first attempt at the vertical-clip rule flagged any box shorter than its first child,
+  which fired on `#selection-body` (35px over 442px of rows) and six other legitimate scroll lists —
+  seven false positives, i.e. a check that gets ignored. The rule that works flags a box that cannot
+  show **one whole control it contains** (`clientHeight < tallest input/select/button`): the squashed
+  toolbar (38 < 44) fires, the lists (no controls) do not, and the table body (454 over a 276-row
+  table) does not. **Always negative-test a new guard** — restore the defect, confirm it goes red,
+  and confirm it stays green everywhere else.
+* **`audit_endpoints.py` probes `http://127.0.0.1:8501` by default — the live engine.** Two brand-new
+  routes reported DEAD with an HTML 404 purely because that process predated the code. Use
+  `--base http://127.0.0.1:8599` against a server started from the current tree before believing a
+  route is broken. Same run, same code: **2 dead against the stale process, 0 dead against a fresh
+  one.** A stale process is the first hypothesis for any "route vanished" result.

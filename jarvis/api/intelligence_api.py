@@ -471,6 +471,42 @@ def _spec_kwargs(raw: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
+#: The five axes a caller may narrow. Order is irrelevant but the set is fixed —
+#: an unknown name in a request is ignored rather than widening the grid.
+_SPACE_DIMENSIONS = ("tp_r", "be_trigger_r", "fast_cash_r", "trail_atr", "min_score_quantiles")
+
+#: Value each axis collapses to when a caller does *not* ask to search it. These
+#: mirror the console's own collapse defaults so both UIs submit the same grid
+#: for the same set of ticked boxes.
+_SPACE_COLLAPSED: Dict[str, Tuple[Any, ...]] = {
+    "tp_r": (2.5,),
+    "be_trigger_r": (None,),
+    "fast_cash_r": (None,),
+    "trail_atr": (None,),
+    "min_score_quantiles": (0.0, 0.97),
+}
+
+
+def _grid_from_dimension_names(names: Any) -> Dict[str, Any]:
+    """Translate the legacy ``grid_dimensions`` shape into a ``space`` dict.
+
+    The dashboard used to send only the *names* of the dimensions to search.
+    ``_spec_kwargs`` does not whitelist that key, so it never reached the
+    dataclass and every run silently used the full 1920-geometry default —
+    the "Search grid" checkboxes looked live but were inert. Accepting the old
+    key keeps any saved/bookmarked request body working, and keeps the fix on
+    the server rather than only in one browser bundle.
+    """
+    if not isinstance(names, (list, tuple)):
+        return {}
+    wanted = {str(n).strip() for n in names}
+    base = GeometrySpace()
+    return {
+        dim: (list(getattr(base, dim)) if dim in wanted else list(_SPACE_COLLAPSED[dim]))
+        for dim in _SPACE_DIMENSIONS
+    }
+
+
 def _space_from_spec(raw: Dict[str, Any]) -> GeometrySpace:
     """Build the search grid, honouring optional narrowing from the request.
 
@@ -478,9 +514,17 @@ def _space_from_spec(raw: Dict[str, Any]) -> GeometrySpace:
     product is 1920 geometries per mode, which is far more than a few-minute
     budget allows, so exposing the dimensions is what makes the endpoint usable
     interactively rather than only as a batch tool.
+
+    Two request shapes are accepted. ``space`` is explicit per-axis values and
+    wins. ``grid_dimensions`` is the legacy list of axis names and is only
+    consulted when ``space`` is absent, so a caller that sends ``space: {}``
+    ("search everything") is not mistaken for one that sent nothing.
     """
     space = GeometrySpace()
-    grid = (raw or {}).get("space") or {}
+    raw = raw or {}
+    grid = raw.get("space")
+    if not isinstance(grid, dict):
+        grid = _grid_from_dimension_names(raw.get("grid_dimensions"))
     if not isinstance(grid, dict):
         return space
 
