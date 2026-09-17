@@ -2,12 +2,17 @@
 HM Algo 2.0 — Parallel Analyst Cluster Orchestrator.
 Dispatches all specialized analyst agents concurrently via asyncio / ThreadPool with timeout protection.
 """
+import logging
 import time
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from typing import Dict, List, Tuple, Any
 
-from jarvis.data.schemas import MarketContext, RegimeOutput, AnalystReport, DevilAdvocateReport
+from jarvis.data.schemas import (
+    MarketContext, RegimeOutput, AnalystReport, DevilAdvocateReport, AnalystRole,
+)
+
+logger = logging.getLogger("JARVIS_AnalystCluster")
 from jarvis.analysts.structure_analyst import StructureAnalyst
 from jarvis.analysts.momentum_analyst import MomentumAnalyst
 from jarvis.analysts.liquidity_analyst import LiquidityAnalyst
@@ -16,6 +21,19 @@ from jarvis.analysts.macro_analyst import MacroAnalyst
 from jarvis.analysts.risk_analyst import RiskAnalyst
 from jarvis.analysts.devil_advocate import DevilAdvocateAnalyst
 from jarvis.application.timeout_guard import TimeoutGuard
+
+def _analyst_role(role_name: str):
+    """The AnalystRole for a role name, falling back to the raw string.
+
+    `AnalystReport.role` is typed `AnalystRole`, but the fallback used to pass
+    the plain string. `AnalystRole` is a `str`-Enum so the two compare equal,
+    which is why it went unnoticed — but only the enum has `.name`/`.value`.
+    """
+    try:
+        return AnalystRole(role_name)
+    except Exception:
+        return role_name
+
 
 class ParallelAnalystCluster:
     """Runs all 7 specialized analyst agents concurrently or sequentially to minimize latency."""
@@ -69,10 +87,23 @@ class ParallelAnalystCluster:
         for role_name, fut in futures.items():
             try:
                 reports[role_name] = fut.result(timeout=self.timeout_sec)
-            except Exception:
-                # Instant zero-overhead fallback report if worker times out or errors
+            except Exception as exc:
+                # Instant zero-overhead fallback report if worker times out or
+                # errors. WAS SILENT: a dead analyst was indistinguishable from a
+                # genuine neutral one, and score=50.0 flows into the same
+                # aggregation as a real reading.
+                #
+                # NOTE this is fail-OPEN by construction and is left that way on
+                # purpose: the alternative (fail closed) would block the trade
+                # whenever an analyst is merely slow, which is worse than
+                # analysing without it. What must not happen is silence — hence
+                # the warning, and the "timeout / neutral fallback" entry in
+                # `evidence`, which is the only thing downstream can inspect.
+                logger.warning("Analyst %s failed or timed out after %.2fs (%s: %s) "
+                               "-- substituting a NEUTRAL score-50 fallback.",
+                               role_name, self.timeout_sec, type(exc).__name__, exc)
                 reports[role_name] = AnalystReport(
-                    role=role_name,
+                    role=_analyst_role(role_name),
                     symbol=context.symbol,
                     bias="NEUTRAL",
                     score=50.0,
@@ -83,7 +114,26 @@ class ParallelAnalystCluster:
 
         try:
             devil_report = devil_future.result(timeout=self.timeout_sec)
-        except Exception:
+        except Exception as exc:
+            # FAIL-OPEN, and the most consequential fallback in the file.
+            #
+            # `decision_engine:644` gates on
+            #   "Devil Adversarial Guard": penalty_score <= max_devil_penalty  (43.0)
+            # so penalty_score=0.0 always PASSES: when the critic times out the
+            # adversarial check is not merely weakened, it is removed. Worse,
+            # penalty_score is also fed to the ML feature vector (:192) and
+            # recorded as `adversarial_penalty` in the scan columns
+            # (signal_scan.py:303), where 0.0 is then indistinguishable from "the
+            # critic examined this and found nothing wrong".
+            #
+            # Left fail-open deliberately — blocking every trade on a slow critic
+            # is worse than trading uncriticised — but it is now loud, and
+            # critique_confidence is 0.0 rather than the default 1.0 so a
+            # fallback cannot claim confidence it does not have.
+            logger.warning("Devil's Advocate failed or timed out after %.2fs (%s: %s) "
+                           "-- substituting penalty 0.0, which PASSES the "
+                           "adversarial guard. This trade is uncriticised.",
+                           self.timeout_sec, type(exc).__name__, exc)
             devil_report = DevilAdvocateReport(
                 symbol=context.symbol,
                 counter_bias="NEUTRAL",
@@ -91,7 +141,8 @@ class ParallelAnalystCluster:
                 invalidation_risk_coefficient=1.0,
                 threats_detected=[],
                 invalidation_triggers=[],
-                liquidity_traps=[]
+                liquidity_traps=[],
+                critique_confidence=0.0,
             )
 
         return reports, devil_report
