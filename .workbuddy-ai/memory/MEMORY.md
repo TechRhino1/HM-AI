@@ -49,9 +49,14 @@ branch test; 657 when this skill was written). `tools/`:
 nothing may be listening there, or its probes hit the engine-less scratch server and read as
 `attached=False` / `503`, which looks exactly like a regression. Run the browser suites against
 **`.scratch/srv8611.py` on :8611** instead. Its total is *conditional*: 45 with no engine, 46 with one) ·
-`verify_dashboard_render.js` (**191** — was 88; the backtest fixture added 23, the history fixture 19,
-auto-selection + regime-policy 22, the order path 15, the copilot panel 15, trade markers 8. Its chart
-  stub records `setMarkers`; a no-op stub there made `drawTradeMarkers` wholly unobservable) ·
+`verify_dashboard_render.js` (**209** — was 88; the backtest fixture added 23, the history fixture 19,
+auto-selection + regime-policy 22, the order path 15, the copilot panel 15, trade markers 8, the
+Analyst/News context strip 18. Its chart stub records `setMarkers`; a no-op stub there made
+`drawTradeMarkers` wholly unobservable. **A stub must mirror the real markup's initial state**: the strip's
+panels ship `hidden` + `data-state="loading"` in `dashboard.html`, and both renderers early-return on a
+hidden host — leave them visible and the full analyst panel's refresh makes `setContext()`'s own render
+look redundant. Build nodes with `elementFor(id)`, never `registry.get(id)` (a lazy Map: un-queried ids
+return `undefined`)) ·
 `verify_copilot_render.js` (**23** — the copilot answer renderer exists in **two** front ends and this
 evaluates both and asserts they agree; it exists because they had already drifted into a formatting bug
 in one and an XSS in the other) ·

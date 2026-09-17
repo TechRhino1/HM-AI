@@ -72,7 +72,11 @@ const TEMPLATE_TREE = {
                  'pos-count', 'pos-total', 'pos-body', 'ticket-source', 'ticket-symbol',
                  'ticket-buy', 'ticket-sell', 'ticket-volume', 'ticket-price',
                  'ticket-sl', 'ticket-tp', 'ticket-hint', 'pending-count',
-                 'pending-refresh', 'pending-body', 'reason-tier', 'reason-body'],
+                 'pending-refresh', 'pending-body', 'reason-tier', 'reason-body',
+                 /* The context strip beside the ticket (item 5: Analyst and News
+                    surfaced inside the trade page). It writes to its own
+                    containers so no id is shared with the full panels. */
+                 'ctx-analyst', 'ctx-news'],
   'view-news': ['news-count', 'news-live-chip', 'news-impact', 'news-currency',
                 'news-refresh', 'news-body', 'news-updated', 'news-hero',
                 'news-detail-impact', 'news-detail'],
@@ -92,6 +96,46 @@ const dom = createDom({
 });
 const { documentStub, registry, requestedIds, prelinked, elementFor,
         linkTree, fireDocument, deepHtml, selectAll } = dom;
+
+/* ── The context strip, as dashboard.html:383-393 declares it ────────────────
+   The buttons carry `data-ctx` and no id, so the template tree (which builds
+   nodes by id) cannot create them — yet setContext() and bind() both find them
+   with `document.querySelectorAll('[data-ctx]')`. Without them the strip has no
+   controls at all, which is exactly the kind of gap a stub hides.
+
+   The two panels are created in the state the real markup ships them in:
+   `hidden`, with `data-state="loading"`. That detail is load-bearing. Both
+   renderers early-return while the panel is hidden, so a stub that left them
+   visible lets renderDevilAdvocate() (which also refreshes the analyst strip)
+   populate them long before any tab is pressed — and the tab's own render then
+   looks redundant. Deleting `renderContextAnalyst()` from setContext() passed
+   every check until the stub matched the markup.
+
+   Built BEFORE the controller runs, because bind() attaches the handlers once.
+
+   The fourth button carries a value setContext() does not recognise; the
+   template never emits one, but the normalisation is a real fail-safe and this
+   is how it gets exercised. */
+function makeContextStrip() {
+  // elementFor(), not registry.get(): the registry is a plain Map that is filled
+  // lazily, so .get() on an id nobody has queried yet returns undefined and the
+  // state below would be silently applied to nothing.
+  ['ctx-analyst', 'ctx-news'].forEach((id) => {
+    const el = elementFor(id);
+    if (!el) return;
+    el.hidden = true;
+    el.setAttribute('data-state', 'loading');
+  });
+  const host = elementFor('view-trade');
+  ['why', 'analyst', 'news', 'bogus'].forEach((tab) => {
+    const btn = documentStub.createElement('button');
+    btn.setAttribute('data-ctx', tab);
+    btn.setAttribute('aria-pressed', String(tab === 'why'));
+    if (host) host.appendChild(btn);
+    else documentStub.appendChild(btn);
+  });
+}
+makeContextStrip();
 
 /* Read a metric card's value by the label it sits beside, so a check binds the
    number to *its own* label rather than asserting that the number appears
@@ -1019,6 +1063,50 @@ function readTvFailure() {
   wiring.tvErrorHtml = deepHtml(registry.get('chart-tv'));
 }
 
+/* ── Context strip: Analyst and News beside the ticket ──────────────────────
+   Item 5. Driven by clicking the real [data-ctx] buttons — the same route a
+   user takes — rather than by calling setContext() directly, so the click
+   binding and the render are both exercised. */
+function clickContext(tab) {
+  const hit = selectAll(documentStub, '[data-ctx]')
+    .find((b) => b.getAttribute('data-ctx') === tab);
+  if (!hit) return 0;
+  return hit.fire('click');
+}
+
+function captureContext(key, clicked) {
+  wiring.ctx = wiring.ctx || {};
+  const pressed = {};
+  selectAll(documentStub, '[data-ctx]').forEach((b) => {
+    pressed[b.getAttribute('data-ctx')] = b.getAttribute('aria-pressed');
+  });
+  const panel = (id) => registry.get(id) || {};
+  wiring.ctx[key] = {
+    // Recorded so an assertion cannot pass because the button was never found.
+    clicked: clicked,
+    analystHtml: deepHtml(panel('ctx-analyst')),
+    newsHtml: deepHtml(panel('ctx-news')),
+    reasonHidden: !!panel('reason-body').hidden,
+    analystHidden: !!panel('ctx-analyst').hidden,
+    newsHidden: !!panel('ctx-news').hidden,
+    pressed: pressed
+  };
+}
+
+/* One <li> of the rendered strip, as plain text, so checks bind to the row the
+   renderer actually emitted rather than to a substring anywhere in the panel. */
+function ctxItems(html) {
+  const s = String(html || '');
+  const out = [];
+  const re = /<li[^>]*>([\s\S]*?)<\/li>/g;
+  let m;
+  while ((m = re.exec(s)) !== null) {
+    out.push(String(m[1]).replace(/<[^>]*>/g, ' ').replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/\s+/g, ' ').trim());
+  }
+  return out;
+}
+
 /* ── Order submission: the request side of the money path ───────────────────
    Both submit handlers read the ticket form, so the form is filled and the real
    button is clicked — the same route a user takes. Firing the handler directly
@@ -1340,6 +1428,101 @@ function report() {
   ok('the live chip cleared once nothing was in its window',
     (registry.get('news-live-chip') || {}).textContent === 'no release live',
     (registry.get('news-live-chip') || {}).textContent);
+
+  /* ── Context strip: Analyst and News beside the ticket ────────────────────
+     Captured at ticks 73-75 by clicking the real [data-ctx] buttons from the
+     trade view (the clock had not moved yet), plus one more read taken now that
+     the clock HAS moved an hour — the pair is what proves the strip recomputes
+     rather than echoing a cached server badge. */
+  console.log('\ncontext strip beside the ticket');
+  const CA = (wiring.ctx || {}).analyst || {};
+  const CN = (wiring.ctx || {}).news || {};
+  const CB = (wiring.ctx || {}).bogus || {};
+
+  ok('the tab buttons exist and their clicks were delivered',
+    CA.clicked > 0 && CN.clicked > 0 && CB.clicked > 0,
+    'handlers fired: analyst=' + CA.clicked + ' news=' + CN.clicked + ' bogus=' + CB.clicked);
+
+  ok('pressing Analyst leaves it the only pressed tab',
+    CA.pressed && CA.pressed.analyst === 'true' && CA.pressed.why === 'false' &&
+    CA.pressed.news === 'false', JSON.stringify(CA.pressed));
+  ok('pressing Analyst swaps the strip in and hides the other two',
+    CA.analystHidden === false && CA.newsHidden === true && CA.reasonHidden === true,
+    'analyst=' + CA.analystHidden + ' news=' + CA.newsHidden + ' reason=' + CA.reasonHidden);
+
+  /* The strip's whole claim is that it cannot disagree with the full panel,
+     because both read state.decisions. Binding it to the panel's own rendered
+     verdict is what makes that falsifiable — a hardcoded 'BLOCKED' would pass a
+     literal check, and a strip reading the WRONG symbol's decision (EURUSD is
+     authorised) fails this one. */
+  const panelVerdict = (registry.get('da-verdict') || {}).textContent;
+  ok('the strip\u2019s verdict is the one the analyst panel rendered for the same setup',
+    !!panelVerdict && new RegExp('>' + panelVerdict + '<').test(String(CA.analystHtml)) &&
+    !new RegExp('>AUTHORISED<').test(String(CA.analystHtml)),
+    'panel=' + panelVerdict + ' strip=' + (String(CA.analystHtml).match(/tt-chip--\w+">([^<]*)/g) || []).join(','));
+  ok('the strip shows the quality gate\u2019s own pass/block state',
+    /gate block</.test(String(CA.analystHtml)),
+    (String(CA.analystHtml).match(/gate [^<]*/) || ['no gate chip'])[0]);
+  ok('the strip shows the confluence tier and score the engine sent',
+    /HIGH · 8\.2/.test(String(CA.analystHtml)),
+    (String(CA.analystHtml).replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').slice(0, 90)));
+
+  const aItems = ctxItems(CA.analystHtml);
+  ok('the case against lists the bear_case after the risk factors',
+    aItems.length === 3 && aItems[0] === 'Event risk inside 6h' &&
+    aItems[1] === 'Spread widens at rollover' && aItems[2] === 'RSI divergence on H1',
+    aItems.length + ': ' + aItems.join(' | '));
+  ok('a setup that DOES have threats does not show the no-threats caveat',
+    !/reported no threats/.test(String(CA.analystHtml)));
+
+  ok('pressing News leaves it the only pressed tab',
+    CN.pressed && CN.pressed.news === 'true' && CN.pressed.analyst === 'false' &&
+    CN.pressed.why === 'false', JSON.stringify(CN.pressed));
+  ok('pressing News swaps the strip in and hides the other two',
+    CN.newsHidden === false && CN.analystHidden === true && CN.reasonHidden === true,
+    'analyst=' + CN.analystHidden + ' news=' + CN.newsHidden + ' reason=' + CN.reasonHidden);
+
+  /* Five releases are loaded; the Dallas print was an hour ago, so the strip
+     must show four. This is the rule that keeps already-happened news out of a
+     panel whose job is what to position for next. */
+  const nItems = ctxItems(CN.newsHtml);
+  ok('the strip lists the four releases the trader can still act on',
+    nItems.length === 4, nItems.length + ': ' + nItems.join(' | '));
+  ok('a release that already happened is left out',
+    nItems.length === 4 && !nItems.some((t) => /Dallas Fed/.test(t)),
+    nItems.join(' | '));
+  ok('the soonest release is first, with its own recomputed countdown',
+    nItems.length === 4 &&
+    /^HIGH USD US Crude Oil Inventories · T\+5m 0s$/.test(nItems[0]) &&
+    /^HIGH USD US CPI \(y\/y\) · T−2m 0s$/.test(nItems[1]) &&
+    /^HIGH USD US CB Consumer Confidence · in 30m 0s$/.test(nItems[2]) &&
+    /^LOW EUR US Preliminary GDP \(q\/q\) · in 2h 30m$/.test(nItems[3]),
+    nItems.join(' | '));
+  ok('a high-impact release is chipped as high impact',
+    (String(CN.newsHtml).match(/tt-chip--sell/g) || []).length === 3,
+    'sell chips=' + (String(CN.newsHtml).match(/tt-chip--sell/g) || []).length);
+
+  /* Same strip, an hour later. Everything that was live is now past, so only
+     the GDP print survives — the exclusion is recomputed from each timestamp,
+     not carried over from the earlier render. */
+  captureContext('news-after', clickContext('news'));
+  const CN2 = (wiring.ctx || {})['news-after'] || {};
+  const nItems2 = ctxItems(CN2.newsHtml);
+  ok('after the clock moves, only the release still in the future is listed',
+    nItems2.length === 1 && /US Preliminary GDP/.test(nItems2[0]),
+    nItems2.length + ': ' + nItems2.join(' | '));
+  ok('its countdown is recomputed, not the one carried from the earlier render',
+    nItems2.length === 1 && /· in 1h 30m$/.test(nItems2[0]),
+    nItems2.length ? nItems2[0] : 'nothing rendered');
+
+  /* An unrecognised tab is not in setContext's list. Normalising to 'why' is the
+     fail-safe: without it every panel would be hidden and nothing would answer. */
+  ok('an unrecognised tab falls back to the why strip',
+    CB.reasonHidden === false && CB.analystHidden === true && CB.newsHidden === true,
+    'analyst=' + CB.analystHidden + ' news=' + CB.newsHidden + ' reason=' + CB.reasonHidden);
+  ok('the fallback moves the pressed state onto the why tab',
+    CB.pressed && CB.pressed.why === 'true' && CB.pressed.analyst === 'false' &&
+    CB.pressed.news === 'false', JSON.stringify(CB.pressed));
 
   console.log('\ndevil\u2019s advocate');
   ok('opening the view rendered the selected symbol',
@@ -1962,6 +2145,25 @@ function drain() {
   // state.view === 'news', and the clock-advance checks run in report(). The
   // clock has still not moved, so the skew recomputed here is the same one.
   if (ticks === 44) fireDocument('keydown', { key: '2', target: { tagName: 'DIV' } });
+  /* Context strip (item 5): Analyst and News inside the trade page. Driven by
+     clicking the real buttons, from the trade view they actually live in — the
+     strip is inside view-trade, so exercising it from another view would leave
+     open whether it renders where a user sees it.
+
+     The analyst capture is taken EARLY, before the analyst view is opened at
+     tick 40. That matters: renderDevilAdvocate() also refreshes the strip, so a
+     capture taken afterwards cannot tell the tab's own render apart from the
+     full panel's — deleting `renderContextAnalyst()` from setContext() still
+     passed when the click ran late. The news capture has the same hazard
+     (renderNews() refreshes it), so it is taken before tick 44's reload.
+
+     The strip is handed back to 'why' at 24 so the rest of the run sees the
+     default tab. The post-advance news read happens in report(), after the
+     clock has actually moved. */
+  if (ticks === 15) fireDocument('keydown', { key: '1', target: { tagName: 'DIV' } });
+  if (ticks === 17) captureContext('analyst', clickContext('analyst'));
+  if (ticks === 19) captureContext('news', clickContext('news'));
+  if (ticks === 24) captureContext('bogus', clickContext('bogus'));
   // Order submission. The broker answers HTTP 200 for a refusal and puts the
   // outcome in `status`, so each outcome has to be scripted. The pending order
   // is driven first, then the market order, because the two handlers guard
