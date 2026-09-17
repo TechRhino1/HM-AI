@@ -302,6 +302,31 @@
     return apiRequest(path, { method: 'POST', body: body || {}, timeout: timeout });
   }
 
+  /* ── Action outcomes ──────────────────────────────────────────────────── */
+  /* The broker reports a refused order with **HTTP 200** and a status of its
+     own, so `res.ok` says nothing about whether the order happened. A refusal
+     arrives as `{"status": "FAILED", "reason": …}` (the broker said no) or
+     `{"status": "BLOCKED", "reason": …}` (execution is disabled, so nothing was
+     ever sent). Testing for a single sentinel therefore misreports the other,
+     and the market-order path tested for nothing at all — so a rejected order
+     was announced to the user as submitted. Anything in this set means the
+     action did not happen; every other status is left alone, so a status this
+     list has not heard of can never turn a real success into a false failure. */
+  var ACTION_REFUSED = { FAILED: 1, BLOCKED: 1, REJECTED: 1, ERROR: 1 };
+
+  function actionRefused(data) {
+    return !!ACTION_REFUSED[String((data || {}).status || '').toUpperCase()];
+  }
+
+  /* One message chain for every action. The market-order path read only
+     `error`, but the broker sends `reason` — so a refusal fell through to
+     "HTTP 200", which reads as a success code attached to a failure. */
+  function actionFailureMessage(prefix, res) {
+    var data = (res && res.data) || {};
+    return prefix + (data.error || data.reason || (res && res.error) ||
+                     ('HTTP ' + (res && res.status)));
+  }
+
   /* ── Toasts ───────────────────────────────────────────────────────────── */
   function toast(message, kind) {
     var host = $('toasts');
@@ -954,12 +979,12 @@
       delete body.order_type;
       delete body.volume;
       apiPost('/api/action/modify_pending_order', body, TIMEOUT.normal).then(function (res) {
-        if (res.ok && (res.data || {}).status !== 'FAILED') {
+        if (res.ok && !actionRefused(res.data)) {
           toast('Order #' + editing + ' updated');
           exitPendingEdit();
           loadPendingOrders();
         } else {
-          toast('Update failed: ' + (((res.data || {}).error) || ((res.data || {}).reason) || res.error || ('HTTP ' + res.status)), 'error');
+          toast(actionFailureMessage('Update failed: ', res), 'error');
         }
       });
       return;
@@ -967,11 +992,11 @@
 
     apiPost('/api/action/place_pending_order', body, TIMEOUT.normal).then(function (res) {
       var data = res.data || {};
-      if (res.ok && data.status !== 'FAILED') {
+      if (res.ok && !actionRefused(data)) {
         toast(type.replace('_', ' ').toLowerCase() + ' ' + vol + ' ' + sym + ' @ ' + price + ' placed');
         loadPendingOrders();
       } else {
-        toast('Order rejected: ' + (data.error || data.reason || res.error || ('HTTP ' + res.status)), 'error');
+        toast(actionFailureMessage('Order rejected: ', res), 'error');
       }
     });
   }
@@ -981,12 +1006,12 @@
     if (!window.confirm('Cancel working order #' + ticket + '?')) return;
     apiPost('/api/action/cancel_pending_order', { ticket: ticket }, TIMEOUT.normal).then(function (res) {
       var data = res.data || {};
-      if (res.ok && data.status !== 'FAILED') {
+      if (res.ok && !actionRefused(data)) {
         toast('Order #' + ticket + ' cancelled');
         if (state.editingTicket === Number(ticket)) exitPendingEdit();
         loadPendingOrders();
       } else {
-        toast('Cancel failed: ' + (data.error || data.reason || res.error || ('HTTP ' + res.status)), 'error');
+        toast(actionFailureMessage('Cancel failed: ', res), 'error');
       }
     });
   }
@@ -4253,8 +4278,8 @@
     if (isFinite(tp) && tp > 0) body.tp = tp;
 
     apiPost('/api/action/manual_trade', body, TIMEOUT.normal).then(function (res) {
-      if (res.ok) toast(side + ' ' + vol + ' ' + sym + ' submitted');
-      else toast('Order rejected: ' + ((res.data && res.data.error) || res.error || ('HTTP ' + res.status)), 'error');
+      if (res.ok && !actionRefused(res.data)) toast(side + ' ' + vol + ' ' + sym + ' submitted');
+      else toast(actionFailureMessage('Order rejected: ', res), 'error');
     });
   }
 

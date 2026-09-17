@@ -129,6 +129,26 @@ in a way that no error message explains.
 * Diagnosing a blocked main thread: `page.evaluate` ignores its own `timeout`, so race it against a
   timer and run a control phase. `Debugger.enable` + `Debugger.pause` names the blocking frame (no
   pause ⇒ the block is native).
+* **A refused order comes back as HTTP 200, so `res.ok` says nothing about whether it happened.**
+  `mt5_client` reports a refusal in the *body* — `{"status": "FAILED", "reason": …}` when the broker
+  said no (market closed, invalid stops, insufficient margin, the coherence check, a timeout) and
+  `{"status": "BLOCKED", "reason": …}` when the mode gate refuses it — and the route passes that dict
+  through with `_send_json(res)`, whose default status is 200. Measured: a BUY with its stop above the
+  fill price answers `{"status": "FAILED", "reason": "BUY stop-loss 2100.0 is not below the fill price
+  2000.0"}` with **`HTTP=200`**. Two consequences, both real:
+  - `manual_trade` guarded on **`if (res.ok)`** alone, so a **rejected market order was announced to
+    the trader as "submitted"** — a false confirmation of a trade, green toast and all. The three
+    pending-order handlers tested `status !== 'FAILED'`, so a **`BLOCKED`** order (never sent) was
+    announced as **"placed"**. Fixed with one shared predicate, `actionRefused(data)`, over
+    `{FAILED, BLOCKED, REJECTED, ERROR}`, plus `actionFailureMessage()` so `reason` is not dropped in
+    favour of the nonsensical "Order rejected: HTTP 200".
+  - The failure *message* chain matters too: the broker sends **`reason`**, the server's own validation
+    sends **`error`** with **HTTP 400**, and the UI read only `error` on the market path.
+  **Rule: for any action route, decide the outcome from the body's status, never from the HTTP code —
+  and when a guard names failure sentinels, check the whole set the backend can emit.** A cross-language
+  test now pins this (`tests/test_action_response_contract.py`): it reads the statuses out of
+  `mt5_client.py`, reads the UI's set out of `dashboard.js`, and fails if the backend can refuse with a
+  status the UI has never heard of — which is exactly the drift that produced the bug.
 
 ## Data source / broker
 
@@ -390,6 +410,16 @@ in a way that no error message explains.
   suite reports `attached=True`, `decisions=1`, **46/46**. Corollary: this suite's **total is
   conditional** (45 with no engine, 46 with one), so a changing denominator here is not lost coverage.
   Before believing any live-suite failure, check `netstat -ano | grep :<port>` for a `LISTENING` squatter.
+* **A stub default that disagrees with the real DOM invents a bug in the app.** The `El` stub had no
+  `value`, so an untouched form control read `undefined`; the controller's guard is
+  `slEl.value !== ''`, which is correct against a real input (an empty one reads `''`) but passed on
+  `undefined`, so the harness posted `Number(undefined)` — `NaN`, serialised as `null` — for a level
+  the user never typed. The check failed and looked like a frontend defect. In a real DOM **every form
+  control's `value` is a string**, so the stub defaults to `''`. Same family as the missing `.options`
+  above: when a check fails, first ask whether the *stub* is faithful before believing the app is wrong.
+* **`curl -s -o /dev/null -w '%{http_code}'` exits 23**, so a `cmd && next` chain silently skips
+  `next` and you get an empty result that reads like the second command produced nothing. Separate the
+  probe from the command it guards, or use `;`.
 
 ## Data integrity
 

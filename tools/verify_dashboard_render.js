@@ -179,6 +179,12 @@ class El {
     this._html = '';
     this.className = '';
     this.hidden = false;
+    /* In a real DOM every form control's `value` is a string — an untouched
+       input reads `''`, never `undefined`. Leaving it undefined made the
+       controller's `slEl.value !== ''` guard pass on an empty field and send
+       `Number(undefined)` (NaN, serialised as null) for a level the user never
+       typed. A stub default that disagrees with the DOM invents a bug. */
+    this.value = '';
     this.style = {};
     this.attrs = {};
     this.children = [];
@@ -351,6 +357,18 @@ function metricValue(html, label) {
   if (at < 0) return null;
   const m = /tt-metric__value"\s*>([^<]*)</.exec(s.slice(at));
   return m ? m[1] : null;
+}
+
+/* Every toast currently on screen. `toast()` builds a div with
+   `textContent` and a `tt-toast--<kind>` class, so both the wording and the
+   severity are readable. The sandbox's setTimeout is a no-op, so a toast is
+   never auto-dismissed and the harness can read it after the promise settles. */
+function toasts() {
+  const host = registry.get('toasts');
+  return (host ? host.children : []).map((c) => ({
+    text: String(c._text || ''),
+    cls: String(c.className || '')
+  }));
 }
 
 const documentStub = {
@@ -958,15 +976,37 @@ const fetchCalls = [];
 /* Flipped by the harness to drive the auto-selection route's 503 branch. */
 let selectionAvailable = true;
 
-function fetchStub(url) {
+/* The action endpoints answer **HTTP 200 with a status of their own** — the
+   broker reports a refused order as `{"status": "FAILED", "reason": …}` or
+   `{"status": "BLOCKED", "reason": …}` and the server passes that dict straight
+   through. So the response cannot be inferred from the HTTP code and has to be
+   scripted: this is what lets both outcomes of an order be driven. The default
+   is the success the real server sends for a paper fill. */
+let actionResponse = { status: 'PLACED', ticket: 90001 };
+let actionStatus = 200;
+
+/* Every POST the controller makes, with the body it built — the request side of
+   the order path, which nothing else in the repo observes. */
+const postCalls = [];
+
+function fetchStub(url, opts) {
   fetchCalls.push(url);
+  const method = String((opts && opts.method) || 'GET').toUpperCase();
+  if (method !== 'GET') {
+    let sent = (opts && opts.body) || null;
+    if (typeof sent === 'string') { try { sent = JSON.parse(sent); } catch (e) { /* keep the raw string */ } }
+    postCalls.push({ url: url, method: method, body: sent });
+  }
   let body = {};
   /* The status is a variable rather than a hardcoded 200 because apiRequest()
      reads resp.ok and resp.status and the panels branch on them — a stub that
      can only answer 200 makes every non-200 branch in every panel unreachable,
      including the ones whose whole point is to say "the engine is not attached". */
   let status = 200;
-  if (url.indexOf('/api/candles') >= 0) {
+  if (url.indexOf('/api/action/') >= 0) {
+    body = actionResponse;
+    status = actionStatus;
+  } else if (url.indexOf('/api/candles') >= 0) {
     body = { symbol: 'XAUUSD', timeframe: 'H1', candles: buildCandles() };
   } else if (url.indexOf('/api/telemetry_state') >= 0) {
     body = TELEMETRY;
@@ -1093,7 +1133,8 @@ const wiring = {
   btEmptyHtml: null,
   btEmptyState: null,
   selection: null,
-  regime: null
+  regime: null,
+  toasts: {}
 };
 
 function driveViews() {
@@ -1212,6 +1253,34 @@ function captureRegimePolicy() {
 
 function readTvFailure() {
   wiring.tvErrorHtml = deepHtml(registry.get('chart-tv'));
+}
+
+/* ── Order submission: the request side of the money path ───────────────────
+   Both submit handlers read the ticket form, so the form is filled and the real
+   button is clicked — the same route a user takes. Firing the handler directly
+   would skip the form parsing that decides what is actually sent. */
+function setTicket(fields) {
+  Object.keys(fields).forEach(function (id) {
+    const el = registry.get(id);
+    if (el) el.value = String(fields[id]);
+  });
+}
+
+let toastMark = 0;
+function captureToasts(key) {
+  const all = toasts();
+  wiring.toasts[key] = all.slice(toastMark);
+  toastMark = all.length;
+}
+
+function submitManualTrade(side) {
+  const btn = registry.get(side === 'SELL' ? 'ticket-sell' : 'ticket-buy');
+  return btn ? btn.fire('click') : 0;
+}
+
+function submitPendingOrder() {
+  const btn = registry.get('ticket-place');
+  return btn ? btn.fire('click') : 0;
 }
 
 function driveTvSuccess() {
@@ -1810,6 +1879,62 @@ function report() {
     metricValue(regMetrics, 'Objective') === 'expectancy',
     'Objective=' + metricValue(regMetrics, 'Objective'));
 
+  console.log('\norder submission');
+  /* The broker reports a refused order as HTTP 200 with `status` set, so the
+     HTTP code cannot decide the outcome and these are the checks that would
+     catch the UI announcing a trade that never happened. */
+  const T = wiring.toasts || {};
+  const texts = (key) => (T[key] || []).map((t) => t.text);
+  const kinds = (key) => (T[key] || []).map((t) => t.cls);
+  const says = (key, needle) => texts(key).some((s) => s.indexOf(needle) >= 0);
+  const isError = (key) => kinds(key).length > 0 && kinds(key).every((k) => k.indexOf('--error') >= 0);
+  const dump = (key) => JSON.stringify(T[key] || []);
+
+  const pendPost = postCalls.filter((c) => c.url.indexOf('place_pending_order') >= 0)[0];
+  ok('placing a pending order posts the symbol, type, price and volume',
+    !!pendPost && pendPost.method === 'POST' && !!pendPost.body &&
+    pendPost.body.symbol === 'XAUUSD' && pendPost.body.order_type === 'BUY_LIMIT' &&
+    pendPost.body.price === 3400 && pendPost.body.volume === 0.2,
+    pendPost ? JSON.stringify(pendPost.body) : 'no POST captured');
+  /* Blank means "none" on a new order, and the server treats 0 as none too —
+     so a blank level must be absent rather than sent as 0, which would read as
+     "no stop" only by coincidence and as an explicit clear on an update. */
+  ok('a blank stop or target is omitted rather than sent as zero',
+    !!pendPost && pendPost.body.sl === undefined && pendPost.body.tp === undefined,
+    pendPost ? JSON.stringify(pendPost.body) : '');
+
+  const manPost = postCalls.filter((c) => c.url.indexOf('manual_trade') >= 0)[0];
+  ok('a manual trade posts the side and the volume',
+    !!manPost && manPost.method === 'POST' && !!manPost.body &&
+    manPost.body.side === 'BUY' && manPost.body.volume === 0.2,
+    manPost ? JSON.stringify(manPost.body) : 'no POST captured');
+
+  ok('an accepted pending order is reported as placed',
+    says('pending-ok', 'placed') && !isError('pending-ok'), dump('pending-ok'));
+  ok('a blocked pending order is not reported as placed',
+    !says('pending-blocked', 'placed') && texts('pending-blocked').length > 0,
+    dump('pending-blocked'));
+  ok('a blocked pending order reports the broker reason',
+    says('pending-blocked', 'Execution is disabled') && isError('pending-blocked'),
+    dump('pending-blocked'));
+  ok('an HTTP 400 rejection reports the server error',
+    says('pending-http400', 'price and volume must be numbers') && isError('pending-http400'),
+    dump('pending-http400'));
+
+  ok('an accepted market order is reported as submitted',
+    says('manual-ok', 'submitted') && !isError('manual-ok'), dump('manual-ok'));
+  /* The money path. `send_market_order` answers HTTP 200 with
+     {"status":"FAILED","reason":…} for a broker refusal — market closed,
+     invalid stops, insufficient margin, or the coherence check — so a handler
+     that branches on the HTTP code alone tells the user their order went
+     through when the broker rejected it. */
+  ok('a rejected market order is not reported as submitted',
+    !says('manual-failed', 'submitted') && texts('manual-failed').length > 0,
+    dump('manual-failed'));
+  ok('a rejected market order reports the broker reason',
+    says('manual-failed', 'not below the fill price') && isError('manual-failed'),
+    dump('manual-failed'));
+
   console.log('\ntemplate wiring');
   const missing = Array.from(new Set(requestedIds))
     .filter((id) => !templateIds.has(id) && !prelinked.has(id));
@@ -1833,7 +1958,7 @@ function report() {
    only populated once the first telemetry response lands. */
 let ticks = 0;
 function drain() {
-  if (++ticks > 60) return report();
+  if (++ticks > 70) return report();
   if (ticks === 5) driveViews();
   if (ticks === 8) driveTradingView();
   if (ticks === 10) readTvFailure();
@@ -1890,6 +2015,48 @@ function drain() {
   // state.view === 'news', and the clock-advance checks run in report(). The
   // clock has still not moved, so the skew recomputed here is the same one.
   if (ticks === 44) fireDocument('keydown', { key: '2', target: { tagName: 'DIV' } });
+  // Order submission. The broker answers HTTP 200 for a refusal and puts the
+  // outcome in `status`, so each outcome has to be scripted. The pending order
+  // is driven first, then the market order, because the two handlers guard
+  // differently and the market one is the money path.
+  if (ticks === 46) {
+    setTicket({ 'ticket-symbol': 'XAUUSD', 'ticket-type': 'BUY_LIMIT',
+                'ticket-volume': '0.20', 'ticket-price': '3400' });
+    actionStatus = 200;
+    actionResponse = { status: 'PLACED', ticket: 90001 };
+    submitPendingOrder();
+  }
+  if (ticks === 47) captureToasts('pending-ok');
+  // BLOCKED is a *distinct* status from FAILED: execution is disabled, so the
+  // order was never sent. A guard that only rejects FAILED announces it as
+  // placed.
+  if (ticks === 48) {
+    actionResponse = { status: 'BLOCKED', reason: 'Execution is disabled (mode=offline)' };
+    submitPendingOrder();
+  }
+  if (ticks === 49) captureToasts('pending-blocked');
+  // The server's own validation answers HTTP 400, so this is the one case the
+  // HTTP code alone identifies.
+  if (ticks === 50) {
+    actionStatus = 400;
+    actionResponse = { status: 'FAILED', error: 'price and volume must be numbers' };
+    submitPendingOrder();
+  }
+  if (ticks === 51) captureToasts('pending-http400');
+  if (ticks === 52) {
+    actionStatus = 200;
+    actionResponse = { status: 'FILLED', ticket: 90002, price: 3400.0 };
+    submitManualTrade('BUY');
+  }
+  if (ticks === 53) captureToasts('manual-ok');
+  // A rejected market order, exactly as the live server answers it.
+  if (ticks === 54) {
+    actionResponse = { status: 'FAILED',
+                       reason: 'BUY stop-loss 2100.0 is not below the fill price 2000.0' };
+    submitManualTrade('BUY');
+  }
+  if (ticks === 55) captureToasts('manual-failed');
+  if (ticks === 56) { actionResponse = { status: 'PLACED', ticket: 90001 }; actionStatus = 200; }
   setImmediate(drain);
 }
 drain();
