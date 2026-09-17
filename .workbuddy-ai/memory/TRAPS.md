@@ -633,3 +633,19 @@ in a way that no error message explains.
   costs ~5 s, so any battery over ~20 mutations exceeds the foreground limit — **run it in the background**:
   snapshot each file up front, restore in `finally` *and* `atexit`, and refuse to start unless the suite is
   green and `git diff` holds only the change you intend.
+* **A helper that joins anchor lines silently misses when you pass it one string.** After the heredoc
+  trap above I built `anchor(*lines) -> NL.join(lines)` and then called it as
+  `anchor("line one:\n    line two")` — one argument containing `\n`. `NL.join([s])` returns `s`
+  unchanged, so in a CRLF file **every multi-line anchor matched 0 times** and the battery reported
+  five MISSED mutations that the tests would have caught. The tell: the misses are all multi-line and
+  all report `matched 0 times` rather than a real failure. Make the helper split its inputs —
+  `NL.join(l for chunk in chunks for l in chunk.split("\n"))` — and treat `count(old) != 1` as a
+  harness bug to fix before reading the score.
+* **A MISSED mutation is an equivalent-mutation candidate before it is a test gap.** Two of 24 in the
+  `sessions.py` battery were unobservable: `is_prime = is_weekday and (...)` had become redundant once
+  an early weekend return was added above it, and `max(0, ...)` clamped a difference that is always
+  positive inside that branch. Both are harmless dead code, not missing coverage. Ask "can any input
+  reach the mutated line and still differ?" before writing a test to chase it.
+* **Do not call `symbol_registry.resolve()` from a per-snapshot path.** It `logger.error`s for any
+  unregistered symbol, so a loop over the universe turns into one ERROR line per symbol per snapshot.
+  Use the registry for sizing/spread lookups (once per trade), not for classification in a hot loop.
