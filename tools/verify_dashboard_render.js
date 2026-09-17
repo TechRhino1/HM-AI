@@ -339,6 +339,20 @@ function deepHtml(el) {
   return out;
 }
 
+/* Read a metric card's value by the label it sits beside, so a check binds the
+   number to *its own* label rather than asserting that the number appears
+   somewhere in the panel. Do NOT normalise the markup with
+   `html.replace(/\s+/g, '')` first: the space in `<span class="…">` is part of
+   the markup, so stripping it yields `<spanclass="…">` and the pattern can
+   never match — a false failure that looks exactly like a rendering bug. */
+function metricValue(html, label) {
+  const s = String(html || '');
+  const at = s.indexOf('>' + label + '</span>');
+  if (at < 0) return null;
+  const m = /tt-metric__value"\s*>([^<]*)</.exec(s.slice(at));
+  return m ? m[1] : null;
+}
+
 const documentStub = {
   readyState: 'complete',
   body: new El('body', 'body'),
@@ -839,10 +853,119 @@ const HISTORY_ROWS = [
     closed_at: '2026-09-11T12:00:00+00:00' }
 ];
 
+/* ── Auto-selection fixture ─────────────────────────────────────────────────
+   The payload `/api/intelligence/auto-selection` really returns, including the
+   `status: 'OK'` the renderer gates on — a stub body of `{}` fails that gate and
+   paints the error state, so the panel's cards were never exercised.
+
+   Decision keys mirror `SelectionDecision.to_dict()` (mode_aggregator.py:421).
+   `is_tradeable` is the field the panel filters on, so two of the four decisions
+   are tradeable and two are not: the counts and the card list both have to
+   disagree with the raw `decisions` length for the check to mean anything. */
+const SELECTION_PAYLOAD = {
+  status: 'OK',
+  generated_utc: '2026-09-15T00:00:00Z',
+  dry_run: true,
+  cached: false,
+  age_seconds: 0.0,
+  universe: { symbols: 4, styles: 3, scanned_pairs: 12, candidates: 4 },
+  decisions: [
+    { symbol: 'XAUUSD', direction: 'BUY', consensus_score: 82.5, agreement_ratio: 0.6667,
+      agreement_count: 2, available_count: 3, confidence_tier: 'HIGH', is_tradeable: true,
+      dissenting: false, strong_dissent: false,
+      supporting_styles: ['SWING', 'DAY_TRADING'], dissenting_styles: [],
+      abstaining_styles: ['SCALP'], rationale: '2 of 3 styles agree', votes: [] },
+    { symbol: 'EURUSD', direction: 'SELL', consensus_score: 71.0, agreement_ratio: 0.6667,
+      agreement_count: 2, available_count: 3, confidence_tier: 'MEDIUM', is_tradeable: true,
+      dissenting: false, strong_dissent: false,
+      supporting_styles: ['SWING', 'SCALP'], dissenting_styles: [],
+      abstaining_styles: ['DAY_TRADING'], rationale: '2 of 3 styles agree', votes: [] },
+    { symbol: 'GBPUSD', direction: 'BUY', consensus_score: 55.5, agreement_ratio: 0.3333,
+      agreement_count: 1, available_count: 3, confidence_tier: 'LOW', is_tradeable: false,
+      dissenting: true, strong_dissent: false,
+      supporting_styles: ['SWING'], dissenting_styles: ['SCALP'],
+      abstaining_styles: [], rationale: 'no cross-style agreement', votes: [] },
+    { symbol: 'USDJPY', direction: 'NONE', consensus_score: 0.0, agreement_ratio: 0.0,
+      agreement_count: 0, available_count: 3, confidence_tier: 'NONE', is_tradeable: false,
+      dissenting: false, strong_dissent: false, supporting_styles: [],
+      dissenting_styles: [], abstaining_styles: [], rationale: 'no directional consensus',
+      votes: [] }
+  ],
+  candidates: [],
+  scanned_symbols: ['XAUUSD', 'EURUSD', 'GBPUSD', 'USDJPY']
+};
+
+/* The same route with no orchestrator attached. This is the *expected* answer
+   when the dashboard runs without the engine, and the renderer gives it its own
+   state ("Selection engine not attached") precisely so it is not mistaken for a
+   fault — so it is worth driving, not just the happy path. */
+const SELECTION_UNAVAILABLE = {
+  status: 'UNAVAILABLE',
+  generated_utc: '2026-09-15T00:00:00Z',
+  dry_run: true,
+  cached: false,
+  age_seconds: 0.0,
+  error: 'Live orchestrator is not attached to the web server.',
+  decisions: [],
+  best: null,
+  candidates: [],
+  universe: { symbols: 0, styles: 0 }
+};
+
+/* ── Regime-policy fixture ──────────────────────────────────────────────────
+   `/api/backtest/regime-policy` projects `reports/optimizer/regime_*.json` into
+   a per-mode table. Three things in the projection are easy to get wrong and are
+   each represented here: a mode carrying an `error` is skipped entirely, an
+   `enabled: false` row still counts toward the condition total but not the
+   tradeable one, and `uses_own_geometry` distinguishes a regime's own geometry
+   from the pooled default. */
+const REGIME_POLICY_PAYLOAD = {
+  status: 'OK',
+  source_report: 'regime_20260915_120000.json',
+  age_seconds: 3600,
+  objective: 'expectancy',
+  policy: {
+    SWING: {
+      primary_timeframe: 'H1',
+      regimes: {
+        TREND_BULL: { enabled: true, geometry: { tp_r: 2.5 }, min_score_quantile: 0.99,
+                      uses_own_geometry: true, basis: 'regime-specific', reason: null,
+                      candidates: 120, baseline_expectancy_r: 0.0842, baseline_trades: 310 },
+        RANGE_LOW_VOL: { enabled: false, geometry: { tp_r: 1.5 }, min_score_quantile: 0.97,
+                         uses_own_geometry: false, basis: 'pooled default',
+                         reason: 'below baseline', candidates: 90,
+                         baseline_expectancy_r: -0.0121, baseline_trades: 145 }
+      },
+      enabled_regimes: ['TREND_BULL'],
+      regimes_with_own_geometry: ['TREND_BULL'],
+      out_of_sample: {}, vs_baseline: {}
+    },
+    SCALP: {
+      primary_timeframe: 'M15',
+      regimes: {
+        TREND_BEAR: { enabled: true, geometry: { tp_r: 1.0 }, min_score_quantile: 0.97,
+                      uses_own_geometry: false, basis: 'pooled default', reason: null,
+                      candidates: 200, baseline_expectancy_r: 0.0, baseline_trades: 480 }
+      },
+      enabled_regimes: ['TREND_BEAR'],
+      regimes_with_own_geometry: [], out_of_sample: {}, vs_baseline: {}
+    },
+    POSITION: { error: 'no data for this mode' }
+  }
+};
+
 const fetchCalls = [];
+/* Flipped by the harness to drive the auto-selection route's 503 branch. */
+let selectionAvailable = true;
+
 function fetchStub(url) {
   fetchCalls.push(url);
   let body = {};
+  /* The status is a variable rather than a hardcoded 200 because apiRequest()
+     reads resp.ok and resp.status and the panels branch on them — a stub that
+     can only answer 200 makes every non-200 branch in every panel unreachable,
+     including the ones whose whole point is to say "the engine is not attached". */
+  let status = 200;
   if (url.indexOf('/api/candles') >= 0) {
     body = { symbol: 'XAUUSD', timeframe: 'H1', candles: buildCandles() };
   } else if (url.indexOf('/api/telemetry_state') >= 0) {
@@ -867,6 +990,13 @@ function fetchStub(url) {
   } else if (url.indexOf('/api/history') >= 0) {
     // Bare array, exactly as server.py sends it.
     body = HISTORY_ROWS;
+  } else if (url.indexOf('/api/intelligence/auto-selection') >= 0) {
+    // 503 with status UNAVAILABLE is the real "no orchestrator attached"
+    // answer, not a fabricated failure.
+    body = selectionAvailable ? SELECTION_PAYLOAD : SELECTION_UNAVAILABLE;
+    status = selectionAvailable ? 200 : 503;
+  } else if (url.indexOf('/api/backtest/regime-policy') >= 0) {
+    body = REGIME_POLICY_PAYLOAD;
   } else if (url.indexOf('/api/intelligence/reliability') >= 0) {
     body = { status: 'OK', styles: [] };
   } else if (url.indexOf('/api/backtest/meta') >= 0) {
@@ -888,8 +1018,8 @@ function fetchStub(url) {
   // apiRequest() reads the body with resp.text() and parses it itself, so the
   // stub must expose text() — a json()-only stub makes every call look failed.
   return Promise.resolve({
-    ok: true,
-    status: 200,
+    ok: status >= 200 && status < 300,
+    status: status,
     text: () => Promise.resolve(JSON.stringify(body)),
     json: () => Promise.resolve(body)
   });
@@ -961,7 +1091,9 @@ const wiring = {
   btResultsState: null,
   btResultMeta: null,
   btEmptyHtml: null,
-  btEmptyState: null
+  btEmptyState: null,
+  selection: null,
+  regime: null
 };
 
 function driveViews() {
@@ -1044,6 +1176,37 @@ function captureHistory(key) {
     rows: body ? body.querySelectorAll('tr').length : 0,
     count: (registry.get('hist-count') || {}).textContent,
     summary: (registry.get('hist-summary') || {}).textContent
+  };
+}
+
+/* ── Analytics: auto-selection and regime policy ────────────────────────────
+   Auto-selection loads on boot (from selectSymbol via the boot symbol) and again
+   from the watchlist refresh button, which is the control a user presses when a
+   panel looks stale — so the 503 branch is driven through that button rather
+   than by calling loadSelection(). Regime policy has no boot path at all: it is
+   loaded by setView('analytics'), so the '5' shortcut is the only way in. */
+function captureSelection(key) {
+  const host = registry.get('selection-body');
+  wiring.selection = wiring.selection || {};
+  wiring.selection[key] = {
+    html: deepHtml(host),
+    state: host ? host.getAttribute('data-state') : 'no-element',
+    cards: host ? host.children.length : 0,
+    count: (registry.get('selection-count') || {}).textContent,
+    tier: (registry.get('selection-tier') || {}).textContent,
+    tierClass: (registry.get('selection-tier') || {}).className
+  };
+}
+
+function captureRegimePolicy() {
+  const body = registry.get('regime-policy-body');
+  const metrics = registry.get('regime-policy-metrics');
+  wiring.regime = {
+    html: deepHtml(body),
+    state: body ? body.getAttribute('data-state') : 'no-element',
+    rows: body ? body.querySelectorAll('tr').length : 0,
+    metrics: deepHtml(metrics),
+    source: (registry.get('regime-policy-source') || {}).textContent
   };
 }
 
@@ -1555,6 +1718,98 @@ function report() {
     /scope="col">Closed</.test(html) && !/Execution time/.test(html),
     'header drift');
 
+  console.log('\nauto-selection');
+  const sel = wiring.selection || {};
+  const selOk = sel.ok || {};
+  const selHtml = String(selOk.html || '');
+  const selFlat = selHtml.replace(/\s+/g, ' ');
+
+  // Four decisions arrive; only two are tradeable. A panel that counted
+  // `decisions.length` would say 4, and one that ignored `is_tradeable` would
+  // render all four — so both numbers are asserted against the payload.
+  ok('only tradeable decisions are counted',
+    selOk.count === '2', 'count=' + selOk.count + ' of 4 decisions');
+  ok('only tradeable decisions get a card',
+    selOk.cards === 2, 'cards=' + selOk.cards);
+  ok('an untradeable decision is not rendered as a setup',
+    selHtml.indexOf('GBPUSD') < 0 && selHtml.indexOf('USDJPY') < 0, selFlat.slice(0, 200));
+  ok('the best tier is shown on the panel chip',
+    selOk.tier === 'HIGH' && /tt-chip--high/.test(String(selOk.tierClass)),
+    'tier=' + selOk.tier + ' class=' + selOk.tierClass);
+  ok('a card carries the direction, score and rationale',
+    selHtml.indexOf('XAUUSD') >= 0 && selHtml.indexOf('tt-dir--buy') >= 0 &&
+    selHtml.indexOf('82.5') >= 0 && selHtml.indexOf('2 of 3 styles agree') >= 0,
+    selFlat.slice(0, 240));
+  ok('a sell decision is rendered as a sell',
+    selHtml.indexOf('EURUSD') >= 0 && selHtml.indexOf('tt-dir--sell') >= 0,
+    selFlat.slice(0, 240));
+  ok('the populated panel clears its loading state',
+    selOk.state === null, 'data-state=' + selOk.state);
+
+  const selNa = sel.unavailable || {};
+  const selNaHtml = String(selNa.html || '');
+  // The engine being absent is an expected state, not a fault, and the panel
+  // gives it its own label so an operator does not go looking for a bug.
+  ok('an unattached engine is reported as unattached, not as an error',
+    selNa.state === 'stale' && selNaHtml.indexOf('Selection engine not attached') >= 0,
+    'state=' + selNa.state + ' ' + selNaHtml.replace(/\s+/g, ' ').slice(0, 160));
+  ok('the server\'s own reason is shown rather than a generic one',
+    selNaHtml.indexOf('Live orchestrator is not attached') >= 0,
+    selNaHtml.replace(/\s+/g, ' ').slice(0, 160));
+  ok('the count is zeroed when nothing could be evaluated',
+    selNa.count === '0' && selNa.tier === '—',
+    'count=' + selNa.count + ' tier=' + selNa.tier);
+  ok('the previous cards are cleared, not left behind',
+    selNaHtml.indexOf('XAUUSD') < 0, selNaHtml.replace(/\s+/g, ' ').slice(0, 160));
+
+  console.log('\nregime policy');
+  const reg = wiring.regime || {};
+  const regHtml = String(reg.html || '');
+  const regFlat = regHtml.replace(/\s+/g, ' ');
+  ok('the policy table renders one row per regime across every mode',
+    reg.rows === 3, 'rows=' + reg.rows);
+  ok('a mode the report errored on is skipped, not rendered as empty',
+    regHtml.indexOf('POSITION') < 0, regFlat.slice(0, 200));
+  ok('the report the policy came from is named',
+    String(reg.source || '').indexOf('regime_20260915_120000.json') >= 0,
+    String(reg.source));
+  ok('an enabled condition and a disabled one are distinguished',
+    regHtml.indexOf('tt-dir--buy') >= 0 && regHtml.indexOf('tt-dir--sell') >= 0,
+    regFlat.slice(0, 200));
+  ok('a regime using its own geometry is marked apart from the pooled default',
+    regHtml.indexOf('own') >= 0 && regHtml.indexOf('pooled') >= 0, regFlat.slice(0, 240));
+  /* The quantile is a selectivity statement: 0.99 means "top 1%", and an
+     operator reading "0.99" would have to invert it in their head. */
+  ok('the score quantile is shown as a selectivity, not as a raw quantile',
+    regHtml.indexOf('top 1%') >= 0 && regHtml.indexOf('top 3%') >= 0, regFlat.slice(0, 240));
+  ok('the within-regime baseline expectancy is shown signed, in R',
+    regHtml.indexOf('+0.0842R') >= 0 && regHtml.indexOf('-0.0121R') >= 0,
+    regFlat.slice(0, 300));
+  ok('the populated table clears its loading state',
+    reg.state === null, 'data-state=' + reg.state);
+
+  const regMetrics = String(reg.metrics || '');
+  /* Every counter is read from the label it belongs to. The panel's five cards
+     carry five different totals from the same fixture — 3 modes (one of which
+     the report errored on, so it is counted here but contributes no rows),
+     3 conditions, 2 tradeable, 1 with its own geometry, and the objective name
+     — so a swapped or mislabelled counter shows up as the wrong number beside
+     the right label. */
+  ok('the metrics count conditions and tradeable conditions separately',
+    metricValue(regMetrics, 'Conditions') === '3' &&
+    metricValue(regMetrics, 'Tradeable') === '2',
+    'Conditions=' + metricValue(regMetrics, 'Conditions') +
+    ' Tradeable=' + metricValue(regMetrics, 'Tradeable'));
+  ok('the metrics count modes including the one that errored',
+    metricValue(regMetrics, 'Modes') === '3',
+    'Modes=' + metricValue(regMetrics, 'Modes'));
+  ok('the metrics count only the regimes that earned their own geometry',
+    metricValue(regMetrics, 'Own geometry') === '1',
+    'Own geometry=' + metricValue(regMetrics, 'Own geometry'));
+  ok('the metrics report the objective the policy was optimised for',
+    metricValue(regMetrics, 'Objective') === 'expectancy',
+    'Objective=' + metricValue(regMetrics, 'Objective'));
+
   console.log('\ntemplate wiring');
   const missing = Array.from(new Set(requestedIds))
     .filter((id) => !templateIds.has(id) && !prelinked.has(id));
@@ -1578,7 +1833,7 @@ function report() {
    only populated once the first telemetry response lands. */
 let ticks = 0;
 function drain() {
-  if (++ticks > 40) return report();
+  if (++ticks > 60) return report();
   if (ticks === 5) driveViews();
   if (ticks === 8) driveTradingView();
   if (ticks === 10) readTvFailure();
@@ -1617,6 +1872,24 @@ function drain() {
   if (ticks === 34) { setHistoryFilter('hist-filter-source', 'ALL'); setHistoryFilter('hist-filter-symbol', 'XAU'); }
   if (ticks === 35) captureHistory('xau');
   if (ticks === 36) { setHistoryFilter('hist-filter-symbol', ''); setHistoryFilter('hist-filter-days', '7'); }
+  // Auto-selection loads on boot, so its populated state is already on screen.
+  if (ticks === 37) captureSelection('ok');
+  // The watchlist refresh is the control a user presses when the panel looks
+  // stale. Flipping the stub to the real 503 and pressing it drives the
+  // "engine not attached" branch through the same path a user would.
+  if (ticks === 38) {
+    selectionAvailable = false;
+    const refresh = registry.get('watch-refresh');
+    if (refresh) refresh.fire('click');
+  }
+  if (ticks === 39) captureSelection('unavailable');
+  // Regime policy has no boot path — setView('analytics') is the only way in.
+  if (ticks === 40) fireDocument('keydown', { key: '5', target: { tagName: 'DIV' } });
+  if (ticks === 42) captureRegimePolicy();
+  // Hand the view back to the calendar again: tickNews() early-returns unless
+  // state.view === 'news', and the clock-advance checks run in report(). The
+  // clock has still not moved, so the skew recomputed here is the same one.
+  if (ticks === 44) fireDocument('keydown', { key: '2', target: { tagName: 'DIV' } });
   setImmediate(drain);
 }
 drain();

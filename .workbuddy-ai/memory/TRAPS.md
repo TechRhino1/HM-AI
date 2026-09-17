@@ -370,6 +370,26 @@ in a way that no error message explains.
   for the same journal. Fix the label to match what was counted ("N trade(s) with a recorded result")
   rather than widening the filter, because widening it also feeds break-even trades into
   `len(realised) - len(wins)` and silently reclassifies them as losses.
+* **Never normalise HTML by stripping whitespace before matching it.** `html.replace(/\s+/g, '')`
+  removes the space in `<span class="…">` too, yielding `<spanclass="…">`, so a pattern like
+  `/Modes<\/span><span class="tt-metric__value">3</` can never match — a **false failure that is
+  indistinguishable from a rendering bug** (the printed detail showed the correct markup beside the
+  FAIL). Cost a full debugging round; the string was correct and only the assertion was wrong. Assert
+  against the markup as rendered, and bind a value to its own label rather than asserting the value
+  appears somewhere: `metricValue(html, 'Modes')` reads the `tt-metric__value` span *following* the
+  label, which catches two counters being **swapped** — the loose form
+  (`indexOf('>3<') && indexOf('>2<')`) passes a swap, despite its own comment claiming otherwise.
+  Negative-tested: swapping `Conditions`/`Tradeable` turns exactly 1 check red (`Conditions=2
+  Tradeable=3`); under the loose form it turned **0**.
+* **Two suites that bind the same port will silently test the wrong server.** `verify_ui_live.py`
+  *starts its own* server on **:8599** (`start_server`, and it attaches an orchestrator itself) — it
+  does not use `.scratch/verify_server.py`, which binds the same port. With the scratch server already
+  listening, the suite's own server never binds, every probe lands on the engine-less scratch server,
+  and the report reads `attached=False` / `503 UNAVAILABLE` — i.e. **exactly like a product
+  regression** ("the engine is not wired"). It is not: stop the scratch server first, then the same
+  suite reports `attached=True`, `decisions=1`, **46/46**. Corollary: this suite's **total is
+  conditional** (45 with no engine, 46 with one), so a changing denominator here is not lost coverage.
+  Before believing any live-suite failure, check `netstat -ano | grep :<port>` for a `LISTENING` squatter.
 
 ## Data integrity
 
