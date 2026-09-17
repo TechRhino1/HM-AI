@@ -41,6 +41,7 @@ __all__ = [
     "probe_symbol",
     "ensure_mt5_terminal",
     "terminal_ready",
+    "reset_cache",
 ]
 
 # Canonical -> ordered list of broker aliases for this account.
@@ -136,8 +137,29 @@ def terminal_ready() -> bool:
 
     Read-only: does not attempt an initialization, so a health check cannot
     block on attaching to the terminal.
+
+    Note this latches on success and never re-checks: if the terminal dies
+    later this still reports True. That is deliberate — every consumer uses it
+    to decide whether an EMPTY frame means "broker does not offer this symbol",
+    and staying True keeps that check firing (fail closed) rather than
+    suspending it. It is not a liveness probe.
     """
     return _TERMINAL_READY
+
+
+def reset_cache() -> None:
+    """Forget every cached resolution and the terminal state.
+
+    Mirrors `broker_time.reset_cache()`. Needed after a terminal restart or a
+    server/account change, since both caches are otherwise process-lifetime:
+    a symbol resolved against one broker stays resolved after switching to
+    another, and `_TERMINAL_READY` would suppress re-initialization.
+    """
+    global _TERMINAL_READY, _LAST_INIT_ATTEMPT
+    _CACHE.clear()
+    _FAILED.clear()
+    _TERMINAL_READY = False
+    _LAST_INIT_ATTEMPT = 0.0
 
 
 def probe_symbol(name: str) -> bool:
