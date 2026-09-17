@@ -1004,6 +1004,7 @@ function fetchStub(url, opts) {
      including the ones whose whole point is to say "the engine is not attached". */
   let status = 200;
   if (url.indexOf('/api/action/') >= 0 ||
+      url.indexOf('/api/copilot/ask') >= 0 ||
       url.indexOf('/api/backtest/cancel') >= 0 ||
       url.indexOf('/api/backtest/run') >= 0) {
     body = actionResponse;
@@ -1136,7 +1137,8 @@ const wiring = {
   btEmptyState: null,
   selection: null,
   regime: null,
-  toasts: {}
+  toasts: {},
+  copilot: {}
 };
 
 function driveViews() {
@@ -1283,6 +1285,36 @@ function submitManualTrade(side) {
 function submitPendingOrder() {
   const btn = registry.get('ticket-place');
   return btn ? btn.fire('click') : 0;
+}
+
+/* ── Copilot ────────────────────────────────────────────────────────────────
+   Submitted through the form's own handler, with the event object it expects —
+   `preventDefault` is called before anything else, so firing the handler
+   without one throws and reads as a broken panel. */
+function driveCopilot(query) {
+  const input = registry.get('copilot-input');
+  if (input) input.value = query;
+  const form = registry.get('copilot-form');
+  return form ? form.fire('submit', { preventDefault: function () {} }) : 0;
+}
+
+function copilotSnapshot() {
+  const log = registry.get('copilot-log');
+  return { children: log ? log.children.length : 0, posts: postCalls.length };
+}
+
+function captureCopilot(key, before) {
+  const log = registry.get('copilot-log');
+  const kids = log ? log.children : [];
+  wiring.copilot[key] = {
+    html: deepHtml(log),
+    added: kids.length - before.children,
+    posts: postCalls.length - before.posts,
+    // Each new bubble's own class, so a bubble that should not exist is visible
+    // rather than merely absent from the concatenated text.
+    newClasses: kids.slice(before.children).map((c) => String(c.className || '')),
+    newHtml: kids.slice(before.children).map((c) => deepHtml(c))
+  };
 }
 
 function driveTvSuccess() {
@@ -1954,6 +1986,77 @@ function report() {
   ok('a cancel for a job the server cannot find reports the error',
     says('cancel-404', 'job not found') && isError('cancel-404'), dump('cancel-404'));
 
+  console.log('\ncopilot chat');
+  const C = wiring.copilot || {};
+  const cp = (key) => C[key] || {};
+  /* Only the bubbles this drive added. The log already holds the boot greeting,
+     and reading the whole log would let a check pass on the greeting's text
+     rather than on the answer under test. */
+  const cpHtml = (key) => (cp(key).newHtml || []).join('');
+  const cpCls = (key) => (cp(key).newClasses || []).join(' ');
+  const flat = (s) => String(s || '').replace(/\s+/g, ' ').slice(0, 220);
+
+  /* A whitespace-only question is not a question. Sending it would put a blank
+     bubble in the log and ask the server to answer nothing. */
+  ok('a blank question is not sent and adds no bubble',
+    cp('blank').posts === 0 && cp('blank').added === 0,
+    'posts=' + cp('blank').posts + ' added=' + cp('blank').added);
+  ok('a blank question is trimmed, not sent as whitespace',
+    !(postCalls || []).some((c) => c.url.indexOf('/api/copilot/ask') >= 0 &&
+      c.body && typeof c.body.query === 'string' && c.body.query.trim() === ''),
+    JSON.stringify(postCalls.filter((c) => c.url.indexOf('copilot') >= 0).map((c) => c.body)));
+
+  const askPosts = postCalls.filter((c) => c.url.indexOf('/api/copilot/ask') >= 0);
+  const okPost = askPosts[0];
+  /* The context is what makes a bare "why?" answerable — the server reads it and
+     falls back to the on-screen instrument. */
+  ok('a question carries what the trader is looking at',
+    !!okPost && !!okPost.body && !!okPost.body.context &&
+    'symbol' in okPost.body.context && 'view' in okPost.body.context,
+    okPost ? JSON.stringify(okPost.body) : 'no POST captured');
+
+  /* Escaped *before* the markdown pass, so a symbol name or broker comment
+     cannot inject markup into the chat. */
+  ok('a question containing markup is escaped, not injected',
+    cpHtml('ok').indexOf('<img') < 0 && cpHtml('ok').indexOf('&lt;img') >= 0,
+    flat(cpHtml('ok')));
+  ok('the escaped question keeps its text',
+    cpHtml('ok').indexOf('onerror=alert(1)') >= 0, flat(cpHtml('ok')));
+  ok('a question bubble and an answer bubble are added',
+    cp('ok').added === 2, 'added=' + cp('ok').added + ' ' + JSON.stringify(cp('ok').newClasses));
+  ok('the question is marked as the user\'s and the answer as the bot\'s',
+    cpCls('ok').indexOf('tt-copilot__msg--user') >= 0 &&
+    cpCls('ok').indexOf('tt-copilot__msg--bot') >= 0,
+    JSON.stringify(cp('ok').newClasses));
+
+  /* The answers are built from bullets whose labels are wrapped in **bold**, so
+     an asterisk surviving into the bubble is visible on nearly every reply. */
+  ok('bold inside a bullet is rendered, not left as asterisks',
+    cpHtml('ok').indexOf('<b>Current Bias</b>') >= 0 &&
+    cpHtml('ok').indexOf('<b>1,234.56</b>') >= 0,
+    flat(cpHtml('ok')));
+  ok('no raw asterisks reach the reader',
+    cpHtml('ok').indexOf('**') < 0, flat(cpHtml('ok')));
+  ok('bullets become one list rather than one list each',
+    (cpHtml('ok').match(/<ul>/g) || []).length === 1 &&
+    (cpHtml('ok').match(/<li>/g) || []).length === 2,
+    flat(cpHtml('ok')));
+  ok('a bold line outside a list is still bold',
+    cpHtml('ok').indexOf('<b>Open positions') >= 0, flat(cpHtml('ok')));
+  ok('single asterisks are emphasised, and do not eat the bold pass',
+    cpHtml('ok').indexOf('<i>emphasis</i>') >= 0, flat(cpHtml('ok')));
+
+  /* The "Thinking…" bubble must be gone whichever way the request ends. */
+  ok('a refused question removes the pending bubble',
+    cpHtml('error').indexOf('Thinking') < 0, flat(cpHtml('error')));
+  ok('a refused question says so, with the status',
+    cpHtml('error').indexOf('Unavailable') >= 0 && cpHtml('error').indexOf('503') >= 0,
+    flat(cpHtml('error')));
+  ok('a refused question shows the server\'s own reason, escaped',
+    cpHtml('error').indexOf('Live orchestrator is not attached') >= 0 &&
+    cpCls('error').indexOf('tt-copilot__msg--error') >= 0,
+    flat(cpHtml('error')) + ' classes=' + cpCls('error'));
+
   console.log('\ntemplate wiring');
   const missing = Array.from(new Set(requestedIds))
     .filter((id) => !templateIds.has(id) && !prelinked.has(id));
@@ -1977,7 +2080,7 @@ function report() {
    only populated once the first telemetry response lands. */
 let ticks = 0;
 function drain() {
-  if (++ticks > 70) return report();
+  if (++ticks > 80) return report();
   if (ticks === 5) driveViews();
   if (ticks === 8) driveTradingView();
   if (ticks === 10) readTvFailure();
@@ -2099,6 +2202,37 @@ function drain() {
   }
   if (ticks === 62) captureToasts('cancel-404');
   if (ticks === 63) { actionResponse = { status: 'PLACED', ticket: 90001 }; actionStatus = 200; }
+  // Copilot. A whitespace-only question must not reach the server or add a
+  // bubble; the boot greeting is already in the log, so every capture is a
+  // delta from the count taken immediately before the drive.
+  if (ticks === 65) {
+    wiring.copilotBefore = copilotSnapshot();
+    driveCopilot('   ');
+  }
+  if (ticks === 66) captureCopilot('blank', wiring.copilotBefore);
+  // A hostile question, and an answer shaped like the server's real ones —
+  // every structured answer is bullets whose labels are wrapped in **bold**.
+  if (ticks === 67) {
+    actionStatus = 200;
+    actionResponse = {
+      status: 'OK',
+      response: '**Open positions — 1**\n' +
+                '- **Current Bias**: BULL (TREND_FOLLOW)\n' +
+                '- Balance **1,234.56** · Equity **1,240.00**\n' +
+                'Ask me about a symbol with *emphasis*.'
+    };
+    wiring.copilotBefore = copilotSnapshot();
+    driveCopilot('<img src=x onerror=alert(1)> & "quoted"');
+  }
+  if (ticks === 68) captureCopilot('ok', wiring.copilotBefore);
+  if (ticks === 69) {
+    actionStatus = 503;
+    actionResponse = { status: 'UNAVAILABLE', error: 'Live orchestrator is not attached' };
+    wiring.copilotBefore = copilotSnapshot();
+    driveCopilot('why?');
+  }
+  if (ticks === 70) captureCopilot('error', wiring.copilotBefore);
+  if (ticks === 71) { actionResponse = { status: 'PLACED', ticket: 90001 }; actionStatus = 200; }
   setImmediate(drain);
 }
 drain();

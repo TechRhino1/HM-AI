@@ -47,8 +47,11 @@ plainly that closing the window stops it.
 stop `.scratch/verify_server.py` first or its probes hit the engine-less scratch server and read as
 `attached=False` / `503`, which looks exactly like a regression. Its total is *conditional*: 45 with
 no engine, 46 with one) ·
-`verify_dashboard_render.js` (**168** — was 88; the backtest fixture added 23, the history fixture 19,
-auto-selection + regime-policy 22, the order path 15. Assert against markup **as rendered** — never
+`verify_dashboard_render.js` (**183** — was 88; the backtest fixture added 23, the history fixture 19,
+auto-selection + regime-policy 22, the order path 15, the copilot panel 15) ·
+`verify_copilot_render.js` (**23** — the copilot answer renderer exists in **two** front ends and this
+evaluates both and asserts they agree; it exists because they had already drifted into a formatting bug
+in one and an XSS in the other). Assert against markup **as rendered** — never
 `html.replace(/\s+/g,'')`, which eats the space in `<span class="…">` and makes a correct string fail;
 bind a value to its own label via `metricValue(html, label)` or a swapped counter passes) · `verify_dashboard_nav.js` (31) · `verify_ui_layout.js`
 (**~229** — the total is *not* fixed: it counts controls per viewport, so hiding a control lowers it.

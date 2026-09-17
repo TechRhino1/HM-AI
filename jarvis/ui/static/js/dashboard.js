@@ -4294,6 +4294,19 @@
   /* The copilot answers in a trimmed-down markdown: **bold**, "- " bullets and
      newlines. It is escaped *before* those are applied, so a symbol name or a
      broker comment containing markup can never inject HTML. */
+  /* The inline pass, kept separate so a bullet's body gets exactly the same
+     treatment as any other line. Nearly every bullet the copilot writes puts
+     **bold** on its label ("- **Current Bias**: …", "- Balance **1,234.56**"),
+     so applying this only to non-bullet lines left the asterisks on screen for
+     most of a typical answer. */
+  function copilotInline(line) {
+    return line
+      .replace(/\*\*(.+?)\*\*/g, '<b>$1</b>')
+      // Single-asterisk italics only where the text was not already consumed
+      // by the bold pass above.
+      .replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<i>$2</i>');
+  }
+
   function copilotHtml(text) {
     var safe = esc(String(text === null || text === undefined ? '' : text));
     var lines = safe.split('\n');
@@ -4302,15 +4315,11 @@
     lines.forEach(function (line) {
       if (/^\s*-\s+/.test(line)) {
         if (!inList) { out.push('<ul>'); inList = true; }
-        out.push('<li>' + line.replace(/^\s*-\s+/, '') + '</li>');
+        out.push('<li>' + copilotInline(line.replace(/^\s*-\s+/, '')) + '</li>');
         return;
       }
       if (inList) { out.push('</ul>'); inList = false; }
-      out.push(line
-        .replace(/\*\*(.+?)\*\*/g, '<b>$1</b>')
-        // Single-asterisk italics only where the text was not already consumed
-        // by the bold pass above.
-        .replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<i>$2</i>'));
+      out.push(copilotInline(line));
     });
     if (inList) out.push('</ul>');
     return out.join('<br>').replace(/<br>(<ul>|<\/ul>)/g, '$1');

@@ -129,6 +129,25 @@ in a way that no error message explains.
 * Diagnosing a blocked main thread: `page.evaluate` ignores its own `timeout`, so race it against a
   timer and run a control phase. `Debugger.enable` + `Debugger.pause` names the blocking frame (no
   pause ⇒ the block is native).
+* **A duplicated renderer in two front ends will diverge — audit the copy you did not change.** The
+  copilot chat exists twice (`dashboard.js` and `terminal.js`), each with its own trimmed-down markdown.
+  They had already drifted in opposite directions: the dashboard's bullet branch `return`ed early so the
+  inline pass never ran, leaving `**bold**` as literal asterisks on most of a typical answer (nearly
+  every bullet the copilot writes wraps its label); and the terminal interpolated the answer straight
+  into `innerHTML` with **no escaping at all**, while the dashboard escapes first and says why. So the
+  same feature had a cosmetic bug in one copy and an **XSS** in the other — `terminal.js`'s `bubble()`
+  does `b.innerHTML = html`, and answers interpolate broker/journal strings (symbol names, deal comments,
+  order types). The query is not echoed, so the surface is broker-controlled data rather than remote
+  input — but that is exactly the data the dashboard deemed untrusted. **When a feature exists in both
+  front ends, diff the two implementations before believing either is right.** `tools/verify_copilot_render.js`
+  now extracts and *evaluates* both copies and asserts they produce byte-identical output, which is the
+  only thing that stops the drift recurring.
+* **`deepHtml` serialises `innerHTML`, never the element's own `className`.** A check like
+  `deepHtml(el).indexOf('tt-copilot__msg--error')` can never pass, whatever the code does — the class is
+  an attribute of the element, not part of the markup beneath it. Read `className` off the element (or
+  capture the children's classes) instead. And when a panel is populated on boot as well as by the
+  action under test, capture a **delta** and assert against the bubbles the drive added — reading the
+  whole container lets a check pass on the greeting rather than on the answer.
 * **A refused order comes back as HTTP 200, so `res.ok` says nothing about whether it happened.**
   `mt5_client` reports a refusal in the *body* — `{"status": "FAILED", "reason": …}` when the broker
   said no (market closed, invalid stops, insufficient margin, the coherence check, a timeout) and

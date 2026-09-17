@@ -57,6 +57,48 @@
         dockCollapsed: false
     };
 
+    /* ── HTML escaping for the copilot bubbles ───────────────────────────────
+       The copilot's answers interpolate broker and journal strings — symbol
+       names, deal comments, order types — and those are not trusted markup. The
+       dashboard's copilot escapes them before rendering; this one interpolated
+       them straight into `innerHTML`, so a comment containing markup was
+       injected into the page. Everything dynamic is escaped *first*, then the
+       trimmed-down markdown is applied to the escaped text. */
+    function escapeHtml(value) {
+        return String(value === null || value === undefined ? "" : value)
+            .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+    }
+
+    /* Trimmed-down markdown: **bold**, "- " bullets and newlines. Mirrors
+       `copilotHtml` in dashboard.js. The inline pass is shared with the bullet
+       branch on purpose — nearly every bullet the copilot writes wraps its label
+       in **bold** ("- **Current Bias**: …"), so applying it only to non-bullet
+       lines leaves the asterisks on screen for most of a typical answer. */
+    function copilotInline(line) {
+        return line
+            .replace(/\*\*(.+?)\*\*/g, "<b>$1</b>")
+            .replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<i>$2</i>");
+    }
+
+    function copilotHtml(text) {
+        const safe = escapeHtml(text);
+        const lines = safe.split("\n");
+        const out = [];
+        let inList = false;
+        lines.forEach((line) => {
+            if (/^\s*-\s+/.test(line)) {
+                if (!inList) { out.push("<ul>"); inList = true; }
+                out.push("<li>" + copilotInline(line.replace(/^\s*-\s+/, "")) + "</li>");
+                return;
+            }
+            if (inList) { out.push("</ul>"); inList = false; }
+            out.push(copilotInline(line));
+        });
+        if (inList) out.push("</ul>");
+        return out.join("<br>").replace(/<br>(<ul>|<\/ul>)/g, "$1");
+    }
+
     // DOM Elements Cache
     const el = {
         // Top HUD
@@ -2385,13 +2427,13 @@
             });
             const data = await res.json().catch(() => ({}));
             if (!res.ok) {
-                bubble(`🤖 <b>Copilot unavailable</b> (HTTP ${res.status})<br>${data.error || "Authentication required or server refused the request."}`, true);
+                bubble(`🤖 <b>Copilot unavailable</b> (HTTP ${res.status})<br>${escapeHtml(data.error || "Authentication required or server refused the request.")}`, true);
                 return;
             }
-            bubble(`🤖 <b>HM Algo 2.0:</b><br>${data.response || "No response."}`);
+            bubble(`🤖 <b>HM Algo 2.0:</b><br>${copilotHtml(data.response || "No response.")}`);
         } catch (err) {
             console.error("Copilot error:", err);
-            bubble(`🤖 <b>Could not reach the copilot.</b><br>${err.message || err}`, true);
+            bubble(`🤖 <b>Could not reach the copilot.</b><br>${escapeHtml(err.message || err)}`, true);
         }
     };
 
