@@ -338,6 +338,20 @@ in a way that no error message explains.
 * **Run the browser suites one at a time.** Three suites plus a probe in parallel starved the
   `forex` and `options` pages into 45s navigation timeouts, which report identically to a real
   regression. Two "failures" that vanish on a solo re-run were contention, not code.
+* **A mutant survives when the fixture never contains the value the mutation changes.** The one miss
+  in the 36-mutant `ai_dissector` battery was `v == "BULLISH"` → `v != "BEARISH"`: every alignment
+  fixture used only BULLISH/BEARISH, where the two are identical. Adding a **third, unrecognised
+  value** (`NEUTRAL`) killed it. Same class as the clamp: enumerations of a categorical need a case
+  *outside* the enumerated set, not just each member of it.
+* **A scored pillar can floor above zero, and if the total is persisted the floor is a data defect,
+  not a style choice.** `ai_dissector` assigns `v = 7` *before* `if vol:`, so volatility is really
+  7–15 — it can never penalise, and "no data" equals "worst data". Because `dissection_score` is
+  written into the `Decision` schema and the backtest scan columns, the stored feature's range is
+  **6.7–94.3, not 0–100**. Before dismissing a floor as cosmetic, grep where the score is *stored*.
+* **A docstring's per-pillar maximum is not the achievable maximum.** Three of `ai_dissector`'s
+  seven "0–15" pillars top out at 13, so a total of 105 is unreachable and the tier bands sit ~6%
+  stricter than written. Derive the ceiling by summing the branches, as with any other expected
+  value.
 
 ### Coverage gaps that a green suite hides
 
