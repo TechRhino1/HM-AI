@@ -247,6 +247,18 @@ in a way that no error message explains.
   unbounded (233 re-entries for one NIFTY lookup) and silent because `hydrate_batch` swallows
   exceptions. Read `INDIA_UNIVERSE`/`STOCK_UNIVERSE` directly. Guarded by
   `tests/test_provider_recursion.py`.
+* **A timeout fallback on a CRITIC removes the criticism, and it is invisible.**
+  `parallel_runner` substitutes `penalty_score=0.0` when the Devil's Advocate times out, and
+  `decision_engine:644` gates on `penalty_score <= 43.0` — so 0.0 always passes. The adversarial
+  check is not weakened, it is deleted, and every other gate still reads green. Two rules:
+  **check whether the thing you are defaulting is a gate or a measurement** — 0 neutral, min, empty
+  list and 1.0 are all "passing" values for some gate — and **if the value is also recorded**
+  (here as `adversarial_penalty` in the scan columns), a fallback is indistinguishable from a real
+  reading and will contaminate any analysis built on that column. Fail-open can be the right call;
+  silence never is. Log it, and mark the object (here `critique_confidence=0.0`).
+* **A `str`-Enum makes a type bug invisible.** `AnalystRole(str, Enum)` means `AnalystRole.RISK ==
+  "RISK"`, so passing the bare string where the enum is typed works for every `==` comparison and
+  only breaks on `.name` / `.value` / `isinstance`. Grep for `str, Enum` when a field looks unused.
 * **A guard that "helpfully" re-anchors its own baseline fails open.** `DrawdownGuard` reset any
   baseline more than 1.5× current equity, on the theory that only a withdrawal moves equity that
   far. A loss of >33.3% moves it just as far, so a 40% crash reported `0.0%` and `passed=True`,
