@@ -20,22 +20,54 @@ class SessionEngine:
     }
     ASIAN_RANGE = (0, 7)  # 00:00-07:00 UTC — defines the daily range box
 
+    # Marks a 24/7 instrument. `jarvis.data.tradingview_provider._CRYPTO_SYMBOLS`
+    # serves a longer list (XRP, ADA, DOGE, AVAX, DOT, BNB...); those were falling
+    # through to the 24/5 Forex schedule below, so a crypto bar on a Saturday was
+    # reported as a closed market.
+    CRYPTO_TAGS = ("BTC", "ETH", "SOL", "XRP", "ADA", "DOGE", "AVAX", "DOT", "BNB", "CRYPTO")
+
+    @staticmethod
+    def _as_utc(dt: Optional[datetime]) -> datetime:
+        """Normalise an input timestamp to UTC.
+
+        Every window in this module is defined in UTC — the field is literally
+        named `utc_hour` and the schedule is "closes 21:00 UTC" — so an aware
+        datetime arriving in another zone has to be *converted*, not read as-is.
+        `market_context` passes bar timestamps straight through when they already
+        carry a tzinfo, and MT5-derived timestamps run on the broker's clock, so
+        reading `.hour` off those shifts every boundary by the broker offset.
+        """
+        if dt is None:
+            return datetime.now(timezone.utc)
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+
     @staticmethod
     def get_current_session(dt: Optional[datetime] = None) -> SessionContext:
-        if dt is None:
-            dt = datetime.now(timezone.utc)
-        elif dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
+        dt = SessionEngine._as_utc(dt)
 
         hour = dt.hour
         weekday = dt.weekday()  # 0=Monday, 6=Sunday
 
-        # Session intervals in UTC:
-        # Asian: 00:00 - 09:00 UTC (Tokyo/Sydney)
-        # London: 07:00 - 16:00 UTC
-        # New York: 12:00 - 21:00 UTC
+        # The market is shut from Friday 21:00 UTC to Sunday 21:00 UTC, so there
+        # is no session to name at the weekend. `is_prime_session` already
+        # carried that, but `current_session` is also printed into analyst
+        # narratives and the copilot context, where "LONDON_NY_OVERLAP" on a
+        # Saturday afternoon is simply wrong.
+        if weekday >= 5:
+            return SessionContext(
+                current_session="OFF_HOURS",
+                is_prime_session=False,
+                utc_hour=hour,
+                day_of_week=weekday,
+            )
+
+        # Session intervals in UTC, checked most-specific first:
+        # Asian:          00:00 - 07:00 UTC (Tokyo/Sydney) — 07:00 is the London open
+        # London:         07:00 - 16:00 UTC
         # London/NY Overlap: 12:00 - 16:00 UTC
-        
+        # New York:       16:00 - 21:00 UTC — 12:00-16:00 is named as the overlap
         session_name = "OFF_HOURS"
         if 12 <= hour < 16:
             session_name = "LONDON_NY_OVERLAP"
@@ -46,7 +78,7 @@ class SessionEngine:
         elif 0 <= hour < 9:
             session_name = "ASIAN"
 
-        # Prime volume window is typically 07:00 - 20:00 UTC during weekdays (Monday to Friday)
+        # Prime volume window is typically 07:00 - 20:59 UTC during weekdays (Monday to Friday)
         is_weekday = weekday < 5
         is_prime = is_weekday and (7 <= hour <= 20)
 
@@ -66,23 +98,28 @@ class SessionEngine:
         - 'is_in_killzone': bool — True if in any killzone
         - 'is_asian_range': bool — True if in Asian range accumulation window
         - 'killzone_minutes_remaining': int — minutes until current killzone ends
+
+        Weekends return no killzone: these are institutional weekday windows, and
+        `is_forex_killzone_active` is used as a hard Forex entry filter while
+        `is_in_killzone` is written into the online-ML feature vector — a weekend
+        bar would have trained `is_killzone=1` on a closed market.
         """
-        if dt is None:
-            dt = datetime.now(timezone.utc)
-        elif dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
+        dt = SessionEngine._as_utc(dt)
 
         hour = dt.hour
         active_kz = None
         minutes_remaining = 0
 
-        for kz_name, (start_h, end_h) in SessionEngine.KILLZONES.items():
-            if start_h <= hour < end_h:
-                active_kz = kz_name
-                minutes_remaining = (end_h - hour) * 60 - dt.minute
-                break
+        if dt.weekday() < 5:
+            for kz_name, (start_h, end_h) in SessionEngine.KILLZONES.items():
+                if start_h <= hour < end_h:
+                    active_kz = kz_name
+                    minutes_remaining = (end_h - hour) * 60 - dt.minute
+                    break
 
-        is_asian = SessionEngine.ASIAN_RANGE[0] <= hour < SessionEngine.ASIAN_RANGE[1]
+        is_asian = dt.weekday() < 5 and (
+            SessionEngine.ASIAN_RANGE[0] <= hour < SessionEngine.ASIAN_RANGE[1]
+        )
 
         return {
             "active_killzone": active_kz,
@@ -102,10 +139,7 @@ class SessionEngine:
     def is_index_prime_session(dt: Optional[datetime] = None) -> bool:
         """Determines if the current time falls within US Equity Cash Market core liquidity hours (14:00 to 19:59 UTC).
         Captures institutional morning trend and afternoon continuation while avoiding opening/closing whipsaws."""
-        if dt is None:
-            dt = datetime.now(timezone.utc)
-        elif dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
+        dt = SessionEngine._as_utc(dt)
         return dt.weekday() < 5 and (14 <= dt.hour <= 19)
 
     @staticmethod
@@ -113,15 +147,12 @@ class SessionEngine:
         """
         Determines exact market operational status, weekend closure, and opening schedules in IST & UTC.
         """
-        if dt is None:
-            dt = datetime.now(timezone.utc)
-        elif dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
+        dt = SessionEngine._as_utc(dt)
 
         sym_upper = (symbol or "XAUUSD").upper()
-        
+
         # 1. Crypto assets operate 24/7 continuously
-        if "BTC" in sym_upper or "ETH" in sym_upper or "SOL" in sym_upper or "CRYPTO" in sym_upper:
+        if any(tag in sym_upper for tag in SessionEngine.CRYPTO_TAGS):
             return {
                 "symbol": symbol,
                 "is_open": True,
@@ -131,20 +162,22 @@ class SessionEngine:
                 "status_text": "Market is OPEN (Continuous 24/7 Crypto Trading)",
                 "next_event": "Continuous 24/7 Trading",
                 "next_open_ist": "Always Open",
+                "next_open_utc": "",
                 "countdown_seconds": 0,
-                "countdown_formatted": "Live Now"
+                "countdown_formatted": "Live Now",
+                "reason": "Crypto instruments trade continuously, including weekends.",
             }
 
         # 2. Forex & Spot Metals (Gold / Currencies / Indices)
-        # Global market schedule:
-        # Closes: Friday 21:00 UTC (17:00 EDT / Saturday 02:30 AM IST)
-        # Opens:  Sunday 21:00 UTC (17:00 EDT / Monday 02:30 AM IST)
+        # Global market schedule, fixed in UTC so it does not move with anyone's DST:
+        # Closes: Friday 21:00 UTC (Saturday 02:30 AM IST)
+        # Opens:  Sunday 21:00 UTC (Monday 02:30 AM IST)
         weekday = dt.weekday()  # 0=Mon, 1=Tue, 2=Wed, 3=Thu, 4=Fri, 5=Sat, 6=Sun
         hour = dt.hour
-        minute = dt.minute
 
         is_weekend_closed = False
-        if weekday == 4 and (hour > 21 or (hour == 21 and minute >= 0)):
+        # `minute >= 0` used to sit here; it is always true, so this is `hour >= 21`.
+        if weekday == 4 and hour >= 21:
             is_weekend_closed = True
         elif weekday == 5:
             is_weekend_closed = True
@@ -211,5 +244,7 @@ class SessionEngine:
                 "next_open_ist": "Currently Open",
                 "next_open_utc": "",
                 "countdown_seconds": int(diff_sec),
-                "countdown_formatted": countdown_str
+                "countdown_formatted": countdown_str,
+                "reason": "Global Forex & Spot Metals markets trade continuously from "
+                          "Sunday 21:00 UTC to Friday 21:00 UTC.",
             }
