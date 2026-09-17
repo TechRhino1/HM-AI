@@ -424,20 +424,28 @@ const BENIGN = {
   ok('a stop and a target are formatted, not raw', hist.indexOf('2,395.00') >= 0 || hist.indexOf('2395.00') >= 0,
      hist.slice(0, 300));
 
-  /* The divergence, measured. The dashboard's history column reads `closed_at`
-     and titles the cell "Closed" vs "Opened; not yet closed"; the terminal
-     reads `timestamp`, which is the ENTRY time for a journal row and the EXIT
-     time for an MT5-synced one. So for row 1 the two front ends show different
-     instants (10:15 entry vs 14:45 exit) in a column neither labels. */
+  /* The column used to render `timestamp` under a header of "Execution Time",
+     which is the ENTRY time for a journal row and the EXIT time for an
+     MT5-synced one — so the header was false for half the rows. It now follows
+     the dashboard's rule: prefer `closed_at`, and mark the rows that have none.
+     Fixture row 1 has timestamp 10:15 and closed_at 14:45, so the cell must show
+     14:45; row 2 has closed_at null, so it must be marked (open). */
   const dashSrc = fs.readFileSync(DASH, 'utf8');
   const termSrc = fs.readFileSync(JS, 'utf8');
-  ok('the terminal history column shows the ambiguous `timestamp`',
-     hist.indexOf('2026-09-16 10:15') >= 0 && hist.indexOf('2026-09-16 14:45') < 0,
-     'timestamp should be rendered; closed_at should not be');
-  ok('the dashboard reads `closed_at` and the terminal does not (divergence guard)',
-     dashSrc.indexOf('closed_at') >= 0 && termSrc.indexOf('closed_at') < 0,
-     'dashboard has closed_at=' + (dashSrc.indexOf('closed_at') >= 0) +
-     ' terminal has closed_at=' + (termSrc.indexOf('closed_at') >= 0));
+  ok('the history column shows the close time, not the entry time',
+     hist.indexOf('2026-09-16 14:45') >= 0 && hist.indexOf('2026-09-16 10:15') < 0,
+     'close time should be rendered and the entry time should not');
+  ok('a row with no close time is marked as still open',
+     hist.indexOf('(open)') >= 0 && hist.indexOf('2026-09-15 08:00') >= 0,
+     'expected the open row to show its stamp plus an (open) marker');
+  ok('the open row carries a title that says so',
+     hist.indexOf('Opened; not yet closed') >= 0);
+  /* The divergence is closed: both front ends now read `closed_at`, so this
+     guard flips from "dashboard only" to "both". */
+  ok('both front ends read `closed_at` (the divergence is closed)',
+     dashSrc.indexOf('closed_at') >= 0 && termSrc.indexOf('closed_at') >= 0,
+     'dashboard=' + (dashSrc.indexOf('closed_at') >= 0) +
+     ' terminal=' + (termSrc.indexOf('closed_at') >= 0));
 
   /* ── Pending orders ─────────────────────────────────────────────────────── */
   console.log('\n=== pending orders ===');

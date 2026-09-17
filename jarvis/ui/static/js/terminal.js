@@ -1110,7 +1110,16 @@
             const pnlColor = pnlVal > 0 ? 'var(--neon-bull)' : (pnlVal < 0 ? 'var(--neon-bear)' : 'var(--text-dim)');
             const pnlPrefix = pnlVal > 0 ? '+' : '';
 
-            const dtStr = t.timestamp ? t.timestamp.replace('T', ' ').substring(0, 19) : '--';
+            /* `timestamp` is ambiguous: for a row the engine logged it is the
+               entry time, for one synced from a closed MT5 deal it is the exit.
+               This table was headed "Execution Time", which is true of neither
+               consistently, so show the real close time wherever one exists and
+               mark the rows that have none — the same rule the dashboard's
+               history table follows. */
+            const closedAt = t.closed_at || null;
+            const stamp = closedAt || t.timestamp;
+            const dtStr = stamp ? String(stamp).replace('T', ' ').substring(0, 19) : '--';
+            const whenTitle = closedAt ? 'Closed' : 'Opened; not yet closed';
             const isManual = t.executor === 'MANUAL' || (t.regime === 'MANUAL_EXECUTION');
             const execBadge = isManual
                 ? '<span class="badge-manual">👤 MANUAL</span>'
@@ -1130,7 +1139,7 @@
                 <td class="mono-number" style="color:var(--neon-bear);">${slVal > 0 ? formatPrice(slVal, t.symbol) : '—'}</td>
                 <td class="mono-number" style="color:var(--neon-bull);">${tpVal > 0 ? formatPrice(tpVal, t.symbol) : '—'}</td>
                 <td class="mono-number" style="color:${pnlColor}; font-weight:800; font-size:11px;">${pnlPrefix}$${pnlVal.toFixed(2)}</td>
-                <td class="mono-number" style="color:var(--text-dim); font-size:9px;">${escapeHtml(dtStr)}</td>
+                <td class="mono-number" style="color:var(--text-dim); font-size:9px;" title="${escapeHtml(whenTitle)}">${escapeHtml(dtStr)}${closedAt ? '' : ' <span style="opacity:0.65;">(open)</span>'}</td>
             </tr>`;
         }
         tbody.innerHTML = html;
