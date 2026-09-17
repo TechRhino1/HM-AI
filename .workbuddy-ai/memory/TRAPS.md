@@ -247,6 +247,18 @@ in a way that no error message explains.
   unbounded (233 re-entries for one NIFTY lookup) and silent because `hydrate_batch` swallows
   exceptions. Read `INDIA_UNIVERSE`/`STOCK_UNIVERSE` directly. Guarded by
   `tests/test_provider_recursion.py`.
+* **A guard that "helpfully" re-anchors its own baseline fails open.** `DrawdownGuard` reset any
+  baseline more than 1.5× current equity, on the theory that only a withdrawal moves equity that
+  far. A loss of >33.3% moves it just as far, so a 40% crash reported `0.0%` and `passed=True`,
+  and the same line erased `peak_equity` and cancelled the circuit breaker. **Ask of every
+  heuristic: what does it do on the input it was built to catch?** If a test cannot separate the
+  two cases in a single instant — and here it cannot, because a *realised* loss lowers balance
+  exactly like a withdrawal — the guard must not guess. Fail **closed** and give the operator an
+  explicit `reset_baselines()`. A spurious halt costs a day; a missed one costs the account.
+* **A "process stays open across midnight" check that is gated on having a database never fires in
+  the configuration that most needs it.** `DrawdownGuard`'s rollover read `last_saved_date` under
+  `if self.db_path:`, so the in-memory guard (`is_offline()` forces `db_path=""` — the documented
+  hermetic-backtest path) never rolled over at all. Track the day in memory.
 
 ## Project conventions (moved out of MEMORY.md to keep the injected file small)
 
@@ -338,6 +350,19 @@ in a way that no error message explains.
 * **Run the browser suites one at a time.** Three suites plus a probe in parallel starved the
   `forex` and `options` pages into 45s navigation timeouts, which report identically to a real
   regression. Two "failures" that vanish on a solo re-run were contention, not code.
+* **Tests that build the app share the LIVE risk database — and you cannot fix it by moving
+  `JARVIS_DATA_DIR`.** With no conftest, every `RiskEngine`/`JarvisOrchestrator` got a
+  `DrawdownGuard` on `data/jarvis_drawdown_state.db`, the engine's own file: tests inherited the
+  operator's baseline *and* wrote back into it (found holding `daily_start_equity = 487.36` beside
+  `peak_equity = 10150.0` — a $500 mock account). Redirecting the data dir breaks **12 tests in
+  `test_backtest_optimizer.py` / `test_regime_optimizer.py` that read real parquet out of
+  `data/`**. The fix is `tests/conftest.py`: an autouse fixture forcing an **in-memory** guard
+  (`db_path=""`), with `@pytest.mark.drawdown_persistence` to opt out.
+* **Removing a defect can break a test that was passing because of it.** The drawdown fix made
+  baselines sticky, and `test_d1_online_ml_and_trade_memory_learning_loop` started failing — not
+  because the fix was wrong, but because the old re-anchor had been silently absorbing cross-test
+  equity jumps. When a correct fix turns a suite red, suspect **shared state the bug was masking**
+  before suspecting the fix. Isolate first, then re-measure.
 * **A mutant survives when the fixture never contains the value the mutation changes.** The one miss
   in the 36-mutant `ai_dissector` battery was `v == "BULLISH"` → `v != "BEARISH"`: every alignment
   fixture used only BULLISH/BEARISH, where the two are identical. Adding a **third, unrecognised
