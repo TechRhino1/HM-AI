@@ -646,6 +646,12 @@ in a way that no error message explains.
   an early weekend return was added above it, and `max(0, ...)` clamped a difference that is always
   positive inside that branch. Both are harmless dead code, not missing coverage. Ask "can any input
   reach the mutated line and still differ?" before writing a test to chase it.
+* **A test that asserts only the aggregate verdict can be satisfied by a *different* failure.** Two
+  of 21 mutations survived the first `trade_guard` battery because the SELL "stop exactly at entry"
+  tests asserted `passed is False` while leaving the default **BUY-shaped** take profit in the
+  fixture — so when the stop check was mutated away the take-profit check failed instead and the test
+  still passed. Give every input the assertion is *not* about a valid value, and assert on the
+  reason text, not just the boolean.
 * **Do not call `symbol_registry.resolve()` from a per-snapshot path.** It `logger.error`s for any
   unregistered symbol, so a loop over the universe turns into one ERROR line per symbol per snapshot.
   Use the registry for sizing/spread lookups (once per trade), not for classification in a hot loop.
