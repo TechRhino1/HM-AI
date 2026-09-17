@@ -166,5 +166,60 @@ class RefusalStatusesAgreeWithTheUiTest(unittest.TestCase):
         )
 
 
+class BacktestCancelContractTest(unittest.TestCase):
+    """`/api/backtest/cancel` answers **200** for a job it did not cancel.
+
+    `_post_cancel` replies `{"status": "NOOP", "cancelled": false}` with status
+    200 when the job had already finished, so the UI cannot read the outcome
+    from the HTTP code here either — it branches on `cancelled`. That is the
+    only signal distinguishing "cancelled" from "there was nothing to cancel",
+    so it is pinned.
+    """
+
+    def _cancel(self, cancel_result):
+        from jarvis.api import intelligence_api as ia
+
+        class _Job:
+            def to_dict(self):
+                return {"job_id": "bt-1", "status": "DONE"}
+
+        class _Jobs:
+            def cancel(self, job_id):
+                return cancel_result
+
+            def get(self, job_id):
+                return _Job()
+
+        class _Handler:
+            def __init__(self):
+                self.sent = []
+
+            def _send_json(self, payload, status_code=200, cookies=None):
+                self.sent.append((status_code, payload))
+
+        handler = _Handler()
+        real_jobs = ia.INTELLIGENCE.jobs
+        ia.INTELLIGENCE.jobs = _Jobs()
+        try:
+            handled = ia.INTELLIGENCE.handle_post(
+                "/api/backtest/cancel", {"job_id": "bt-1"}, handler)
+        finally:
+            ia.INTELLIGENCE.jobs = real_jobs
+
+        self.assertTrue(handled)
+        return handler.sent[-1]
+
+    def test_a_job_that_was_not_cancelled_still_answers_200(self):
+        status, payload = self._cancel(False)
+        self.assertEqual(status, 200, "the UI's res.ok would be true here")
+        self.assertEqual(payload["status"], "NOOP")
+        self.assertIs(payload["cancelled"], False)
+
+    def test_a_job_that_was_cancelled_reports_it(self):
+        status, payload = self._cancel(True)
+        self.assertEqual(status, 200)
+        self.assertIs(payload["cancelled"], True)
+
+
 if __name__ == "__main__":
     unittest.main()

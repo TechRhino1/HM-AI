@@ -41,14 +41,14 @@ plainly that closing the window stops it.
 
 ## Baselines
 
-**pytest 920 passed / 20 deselected** (883 → 887 with `test_history_window_filter.py`, → 914 with
-`test_copilot_intents.py`, → 920 with `test_action_response_contract.py`). `tools/`:
+**pytest 922 passed / 20 deselected** (883 → 887 with `test_history_window_filter.py`, → 914 with
+`test_copilot_intents.py`, → 922 with `test_action_response_contract.py`). `tools/`:
 `verify_ui_live.py` (46 — was 44; two `/api/copilot/ask` probes. **Starts its own server on :8599** —
 stop `.scratch/verify_server.py` first or its probes hit the engine-less scratch server and read as
 `attached=False` / `503`, which looks exactly like a regression. Its total is *conditional*: 45 with
 no engine, 46 with one) ·
-`verify_dashboard_render.js` (**163** — was 88; the backtest fixture added 23, the history fixture 19,
-auto-selection + regime-policy 22, the order path 10. Assert against markup **as rendered** — never
+`verify_dashboard_render.js` (**168** — was 88; the backtest fixture added 23, the history fixture 19,
+auto-selection + regime-policy 22, the order path 15. Assert against markup **as rendered** — never
 `html.replace(/\s+/g,'')`, which eats the space in `<span class="…">` and makes a correct string fail;
 bind a value to its own label via `metricValue(html, label)` or a swapped counter passes) · `verify_dashboard_nav.js` (31) · `verify_ui_layout.js`
 (**~229** — the total is *not* fixed: it counts controls per viewport, so hiding a control lowers it.

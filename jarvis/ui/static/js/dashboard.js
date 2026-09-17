@@ -4257,8 +4257,15 @@
   function cancelJob() {
     if (!state.activeJob) return;
     apiPost('/api/backtest/cancel', { job_id: state.activeJob }, TIMEOUT.normal).then(function (res) {
-      if (res.ok) toast('Cancel requested');
-      else toast('Cancel failed: ' + (res.error || ('HTTP ' + res.status)), 'error');
+      var data = res.data || {};
+      /* A job that has already finished is answered **200** with
+         `{"status": "NOOP", "cancelled": false}` — nothing was cancelled. Reading
+         only `res.ok` toasted "Cancel requested" for a job that was still
+         running and still holding memory, which is the state the user is trying
+         to get out of. */
+      if (res.ok && data.cancelled) toast('Cancel requested');
+      else if (res.ok) toast('That job is no longer running', 'warn');
+      else toast(actionFailureMessage('Cancel failed: ', res), 'error');
     });
   }
 

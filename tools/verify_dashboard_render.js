@@ -1003,7 +1003,9 @@ function fetchStub(url, opts) {
      can only answer 200 makes every non-200 branch in every panel unreachable,
      including the ones whose whole point is to say "the engine is not attached". */
   let status = 200;
-  if (url.indexOf('/api/action/') >= 0) {
+  if (url.indexOf('/api/action/') >= 0 ||
+      url.indexOf('/api/backtest/cancel') >= 0 ||
+      url.indexOf('/api/backtest/run') >= 0) {
     body = actionResponse;
     status = actionStatus;
   } else if (url.indexOf('/api/candles') >= 0) {
@@ -1935,6 +1937,23 @@ function report() {
     says('manual-failed', 'not below the fill price') && isError('manual-failed'),
     dump('manual-failed'));
 
+  /* The same class one route down: `/api/backtest/cancel` answers 200 with
+     `cancelled: false` when the job had already finished, so a guard on the
+     HTTP code alone claims a cancellation that did not happen. */
+  const cancelPost = postCalls.filter((c) => c.url.indexOf('/api/backtest/cancel') >= 0)[0];
+  ok('cancelling a backtest posts the active job id',
+    !!cancelPost && cancelPost.method === 'POST' && !!cancelPost.body && !!cancelPost.body.job_id,
+    cancelPost ? JSON.stringify(cancelPost.body) : 'no POST captured');
+  ok('an accepted cancel is reported as requested',
+    says('cancel-ok', 'Cancel requested') && !isError('cancel-ok'), dump('cancel-ok'));
+  ok('a cancel that changed nothing is not reported as requested',
+    !says('cancel-noop', 'Cancel requested') && texts('cancel-noop').length > 0,
+    dump('cancel-noop'));
+  ok('a cancel that changed nothing says the job is no longer running',
+    says('cancel-noop', 'no longer running') && !isError('cancel-noop'), dump('cancel-noop'));
+  ok('a cancel for a job the server cannot find reports the error',
+    says('cancel-404', 'job not found') && isError('cancel-404'), dump('cancel-404'));
+
   console.log('\ntemplate wiring');
   const missing = Array.from(new Set(requestedIds))
     .filter((id) => !templateIds.has(id) && !prelinked.has(id));
@@ -2056,7 +2075,30 @@ function drain() {
     submitManualTrade('BUY');
   }
   if (ticks === 55) captureToasts('manual-failed');
-  if (ticks === 56) { actionResponse = { status: 'PLACED', ticket: 90001 }; actionStatus = 200; }
+  // Backtest cancel. The active job is whichever row was last clicked, so the
+  // button has something to cancel. A job that has already finished answers 200
+  // with cancelled:false, which is not a cancellation.
+  if (ticks === 57) {
+    actionStatus = 200;
+    actionResponse = { status: 'OK', cancelled: true, job: { job_id: 'bt-empty' } };
+    const btn = registry.get('bt-cancel');
+    if (btn) btn.fire('click');
+  }
+  if (ticks === 58) captureToasts('cancel-ok');
+  if (ticks === 59) {
+    actionResponse = { status: 'NOOP', cancelled: false, job: { job_id: 'bt-empty' } };
+    const btn = registry.get('bt-cancel');
+    if (btn) btn.fire('click');
+  }
+  if (ticks === 60) captureToasts('cancel-noop');
+  if (ticks === 61) {
+    actionStatus = 404;
+    actionResponse = { status: 'ERROR', error: 'job not found' };
+    const btn = registry.get('bt-cancel');
+    if (btn) btn.fire('click');
+  }
+  if (ticks === 62) captureToasts('cancel-404');
+  if (ticks === 63) { actionResponse = { status: 'PLACED', ticket: 90001 }; actionStatus = 200; }
   setImmediate(drain);
 }
 drain();

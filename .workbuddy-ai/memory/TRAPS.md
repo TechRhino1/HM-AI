@@ -149,6 +149,16 @@ in a way that no error message explains.
   test now pins this (`tests/test_action_response_contract.py`): it reads the statuses out of
   `mt5_client.py`, reads the UI's set out of `dashboard.js`, and fails if the backend can refuse with a
   status the UI has never heard of — which is exactly the drift that produced the bug.
+* **Sweep the class, not the instance.** Finding one guard that reads the wrong signal is worth
+  `grep -nE "res\.ok" jarvis/ui/static/js/dashboard.js` — five guards, and the last one was still wrong:
+  `/api/backtest/cancel` answers **200** with `{"status": "NOOP", "cancelled": false}` for a job that had
+  already finished, so `if (res.ok) toast('Cancel requested')` claimed a cancellation that did not
+  happen. Not a money path, but not harmless: jobs are serialised because the box has under a gigabyte
+  free, so the user stops watching a job that is still holding memory. **Check the route's body for a
+  200 that does not mean success** (`NOOP`, `UNAVAILABLE`, `cancelled: false`) — the status code is not
+  the outcome. Counter-example worth keeping: `runJob` in the same file was already right, checking
+  `!res.ok || !res.data` *and* requiring a `job_id` — so validate the payload and say which handlers
+  were the outliers, not that the controller was careless.
 
 ## Data source / broker
 
