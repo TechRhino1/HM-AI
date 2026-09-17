@@ -279,7 +279,10 @@ class TestCheckLimits:
 # Persistence
 # ---------------------------------------------------------------------------
 
+@pytest.mark.drawdown_persistence
 class TestPersistence:
+    """Opts out of the in-memory fixture — these tests need real sqlite files."""
+
     def guard_at(self, tmp_path, **kw):
         return DrawdownGuard(db_path=str(tmp_path / "dd.db"), clock=lambda: DAY0, **kw)
 
