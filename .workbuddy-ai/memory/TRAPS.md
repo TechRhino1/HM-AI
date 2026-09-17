@@ -619,3 +619,10 @@ in a way that no error message explains.
   `verify_dashboard_render.js`'s chart stub had `setMarkers() {}`, so `drawTradeMarkers` was never seen:
   183 checks passed without asking whether any marker was drawn. When adding a stub, make every method the
   code under test calls *record*, and confirm by mutating the renderer that some check fails.
+* **A mutation run that gets killed leaves the tree mutated, and the next run measures against it.**
+  A foreground mutation battery hit the 120 s timeout and was SIGTERM'd mid-flight; it left
+  `sl_long = long_entry + risk` in `tools/p0_1_direction_audit.py`. The retry then reported a meaningless
+  "21/22 caught" because *every* run was measured against a baseline that was already broken. A pytest run
+  costs ~5 s, so any battery over ~20 mutations exceeds the foreground limit — **run it in the background**:
+  snapshot each file up front, restore in `finally` *and* `atexit`, and refuse to start unless the suite is
+  green and `git diff` holds only the change you intend.

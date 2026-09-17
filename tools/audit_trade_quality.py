@@ -108,8 +108,13 @@ def dynamic_regimes(df: pd.DataFrame, cands: pd.DataFrame) -> pd.DataFrame:
     out["trend_norm"] = c_trend
 
     def tercile(v: np.ndarray, labels: List[str]) -> np.ndarray:
+        # With fewer than three points a tercile says nothing, so fall back to
+        # this bucket's OWN middle label. It used to return the literal "MID",
+        # which is not a member of either domain — vol_bucket would then group
+        # as "MID" beside LOW_VOL/MID_VOL/HIGH_VOL in the reports that group by
+        # it, and trend_bucket would carry a value outside its own label set.
         if len(v) < 3:
-            return np.array(["MID"] * len(v))
+            return np.array([labels[1]] * len(v))
         lo, hi = np.percentile(v, [33.3, 66.7])
         return np.where(v <= lo, labels[0], np.where(v >= hi, labels[2], labels[1]))
 
