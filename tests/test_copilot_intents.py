@@ -69,9 +69,23 @@ def _account():
 
 
 def _decision(symbol="XAUUSD", decision="WAIT"):
-    return _NS(decision=decision, bias="BULLISH", strategy="MOMENTUM_BREAKOUT",
+    """Every field the copilot *and* ReasoningEngine actually read.
+
+    An earlier version omitted `symbol`, `regime`, `bull_case`, `bear_case` and
+    `quality_gate.passed`. That mattered: `ReasoningEngine.generate_explanation`
+    reads all five, so the copilot's `analyze <symbol>` branch — the one that
+    renders a full decision explanation — could never be reached by a test, and
+    would have raised the first time anything did reach it. A stub that is
+    missing a field the code reads is a coverage hole, not a simplification.
+    """
+    from jarvis.data.schemas import MarketRegime
+
+    return _NS(symbol=symbol, decision=decision, bias="BULLISH", strategy="MOMENTUM_BREAKOUT",
                probabilities={"bullish": 0.61},
-               quality_gate=_NS(failing_reasons=["SPREAD_TOO_WIDE"]),
+               regime=_NS(primary_regime=MarketRegime.TREND_BULL, confidence=0.72),
+               bull_case=["HTF trend intact"],
+               bear_case=["Momentum divergence"],
+               quality_gate=_NS(failing_reasons=["SPREAD_TOO_WIDE"], passed=False),
                risk_factors=["Chasing an extended candle"],
                adversarial_penalty=3.5,
                invalidation_levels=["2370.00", "2362.50"],
@@ -221,6 +235,18 @@ class CopilotRoutingTest(unittest.TestCase):
         answer = _copilot(contexts={"EURUSD": _context()}).ask("analyze EURUSD")
         self.assertIn(MARK["context"], answer)
         self.assertIn("LONDON", answer)
+
+    def test_analyze_with_a_recorded_decision_renders_the_full_explanation(self):
+        """The `analyze` branch that reaches ReasoningEngine.
+
+        Uncovered until now: the branch only fires when the symbol has a
+        recorded decision, and no test supplied one. It is a different renderer
+        from the market-context answer below it.
+        """
+        answer = _copilot(decisions={"XAUUSD": _decision("XAUUSD")}).ask("analyze XAUUSD")
+        self.assertIn("DECISION EXPLANATION [XAUUSD]", answer)
+        self.assertIn("SPREAD_TOO_WIDE", answer)
+        self.assertIn("TREND_BULL", answer)
 
     def test_risk_question(self):
         answer = _copilot(account=_account(), positions=[_position()]).ask(

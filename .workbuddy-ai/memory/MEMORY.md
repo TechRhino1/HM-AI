@@ -41,9 +41,10 @@ plainly that closing the window stops it.
 
 ## Baselines
 
-**pytest 924 passed / 20 deselected** (883 → 887 with `test_history_window_filter.py`, → 914 with
+**pytest 970 passed / 20 deselected** (883 → 887 with `test_history_window_filter.py`, → 914 with
 `test_copilot_intents.py`, → 922 with `test_action_response_contract.py`, → 924 when its drift guard was
-rebuilt — that file went 8 → 10 tests). `tools/`:
+rebuilt, → **970** with `test_copilot_memory.py` (22) and `test_copilot_provider.py` (23) plus one restored
+branch test; 657 when this skill was written). `tools/`:
 `verify_ui_live.py` (46 — was 44; two `/api/copilot/ask` probes. **Starts its own server on :8599** —
 nothing may be listening there, or its probes hit the engine-less scratch server and read as
 `attached=False` / `503`, which looks exactly like a regression. Run the browser suites against
@@ -128,6 +129,28 @@ into 45s navigation timeouts, which read exactly like a regression.
   (`REFUSALS` / `COMPLETIONS` / `NON_2XX_ONLY`) so an unknown status *forces* a decision. Scope the
   enumeration to the route's own dispatch (`do_POST`'s `/api/action/` block), not the whole file: the
   status endpoint emits `SAFE_MODE`/`OPERATIONAL` about the system, a different vocabulary.
+
+* **The copilot: memory carries a referent, the model is additive only.** `JarvisCopilot.ask(q, context,
+  session_id)` — with no `session_id` it is stateless and byte-identical to before (the one-line curl and
+  the 27 older tests depend on it). `ConversationMemory` records only `(intent, symbol)`, **never** an
+  answer: every figure is re-read from `state_manager` at answer time, and the test that proves it mutates
+  the state *between* two turns. The optional LLM (`jarvis/api/copilot_provider.py`, OpenAI-compatible,
+  `JARVIS_COPILOT_API_KEY`) is consulted **only** when the router returned the help text, so a grounded
+  number can never be replaced by prose; the key lives in the `Authorization` header and nowhere else —
+  not the body, not a log line, not an error string — and any failure returns `None` so the rule-based
+  answer stands. Provider-agnostic, so no vendor choice is forced; inert with no key.
+* **A test stub missing a field the code reads is a coverage hole, not a simplification.** `_decision()`
+  omitted `symbol`/`regime`/`bull_case`/`bear_case`/`quality_gate.passed`, all of which
+  `ReasoningEngine.generate_explanation` reads — so the copilot's `analyze <symbol>` branch had **never
+  executed in any test** and raised the first time one did. When a branch seems untested, check whether the
+  stub *can* reach it before concluding the branch is fine.
+* **A mutation that passes proves nothing.** My first attempt injected a branch reading
+  `carried['_cached']`, a key nothing ever sets, so the mutated code never ran and the suite stayed green.
+  Always confirm the mutation actually **fails** the suite — if it doesn't, the mutation is dead, not the
+  guard.
+* **`curl -s -o /dev/null -w '%{http_code}'` exits 23**, so an `&&` chain built on it silently skips every
+  later step while still printing the code — it looks like the probe worked and the following commands just
+  produced nothing. Use `;` to separate probes. And **`--noproxy '*'`** is mandatory here.
 
 ## Signal quality
 

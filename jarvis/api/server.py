@@ -4,6 +4,7 @@ Provides REST, JSON streaming, manual trading execution, position management, ne
 """
 import os
 import json
+import hashlib
 import logging
 import mimetypes
 import math
@@ -117,6 +118,27 @@ class JarvisRequestHandler(BaseHTTPRequestHandler):
             return RemoteAuthEngine.validate_token(token)
         if self._is_local_request():
             return {"username": "admin", "role": "ADMIN", "full_name": "Local Administrator"}
+        return None
+
+    def _copilot_session_id(self) -> Optional[str]:
+        """A stable key for this caller's conversation thread.
+
+        The token when there is one, so two browsers signed into the same
+        account keep separate threads; otherwise the client address for a local
+        request. Returns ``None`` when neither exists, which leaves the call
+        stateless — exactly the behaviour before memory existed.
+
+        The token is hashed rather than used directly. The store is in memory
+        and never logs its keys, but a session id is the kind of string that
+        ends up in a debug print, and a credential must not be.
+        """
+        token = self._extract_token()
+        if token:
+            return "tok:" + hashlib.sha256(token.encode("utf-8")).hexdigest()[:16]
+        if self._is_local_request():
+            addr = getattr(self, "client_address", None)
+            ip = addr[0] if addr else "local"
+            return f"local:{ip}"
         return None
 
     def _check_auth(self) -> bool:
@@ -792,8 +814,20 @@ class JarvisRequestHandler(BaseHTTPRequestHandler):
                 # ignored rather than rejected — this endpoint must stay usable
                 # from a one-line curl.
                 context = data.get("context") if isinstance(data.get("context"), dict) else None
-                response_text = self.copilot.ask(query, context=context)
-                self._send_json({"query": query, "response": response_text})
+                # Conversation memory is per caller. A curl with no token and no
+                # local origin still gets the old stateless behaviour.
+                session_id = self._copilot_session_id()
+                response_text = self.copilot.ask(query, context=context,
+                                                 session_id=session_id)
+                # `session` and `provider` are additive: both front ends read
+                # `response` and nothing else. They exist so a caller can tell a
+                # stateless answer from a continued one without guessing.
+                self._send_json({
+                    "query": query,
+                    "response": response_text,
+                    "session": bool(session_id),
+                    "provider": bool(self.copilot.provider.available),
+                })
             elif path == "/api/action/auto-select" or path.startswith("/api/backtest/") or path.startswith("/api/intelligence/"):
                 from jarvis.api.intelligence_api import INTELLIGENCE
                 if not INTELLIGENCE.handle_post(path, data, self):
