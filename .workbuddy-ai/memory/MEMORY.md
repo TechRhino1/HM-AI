@@ -41,12 +41,12 @@ plainly that closing the window stops it.
 
 ## Baselines
 
-**pytest 1324 passed / 20 deselected** (883 → 887 with `test_history_window_filter.py`, → 914 with
+**pytest 1356 passed / 20 deselected** (883 → 887 with `test_history_window_filter.py`, → 914 with
 `test_copilot_intents.py`, → 922 with `test_action_response_contract.py`, → 924 when its drift guard was
 rebuilt, → 970 with `test_copilot_memory.py` (22) and `test_copilot_provider.py` (23) plus one restored
 branch test, → 998 with `test_measurement_spine.py` (28), → 1054 with `test_remote_auth.py` (56),
-→ 1246 with `test_market_sessions.py` (192), → **1324** with `test_trade_guard.py` (78); 657 when
-this skill was written). `tools/`:
+→ 1246 with `test_market_sessions.py` (192), → 1324 with `test_trade_guard.py` (78), → **1356** with
+`test_hrp_allocator.py` (32); 657 when this skill was written). `tools/`:
 `verify_ui_live.py` (46 — was 44; two `/api/copilot/ask` probes. **Starts its own server on :8599** —
 nothing may be listening there, or its probes hit the engine-less scratch server and read as
 `attached=False` / `503`, which looks exactly like a regression. Run the browser suites against

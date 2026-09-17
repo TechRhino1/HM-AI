@@ -646,6 +646,17 @@ in a way that no error message explains.
   an early weekend return was added above it, and `max(0, ...)` clamped a difference that is always
   positive inside that branch. Both are harmless dead code, not missing coverage. Ask "can any input
   reach the mutated line and still differ?" before writing a test to chase it.
+* **A docstring is a claim — check it against the code, and check `git log --diff-filter=A`.**
+  `jarvis/risk/hrp_allocator.py` advertised Hierarchical Risk Parity and shipped inverse-variance
+  weighting; the *adding* commit was already a 48-line stub and its one HRP-specific helper,
+  `get_correlation_distance`, has never been called. Its output is still published as "HRP" in
+  `reports/backtest_3month_report.md`. Before trusting a module named after a known algorithm, grep
+  for unused helpers and see whether the file was ever anything else.
+* **An epsilon added to avoid dividing by zero can invert the quantity's meaning.**
+  `variances[variances <= 0] = 1e-6` gives a flat series an inverse variance of a **million**, so it
+  took ~100% of the portfolio allocation — the asset the data says least about won. (In a backtest a
+  flat series is exactly a symbol that never traded.) Always test a `1/epsilon` path with a
+  degenerate input.
 * **A test that asserts only the aggregate verdict can be satisfied by a *different* failure.** Two
   of 21 mutations survived the first `trade_guard` battery because the SELL "stop exactly at entry"
   tests asserted `passed is False` while leaving the default **BUY-shaped** take profit in the
