@@ -4122,9 +4122,9 @@
             '<td><span class="tt-symbol">' + esc(m.style || '—') + '</span></td>' +
             '<td class="tt-muted">' + esc(m.primary_timeframe || '—') + '</td>' +
             '<td class="tt-num">' + num(m.series_count, 0) + '</td>' +
-            '<td class="tt-num">' + (is_.trades !== undefined ? is_.trades : '—') + '</td>' +
+            '<td class="tt-num">' + num(is_.trades, 0) + '</td>' +
             '<td class="tt-num ' + signClass(isExp) + '">' + (isExp !== undefined ? num(isExp, 4) : '—') + '</td>' +
-            '<td class="tt-num">' + (oos.trades !== undefined ? oos.trades : '—') + '</td>' +
+            '<td class="tt-num">' + num(oos.trades, 0) + '</td>' +
             '<td class="tt-num ' + signClass(oosExp) + '">' + (oosExp !== undefined ? num(oosExp, 4) : '—') + '</td>' +
             '<td class="tt-num">' + num((m.full_window || {}).profit_factor, 3) + '</td>' +
             '<td class="tt-num">' + num((m.full_window || {}).max_dd_r, 2) + '</td>' +

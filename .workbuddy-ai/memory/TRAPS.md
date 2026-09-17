@@ -47,8 +47,11 @@ in a way that no error message explains.
   "connection refused" story it tells is otherwise entirely fictitious.
 * **A background process started with `&` inside a Bash call dies when that call returns.** It looks
   alive for the rest of the same invocation (the first probe can succeed) and is gone by the next, so
-  the failure reads as a server that crashed on request. Use the tool's own
-  `run_in_background: true`, then verify with `netstat -ano | grep <port> | grep LISTENING`.
+  the failure reads as a server that crashed on request. **`nohup` does not save it** — a
+  `nohup … &` server answered `health=200`, then the very next tool call got
+  `net::ERR_CONNECTION_REFUSED` on every route while the log's last line was a normal startup
+  message. Use the tool's own `run_in_background: true`, then verify with
+  `netstat -ano | grep <port> | grep LISTENING` *and* a `curl --noproxy '*'` before trusting it.
 * **The live server holds the *old* Python.** `/api/*` behaviour must be verified against a
   **second** instance on another port (`JARVIS_PORT` is honoured; `.scratch/verify_server.py` boots a
   standalone UI+REST server on :8599 with a paper client) rather than by killing the engine the user
@@ -286,6 +289,38 @@ in a way that no error message explains.
 * **Run the browser suites one at a time.** Three suites plus a probe in parallel starved the
   `forex` and `options` pages into 45s navigation timeouts, which report identically to a real
   regression. Two "failures" that vanish on a solo re-run were contention, not code.
+
+### Coverage gaps that a green suite hides
+
+* **A renderer whose endpoint the suite stubs with an empty body has no test at all.**
+  `verify_dashboard_render.js` answered every `/api/backtest/` request with
+  `{status:'OK', jobs:[]}` and never fed `renderBacktestResult` a report. The suite was 88/88
+  green through the entire period in which the backtest page was broken, because "the renderer
+  was never called" and "the renderer works" are indistinguishable from the outside. **For every
+  renderer, confirm the fixture supplies a payload with the real shape** — the backtest report is
+  `{modes[], series[]}` built per *trading style* at `optimizer.py:888-995`, nested at
+  `payload.job.result`. A stub returning `{}` or `[]` converts a test into a no-op.
+* **Drive the view through its real wiring, never by calling the renderer.** The backtest is
+  entered the way a user enters it — the `6` shortcut, then a click on `tr[data-job]` — so the
+  test also covers `loadJobs()`, the delegated click handler, `pollJob()`'s DONE branch and
+  `loadJobResult()`'s fetch. Calling `renderBacktestResult(payload)` directly proves the last hop
+  only, which was the hop that was never broken.
+* **A view-gated tick makes a harness detour silently inert.** `tickNews()` early-returns unless
+  `state.view === 'news'`. Adding a backtest phase that switched views turned 5 clock-advance
+  checks red — reading exactly like a broken calendar. When a harness phase changes the view,
+  **hand the view back** before the assertions that depend on it (`drain()` re-enters news at
+  tick 25 for this reason). The failure mode is nasty because the code under test is fine.
+* **A missing property in the DOM stub crashes as if it were an app bug.** The `El` stub had no
+  `.options`, so `loadBacktestMeta`'s `objSel.options.length` threw a `TypeError` and took the
+  whole run down with a `dashboard.js:3891` stack — which reads as a crash in the dashboard. A
+  real `<select>` always has `.options`; derive it from the tree
+  (`get options() { return children.filter(tagName === 'OPTION') }`) so appending an `<option>` is
+  observable. Note the controller's own `sel.options || []` guard is what let the gap survive
+  until a select was actually populated.
+* **Negative-test every new assertion, and report the count.** Reverting the reader to its pre-fix
+  form turned **16** checks red with the user's own words in the detail (`No results in this job`);
+  reverting the number grouping turned exactly **1** red. "Exactly the right checks, no more" is
+  the evidence that a check is pinned to the behaviour rather than to the suite's mood.
 
 ## Data integrity
 

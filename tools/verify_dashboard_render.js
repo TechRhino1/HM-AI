@@ -197,6 +197,14 @@ class El {
   }
   get textContent() { return this._text; }
   set textContent(v) { this._text = v === null || v === undefined ? '' : String(v); }
+  /* A real <select> always exposes `.options`, so a controller that reads
+     `sel.options.length` is not doing anything unusual — it is the documented
+     way to test whether a select has been populated. Without this the backtest
+     form's guard (`options.length === 0`, i.e. "only populate once") threw a
+     TypeError in the harness and took the whole run down, which would have
+     looked like a crash in the dashboard rather than a gap in the stub.
+     Derived from the tree so appending an <option> is actually observable. */
+  get options() { return (this.children || []).filter((c) => c.tagName === 'OPTION'); }
   get innerHTML() { return this._html; }
   set innerHTML(v) {
     this._html = v === null || v === undefined ? '' : String(v);
@@ -684,6 +692,107 @@ const INDIA_OPTION_CHAIN_PAYLOAD = {
   gex: {}
 };
 
+/* ── Backtest fixtures ──────────────────────────────────────────────────────
+   The optimiser's report is per *trading style*, not per symbol: one row per
+   mode carrying the pooled in-sample / out-of-sample split, plus a `series`
+   list describing what data each symbol-mode contributed. That is the shape
+   `jarvis/backtesting/optimizer.py` actually builds.
+
+   Two things this fixture exists to catch, because both shipped as bugs:
+
+   1. NESTING. The report arrives at `payload.job.result`, never at the top
+      level. The reader that shipped before the fix looked only at
+      `payload.report || payload.result`, found nothing, and rendered
+      "No results in this job" on a run that had produced a perfectly good
+      report. So the fixture below is deliberately nested one level deeper than
+      the old reader looked — if someone reintroduces that lookup, the checks
+      on the table content go red instead of silently passing.
+
+   2. EMPTINESS. A job that finished with no report body must still say so
+      explicitly rather than render a blank panel, so a second job carries an
+      empty result and is driven through the same click path. */
+const BACKTEST_META = {
+  orchestrator_attached: true,
+  objectives: ['expectancy', 'profit_factor'],
+  styles: ['SCALP', 'SWING', 'POSITION'],
+  default_space: { tp_r: [1.0, 2.0, 2.5], be_trigger_r: [null, 1.0], trail_atr: [null, 1.5] }
+};
+
+const BACKTEST_JOBS = [
+  { job_id: 'bt-real', label: 'SWING · H1 · 20 symbols', status: 'DONE',
+    progress_lines: 12, started_utc: '2026-09-15T00:00:00Z' },
+  { job_id: 'bt-empty', label: 'SCALP · M15 · no body', status: 'DONE',
+    progress_lines: 3, started_utc: '2026-09-15T00:00:00Z' }
+];
+
+const BACKTEST_MODES = [
+  { style: 'SWING', primary_timeframe: 'H1', series_count: 20,
+    best_geometry: { tp_r: 2.5, be_trigger_r: 1.0, fast_cash_r: null, trail_atr: 1.5 },
+    best_geometry_key: 'tp_r=2.5|be_trigger_r=1.0|fast_cash_r=null|trail_atr=1.5',
+    feasible: true,
+    in_sample: { trades: 1204, expectancy_r: 0.0871 },
+    out_of_sample: { trades: 402, expectancy_r: 0.0412 },
+    full_window: { profit_factor: 1.318, max_dd_r: 12.47 },
+    walk_forward: { generalises: true },
+    per_symbol: [], symbols_positive: 12, symbols_total: 20 },
+  { style: 'SCALP', primary_timeframe: 'M15', series_count: 20,
+    best_geometry: { tp_r: 1.0, be_trigger_r: null, fast_cash_r: 0.5, trail_atr: null },
+    best_geometry_key: 'tp_r=1.0|be_trigger_r=null|fast_cash_r=0.5|trail_atr=null',
+    feasible: true,
+    in_sample: { trades: 4811, expectancy_r: 0.0224 },
+    out_of_sample: { trades: 1602, expectancy_r: -0.0138 },
+    full_window: { profit_factor: 0.994, max_dd_r: 38.9 },
+    walk_forward: { generalises: false },
+    per_symbol: [], symbols_positive: 8, symbols_total: 20 },
+  { style: 'POSITION', primary_timeframe: 'D1', series_count: 20,
+    best_geometry: null, best_geometry_key: '',
+    feasible: false,
+    in_sample: { trades: 96, expectancy_r: -0.0302 },
+    out_of_sample: { trades: 31, expectancy_r: -0.0611 },
+    full_window: { profit_factor: 0.842, max_dd_r: 21.05 },
+    walk_forward: { generalises: false },
+    per_symbol: [], symbols_positive: 6, symbols_total: 20 }
+];
+
+const BACKTEST_SERIES = [
+  { symbol: 'XAUUSD', style: 'SWING', timeframe: 'H1', bars: 8731, candidates: 4210 },
+  { symbol: 'EURUSD', style: 'SWING', timeframe: 'H1', bars: 8790, candidates: 3985 }
+];
+
+const BACKTEST_RESULT = {
+  status: 'OK',
+  job: {
+    job_id: 'bt-real',
+    status: 'DONE',
+    result: {
+      spec: { objective: 'expectancy', modes: ['SCALP', 'SWING', 'POSITION'] },
+      elapsed_seconds: 41.7,
+      evaluations: 1920,
+      cache_hit_rate: 0.38,
+      modes: BACKTEST_MODES,
+      series: BACKTEST_SERIES
+    }
+  }
+};
+
+/* The same job, finished, with no report body at all. */
+const BACKTEST_RESULT_EMPTY = {
+  status: 'OK',
+  job: { job_id: 'bt-empty', status: 'DONE', result: {} }
+};
+
+/* The reader that shipped before the fix, reproduced here purely as a control.
+   It must find nothing in BACKTEST_RESULT — which is precisely why a run with a
+   real report rendered as "No results in this job". Keeping it in the harness
+   makes the fixture's discriminating power explicit rather than assumed: if the
+   nesting in the fixture ever drifts back to a shape the old reader accepted,
+   the control stops returning null and the check below tells us the test has
+   quietly stopped testing anything. */
+function preFixReportReader(payload) {
+  const r = (payload && (payload.report || payload.result)) || {};
+  return r.per_symbol || r.symbols || null;
+}
+
 const fetchCalls = [];
 function fetchStub(url) {
   fetchCalls.push(url);
@@ -711,6 +820,19 @@ function fetchStub(url) {
     }];
   } else if (url.indexOf('/api/intelligence/reliability') >= 0) {
     body = { status: 'OK', styles: [] };
+  } else if (url.indexOf('/api/backtest/meta') >= 0) {
+    body = BACKTEST_META;
+  } else if (url.indexOf('/api/backtest/jobs/') >= 0 && url.indexOf('/result') >= 0) {
+    // `/jobs/<id>/result` — the report body.
+    body = url.indexOf('bt-empty') >= 0 ? BACKTEST_RESULT_EMPTY : BACKTEST_RESULT;
+  } else if (url.indexOf('/api/backtest/jobs/') >= 0) {
+    // `/jobs/<id>` — the poll. Both fixtures are DONE, so the controller's DONE
+    // branch runs and fetches the result, which is the path under test.
+    const id = url.split('/api/backtest/jobs/')[1].split(/[?#]/)[0];
+    body = { status: 'OK', job: { job_id: id, status: 'DONE', progress: 100,
+                                  progress_lines: ['done'] } };
+  } else if (url.indexOf('/api/backtest/jobs') >= 0) {
+    body = { status: 'OK', jobs: BACKTEST_JOBS };
   } else if (url.indexOf('/api/backtest/') >= 0) {
     body = { status: 'OK', jobs: [] };
   }
@@ -782,7 +904,15 @@ const wiring = {
   tvLoadingHtml: null,
   tvErrorHtml: null,
   tvWidgetOpts: null,
-  tvSecondClick: 0
+  tvSecondClick: 0,
+  btRows: 0,
+  btRowClicks: 0,
+  btMetaHtml: null,
+  btResultsHtml: null,
+  btResultsState: null,
+  btResultMeta: null,
+  btEmptyHtml: null,
+  btEmptyState: null
 };
 
 function driveViews() {
@@ -802,6 +932,44 @@ function driveTradingView() {
   // Simulate the CDN being blocked.
   const script = documentStub.head.children[documentStub.head.children.length - 1];
   if (script && typeof script.onerror === 'function') script.onerror();
+}
+
+/* ── Backtest ───────────────────────────────────────────────────────────────
+   The whole point of this suite is that it drives the REAL wiring rather than
+   calling renderers directly, so the backtest is entered the same way a user
+   enters it — the '6' shortcut, then a click on a job row. Calling
+   renderBacktestResult() straight would prove the renderer works and say
+   nothing about whether anything ever reaches it, which is exactly the state
+   the "backtest does not work" report described. */
+function driveBacktestView() {
+  fireDocument('keydown', { key: '6', target: { tagName: 'DIV' } });
+}
+
+/* Click a job row by index. loadJobs() rebuilds #bt-history on every poll, so
+   the rows have to be re-queried at click time rather than captured earlier. */
+function clickBacktestJob(index) {
+  const body = registry.get('bt-history');
+  if (!body) return;
+  const rows = body.querySelectorAll('tr[data-job]');
+  wiring.btRows = rows.length;
+  const row = rows[index];
+  if (!row) return;
+  wiring.btRowClicks += row.fire('click');
+}
+
+function captureBacktestResult() {
+  const host = registry.get('bt-results');
+  const meta = registry.get('bt-result-meta');
+  wiring.btResultsHtml = deepHtml(host);
+  wiring.btResultsState = host ? host.getAttribute('data-state') : 'no-element';
+  wiring.btResultMeta = meta ? meta.textContent : null;
+  wiring.btMetaHtml = deepHtml(registry.get('bt-history'));
+}
+
+function captureBacktestEmpty() {
+  const host = registry.get('bt-results');
+  wiring.btEmptyHtml = deepHtml(host);
+  wiring.btEmptyState = host ? host.getAttribute('data-state') : 'no-element';
 }
 
 function readTvFailure() {
@@ -1161,6 +1329,87 @@ function report() {
       return deepHtml(host).indexOf('OANDA:XAUUSD') >= 0;
     })(), deepHtml(registry.get('chart-tv')).replace(/\s+/g, ' ').slice(0, 160));
 
+  console.log('\nbacktest report');
+  const btMeta = String(wiring.btMetaHtml || '');
+  ok('the job list is fetched and rendered as rows, not the empty state',
+    wiring.btRows === 2, 'rows=' + wiring.btRows);
+  ok('a job row carries the job id the click handler reads',
+    btMeta.indexOf('data-job="bt-real"') >= 0,
+    btMeta.replace(/\s+/g, ' ').slice(0, 160));
+  ok('a done job reports completion rather than a progress count',
+    btMeta.indexOf('done') >= 0, btMeta.replace(/\s+/g, ' ').slice(0, 160));
+  ok('clicking a job row is actually wired to a handler',
+    wiring.btRowClicks >= 1, 'handler fires=' + wiring.btRowClicks);
+
+  const btHtml = String(wiring.btResultsHtml || '');
+  const btFlat = btHtml.replace(/\s+/g, ' ');
+
+  // The regression that started all this: a finished run rendering as
+  // "No results in this job". Assert the negative directly, so a future change
+  // that re-breaks the reader fails on the symptom the user actually reported.
+  ok('a finished run does NOT render the empty state',
+    btHtml.indexOf('No results in this job') < 0, btFlat.slice(0, 220));
+  ok('the success path clears data-state rather than leaving "empty" behind',
+    wiring.btResultsState === null, 'data-state=' + wiring.btResultsState);
+
+  // The report is per trading style. Both tables have to be driven by the
+  // payload, not by any local default.
+  ok('the per-style table is rendered from report.modes',
+    btHtml.indexOf('Per style') >= 0, btFlat.slice(0, 220));
+  ok('every mode in the payload gets a row',
+    ['SWING', 'SCALP', 'POSITION'].every((s) => btHtml.indexOf(s) >= 0),
+    btFlat.slice(0, 300));
+  ok('the data-coverage table is rendered from report.series',
+    btHtml.indexOf('Data coverage') >= 0 && btHtml.indexOf('XAUUSD') >= 0,
+    btFlat.slice(0, 300));
+  ok('trade counts are grouped like every other numeric column, not raw',
+    btHtml.indexOf('1,204') >= 0 && btHtml.indexOf('8,731') >= 0,
+    btFlat.slice(0, 300));
+  ok('the out-of-sample expectancy is shown at 4 decimal places',
+    btHtml.indexOf('0.0412') >= 0, btFlat.slice(0, 300));
+  ok('the geometry is summarised rather than shown as a raw object',
+    btHtml.indexOf('tp 2.50') >= 0 && btHtml.indexOf('be 1.00') >= 0,
+    btFlat.slice(0, 300));
+
+  // The verdict is the one derived field — it must distinguish the three cases
+  // the payload encodes, not collapse them to one label.
+  ok('a feasible mode that generalises reads as generalisable',
+    btHtml.indexOf('generalisable') >= 0, btFlat.slice(0, 300));
+  ok('a feasible mode that does NOT generalise reads as in-sample only',
+    btHtml.indexOf('in-sample only') >= 0, btFlat.slice(0, 300));
+  ok('an infeasible mode reads as no feasible geometry',
+    btHtml.indexOf('no feasible geometry') >= 0, btFlat.slice(0, 300));
+  ok('the verdict is carried by a class, not only by text',
+    /class="tt-up">generalisable/.test(btHtml) && /class="tt-down">no feasible geometry/.test(btHtml),
+    btFlat.slice(0, 300));
+
+  const btMetaLine = String(wiring.btResultMeta || '');
+  ok('the result meta line counts modes and series',
+    btMetaLine.indexOf('3 modes') >= 0 && btMetaLine.indexOf('2 series') >= 0,
+    btMetaLine);
+  ok('the result meta line reports the run cost',
+    btMetaLine.indexOf('1920 evals') >= 0 && btMetaLine.indexOf('cache 38%') >= 0,
+    btMetaLine);
+  ok('the result meta line names the objective from the spec',
+    btMetaLine.indexOf('objective expectancy') >= 0, btMetaLine);
+
+  // The control: the pre-fix reader, run against the very payload the new
+  // reader just rendered, must find nothing. That is what makes this fixture
+  // able to catch the original bug at all.
+  ok('the pre-fix reader finds nothing in this payload (the bug it shipped)',
+    preFixReportReader(BACKTEST_RESULT) === null,
+    JSON.stringify(preFixReportReader(BACKTEST_RESULT)));
+
+  console.log('\nbacktest empty report');
+  const btEmpty = String(wiring.btEmptyHtml || '');
+  ok('a job with no report body says so explicitly instead of rendering blank',
+    btEmpty.indexOf('No results in this job') >= 0,
+    btEmpty.replace(/\s+/g, ' ').slice(0, 200));
+  ok('the empty state is published on data-state so CSS can style it',
+    wiring.btEmptyState === 'empty', 'data-state=' + wiring.btEmptyState);
+  ok('the empty report does not leave the previous job\'s table on screen',
+    btEmpty.indexOf('Per style') < 0, btEmpty.replace(/\s+/g, ' ').slice(0, 200));
+
   console.log('\ntemplate wiring');
   const missing = Array.from(new Set(requestedIds))
     .filter((id) => !templateIds.has(id) && !prelinked.has(id));
@@ -1195,6 +1444,22 @@ function drain() {
   // pin "now" to the new time — which is correct behaviour but would hide the
   // advancement this harness is trying to observe.
   if (ticks === 14) fireDocument('keydown', { key: '2', target: { tagName: 'DIV' } });
+  // Backtest: enter the view, click the job that has a real report, capture,
+  // then click the job whose report body is empty and capture again. The two
+  // are deliberately separated by a tick so the promise chains settle between
+  // them and the second capture cannot read the first one's DOM.
+  if (ticks === 16) driveBacktestView();
+  if (ticks === 18) clickBacktestJob(0);
+  if (ticks === 20) captureBacktestResult();
+  if (ticks === 21) clickBacktestJob(1);
+  if (ticks === 23) captureBacktestEmpty();
+  // Hand the view back to the calendar. tickNews() early-returns unless
+  // state.view === 'news', so the backtest detour above would otherwise leave
+  // the per-second tick inert and make every clock-advance check fail — which
+  // reads exactly like a broken calendar. The clock has not been advanced yet
+  // at this point (that happens in report()), so re-entering news recomputes
+  // the same skew the tick-14 entry did and the advancement is still visible.
+  if (ticks === 25) fireDocument('keydown', { key: '2', target: { tagName: 'DIV' } });
   setImmediate(drain);
 }
 drain();

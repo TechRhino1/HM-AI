@@ -43,7 +43,7 @@ plainly that closing the window stops it.
 
 **pytest 883 passed / 20 deselected** (was 874; the P0 audit commit added
 `test_deflated_sharpe.py` + `test_sample_uniqueness.py`). `tools/`: `verify_ui_live.py` (44) ·
-`verify_dashboard_render.js` (88) · `verify_dashboard_nav.js` (31) · `verify_ui_layout.js`
+`verify_dashboard_render.js` (**111** — was 88; the backtest fixture added 23) · `verify_dashboard_nav.js` (31) · `verify_ui_layout.js`
 (**~229** — the total is *not* fixed: it counts controls per viewport, so hiding a control lowers it.
 238 → 229 is the ticket's pending row correctly disappearing, not a lost check. Read the FAIL lines,
 never the total) · `audit_endpoints.py` (**46** — rises when a new route is added; add POST-only
