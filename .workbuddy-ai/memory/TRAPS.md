@@ -619,6 +619,13 @@ in a way that no error message explains.
   `verify_dashboard_render.js`'s chart stub had `setMarkers() {}`, so `drawTradeMarkers` was never seen:
   183 checks passed without asking whether any marker was drawn. When adding a stub, make every method the
   code under test calls *record*, and confirm by mutating the renderer that some check fails.
+* **A multi-line mutation anchor in a bash heredoc gets mangled in transit.** Several batteries reported
+  "0 matches" for anchors that were byte-for-byte present; the same anchors worked once the script was
+  written to a file with Write and executed. Write mutation scripts to `.scratch/*.py` — do not paste
+  them into a heredoc.
+* **`re.escape()` escapes the newline itself**, so `re.escape(s).replace(re.escape("\n"), r"\r?\n")`
+  silently does nothing and every multi-line anchor misses. Escape each *line* and join with `\r?\n`.
+  Files here also mix CRLF and LF (e.g. `remote_auth.py`: 408 of each), so try both endings.
 * **A mutation run that gets killed leaves the tree mutated, and the next run measures against it.**
   A foreground mutation battery hit the 120 s timeout and was SIGTERM'd mid-flight; it left
   `sl_long = long_entry + risk` in `tools/p0_1_direction_audit.py`. The retry then reported a meaningless

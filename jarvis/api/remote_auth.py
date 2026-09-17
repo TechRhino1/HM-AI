@@ -79,7 +79,14 @@ def _resolve_admin_password() -> str:
     return new_pass
 
 DEFAULT_PASS_RAW = _resolve_admin_password()
-logger.info(f"RemoteAuthEngine initialized with ADMIN_USER='{ADMIN_USERNAME}', ADMIN_PASS='{DEFAULT_PASS_RAW}'")
+# Log WHERE the password came from, never the password. It used to be written
+# here in clear text, which put the remote-access credential into every log
+# file and any log shipped off the box.
+logger.info(
+    "RemoteAuthEngine initialized with ADMIN_USER='%s' (password resolved from %s)",
+    ADMIN_USERNAME,
+    "JARVIS_ADMIN_PASS" if os.environ.get("JARVIS_ADMIN_PASS") else "jarvis/.jarvis_admin_pass",
+)
 
 
 class RemoteAuthEngine:
@@ -87,7 +94,7 @@ class RemoteAuthEngine:
     Secure Authentication and Session Engine for HM Algo 2.0 Remote Web Terminals.
     Includes rate limiting, temporary lockout against brute-force attacks, and persistent HMAC signing.
     """
-    _tokens: Dict[str, float] = {}       # token -> expiration timestamp (30 days validity)
+    _tokens: Dict[str, float] = {}       # token -> expiration timestamp
     _revoked_tokens: set = set()          # set of revoked tokens (logged out)
     _token_ttl: float = 8 * 3600.0       # Short-lived browser session
 
@@ -101,9 +108,19 @@ class RemoteAuthEngine:
 
     @classmethod
     def is_local_client(cls, client_ip: str) -> bool:
-        """Checks whether the client IP represents a local/private network address."""
+        """Checks whether the client IP represents a local/private network address.
+
+        An empty or missing address is NOT local. It used to be treated as
+        local, and because ``check_rate_limit`` defaults ``client_ip`` to ``""``
+        and both of its call sites pass a single argument, every caller was
+        classified as local — so the 5-attempt remote lockout was unreachable
+        and everyone got the relaxed 50. Unknown must fail closed; the stricter
+        limit is the safe default.
+        """
         ip = (client_ip or "").strip().lower()
-        return ip in ("127.0.0.1", "::1", "localhost", "") or ip.startswith("192.168.") or ip.startswith("10.") or ip.startswith("172.16.")
+        if not ip:
+            return False
+        return ip in ("127.0.0.1", "::1", "localhost") or ip.startswith("192.168.") or ip.startswith("10.") or ip.startswith("172.16.")
 
     @classmethod
     def check_rate_limit(cls, identifier: str, client_ip: str = "") -> Tuple[bool, int]:
@@ -230,10 +247,15 @@ class RemoteAuthEngine:
             cls.record_failed_attempt(user_key)
             return None, "Invalid username or password"
 
-        # Verify password validity first so authentic users with correct password can always log in
+        # Verify password validity first so authentic users with correct password can always log in.
+        # There is deliberately NO fallback password here. This module used to accept three
+        # hardcoded strings ("hm2026", "hm2026admin", "admin1234") for the admin account; they
+        # were committed to a public repository, worked regardless of the configured password,
+        # and — because this branch returns before the lockout bookkeeping — were immune to
+        # brute-force lockout. Anyone who had read the source had admin on the remote terminal.
+        # The configured password is in `jarvis/.jarvis_admin_pass` (gitignored), overridable
+        # with JARVIS_ADMIN_PASS.
         is_valid = cls._verify_password(pwd, user_data.get("password_hash", ""))
-        if not is_valid and user_key == "admin" and pwd in ("hm2026", "hm2026admin", "admin1234"):
-            is_valid = True
 
         if is_valid:
             cls.record_successful_login(client_ip or "")
@@ -261,7 +283,7 @@ class RemoteAuthEngine:
     def create_session_token(cls, username: str) -> Dict[str, Any]:
         """
         Generates a tamper-proof HMAC-SHA256 signed session token for authenticated user.
-        Token is valid for 30 days and supports rolling extension.
+        Valid for ``_token_ttl`` (8 hours) and extended on every successful validation.
         """
         cls._init_default_users()
         user_key = (username or "").strip().lower()
@@ -364,7 +386,14 @@ class RemoteAuthEngine:
         """
         cls._init_default_users()
         user_key = (username or "").strip().lower()
-        if not cls.verify_credentials(user_key, old_password):
+        # verify_credentials returns a (user, error) TUPLE, and a failed call
+        # returns (None, "Invalid...") — a non-empty tuple, therefore truthy.
+        # `if not cls.verify_credentials(...)` was always False, so the current
+        # password was never actually checked: any authenticated session could
+        # overwrite the password and lock out (or take over) the account. Test
+        # the first element, which is None exactly when the login failed.
+        user, _err = cls.verify_credentials(user_key, old_password)
+        if not user:
             return False, "Current password verification failed"
 
         if len(new_password.strip()) < 6:
