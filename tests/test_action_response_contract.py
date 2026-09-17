@@ -125,14 +125,39 @@ class ActionResponseContractTest(unittest.TestCase):
 
 
 class RefusalStatusesAgreeWithTheUiTest(unittest.TestCase):
-    """The set of statuses the server can refuse with must be the set the UI
-    treats as a refusal.
+    """Every status the action path can emit must be **classified**, and every
+    refusal must be one the UI actually treats as a refusal.
 
     This is the drift that produced the bug: the backend had two refusal
-    statuses and the frontend knew one. A new refusal status added to
-    `mt5_client` without being added to the UI's guard would otherwise be
-    rendered as a completed trade.
+    statuses and the frontend knew one. The first version of this guard could
+    not catch that drift — it read the emitted statuses and then filtered them
+    through the very set it was validating::
+
+        emitted  = set(re.findall(..., mt5_client.py))
+        refusals = {s for s in emitted if s in {"FAILED", "BLOCKED", ...}}
+
+    `refusals` is a subset of that literal *by construction*, so the assertion
+    that followed was a tautology, and a new refusal status would have been
+    filtered out before it could fail anything. The sets below are instead
+    exhaustive classifications: an unclassified status fails the test and forces
+    a decision, which is the only way a guard like this earns its place.
+
+    Why the UI can use a deny-list at all: a refusal that arrives with HTTP 200
+    is the only case `res.ok` cannot catch, and on the action path those are
+    exactly `FAILED` and `BLOCKED` (the route passes the broker's dict through
+    `_send_json`, whose default is 200). Everything else the server refuses with
+    — `UNAUTHORIZED` 401, `FORBIDDEN` 403, `BAD_REQUEST` 400, the 500 path —
+    carries a non-2xx code, so the UI rejects it before the body is read.
     """
+
+    # The action did NOT happen.
+    REFUSALS = {"FAILED", "BLOCKED", "REJECTED", "ERROR"}
+    # The action DID happen.
+    COMPLETIONS = {"PLACED", "FILLED", "MODIFIED", "CANCELLED", "CLOSED",
+                   "PARTIALLY_CLOSED", "SUCCESS", "OK"}
+    # Refusals the server only ever pairs with a non-2xx code, so `res.ok`
+    # already rejects them and the body-level guard never sees them.
+    NON_2XX_ONLY = {"UNAUTHORIZED", "FORBIDDEN", "BAD_REQUEST", "NOT_FOUND", "LOCKED"}
 
     def _ui_refusal_set(self):
         src = DASHBOARD_JS.read_text(encoding="utf-8")
@@ -143,25 +168,68 @@ class RefusalStatusesAgreeWithTheUiTest(unittest.TestCase):
         return {k.split(":")[0].strip().strip("'\"").upper()
                 for k in m.group(1).split(",") if k.strip()}
 
-    def test_every_refusal_status_the_broker_can_return_is_treated_as_one(self):
-        # Read from the broker layer rather than hard-coded, so a new one shows up.
+    def _statuses(self, path):
+        return set(re.findall(r'"status":\s*"([A-Z_]+)"',
+                              path.read_text(encoding="utf-8")))
+
+    def _action_route_statuses(self):
+        """The status literals inside `do_POST`'s `/api/action/` dispatch.
+
+        Scoped to that method rather than the whole file: the status endpoint
+        emits `SAFE_MODE` / `OPERATIONAL` to describe the *system*, which is a
+        different vocabulary from "did your order happen", and letting those in
+        would make the classification meaningless.
+        """
         src = (Path(__file__).resolve().parents[1]
-               / "jarvis/execution/mt5_client.py").read_text(encoding="utf-8")
-        emitted = set(re.findall(r'"status":\s*"([A-Z_]+)"', src))
-        refusals = {s for s in emitted if s in {"FAILED", "BLOCKED", "REJECTED", "ERROR"}}
-        self.assertTrue(refusals, "expected the broker layer to have refusal statuses")
-        self.assertTrue(
-            refusals <= self._ui_refusal_set(),
-            f"the broker can refuse with {sorted(refusals)} but the UI only knows "
-            f"{sorted(self._ui_refusal_set())} — an unhandled refusal renders as success",
+               / "jarvis/api/server.py").read_text(encoding="utf-8")
+        start = src.index('path.startswith("/api/action/")')
+        rest = src[start:]
+        end = re.search(r"\n    def ", rest)
+        block = rest[:end.start()] if end else rest
+        return set(re.findall(r'"status":\s*"([A-Z_]+)"', block))
+
+    def test_every_status_the_action_path_can_emit_is_classified(self):
+        """The guard that can actually fail.
+
+        Add a refusal status to the broker or a route and this goes red until
+        someone decides which set it belongs to — instead of it silently
+        rendering as a completed trade.
+        """
+        emitted = (self._statuses(Path(__file__).resolve().parents[1]
+                                  / "jarvis/execution/mt5_client.py")
+                   | self._action_route_statuses())
+        self.assertTrue(emitted, "expected to find status literals to classify")
+        known = self.REFUSALS | self.COMPLETIONS | self.NON_2XX_ONLY
+        unclassified = emitted - known
+        self.assertFalse(
+            unclassified,
+            f"the action path can emit {sorted(unclassified)}, which is not "
+            f"classified as a refusal, a completion or a non-2xx-only status. "
+            f"Decide which it is — an unclassified failure renders as success.",
         )
+
+    def test_every_refusal_the_action_path_can_emit_is_treated_as_one(self):
+        emitted = (self._statuses(Path(__file__).resolve().parents[1]
+                                  / "jarvis/execution/mt5_client.py")
+                   | self._action_route_statuses())
+        refusals = emitted & self.REFUSALS
+        self.assertTrue(refusals, "expected the action path to have refusal statuses")
+        handled = self._ui_refusal_set() | self.NON_2XX_ONLY
+        self.assertTrue(
+            refusals <= handled,
+            f"the action path can refuse with {sorted(refusals)} but the UI only "
+            f"knows {sorted(self._ui_refusal_set())} and {sorted(self.NON_2XX_ONLY)} "
+            f"arrive with a non-2xx code — an unhandled refusal renders as success",
+        )
+
+    def test_the_two_classifications_do_not_overlap(self):
+        """A status cannot mean both "it happened" and "it did not"."""
+        self.assertFalse(self.REFUSALS & self.COMPLETIONS)
 
     def test_a_completed_action_is_never_treated_as_a_refusal(self):
         """The opposite mistake, which would turn a filled order into an error."""
-        completed = {"PLACED", "FILLED", "MODIFIED", "CANCELLED", "CLOSED",
-                     "PARTIALLY_CLOSED"}
         self.assertFalse(
-            completed & self._ui_refusal_set(),
+            self.COMPLETIONS & self._ui_refusal_set(),
             "a completed status is in the UI's refusal set",
         )
 

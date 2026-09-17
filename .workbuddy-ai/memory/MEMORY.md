@@ -41,12 +41,13 @@ plainly that closing the window stops it.
 
 ## Baselines
 
-**pytest 922 passed / 20 deselected** (883 → 887 with `test_history_window_filter.py`, → 914 with
-`test_copilot_intents.py`, → 922 with `test_action_response_contract.py`). `tools/`:
+**pytest 924 passed / 20 deselected** (883 → 887 with `test_history_window_filter.py`, → 914 with
+`test_copilot_intents.py`, → 922 with `test_action_response_contract.py`, → 924 when its drift guard was
+rebuilt — that file went 8 → 10 tests). `tools/`:
 `verify_ui_live.py` (46 — was 44; two `/api/copilot/ask` probes. **Starts its own server on :8599** —
-stop `.scratch/verify_server.py` first or its probes hit the engine-less scratch server and read as
-`attached=False` / `503`, which looks exactly like a regression. Its total is *conditional*: 45 with
-no engine, 46 with one) ·
+nothing may be listening there, or its probes hit the engine-less scratch server and read as
+`attached=False` / `503`, which looks exactly like a regression. Run the browser suites against
+**`.scratch/srv8611.py` on :8611** instead. Its total is *conditional*: 45 with no engine, 46 with one) ·
 `verify_dashboard_render.js` (**183** — was 88; the backtest fixture added 23, the history fixture 19,
 auto-selection + regime-policy 22, the order path 15, the copilot panel 15) ·
 `verify_copilot_render.js` (**23** — the copilot answer renderer exists in **two** front ends and this
@@ -56,14 +57,17 @@ in one and an XSS in the other) ·
 renderer coverage before it; `terminal.js` registers `fetchHistory` *only* inside `setInterval`, so an
 inert `setInterval` stub makes the history table — and every assertion on it — a silent no-op. Capture
 the intervals and tick them) ·
-**`tools/lib/dom_stub.js`** holds the stubbed DOM both render harnesses share
-(`createDom({templateIds, docRoots, templateTree})`); a copy per harness would drift invisibly. Assert
+**`tools/dom_stub.js`** holds the stubbed DOM both render harnesses share
+(`createDom({templateIds, docRoots, templateTree})`); a copy per harness would drift invisibly. It is
+**not** under `lib/`: a bare `lib/` in `.gitignore` matches at any depth, so `tools/lib/dom_stub.js`
+worked locally and was absent from every clone — check a new file with
+`git check-ignore -v <path>`. Assert
 against markup **as rendered** — never
 `html.replace(/\s+/g,'')`, which eats the space in `<span class="…">` and makes a correct string fail;
 bind a value to its own label via `metricValue(html, label)` or a swapped counter passes) · `verify_dashboard_nav.js` (31) · `verify_ui_layout.js`
-(**~229** — the total is *not* fixed: it counts controls per viewport, so hiding a control lowers it.
-238 → 229 is the ticket's pending row correctly disappearing, not a lost check. Read the FAIL lines,
-never the total) · `audit_endpoints.py` (**46** — rises when a new route is added; add POST-only
+(**238** as of the ticket work — the total is *not* fixed: it counts controls per viewport, so hiding a
+control lowers it, and 238 → 229 was the ticket's pending row correctly disappearing, not a lost check.
+Read the FAIL lines, never the total) · `audit_endpoints.py` (**46** — rises when a new route is added; add POST-only
 routes to its `POST_ONLY` set or they report DEAD, and **probe with `--base` against a server built
 from the current tree** or a stale engine makes new routes look dead) · `audit_wiring.py` (135
 modules, 0 broken refs).
@@ -107,13 +111,23 @@ into 45s navigation timeouts, which read exactly like a regression.
   JS is parsed, so the string still closes. A value inside an inline handler is a JS string inside an HTML
   attribute and needs both layers, JS first —
   `escapeHtml(s.replace(/\\/g,"\\\\").replace(/'/g,"\\'"))` (`escAttr()` in `terminal.js`). Applied to all
-  three inline-handler sites plus every server string reaching `innerHTML`: **3 → 40 call sites**. Verify
+  three inline-handler sites plus every server string reaching `innerHTML`: **3 → 41 call sites**. Verify
   with a **sweep**, not by eye: list every `${…}` inside an `.innerHTML` assignment, exclude those already
   wrapped in `escapeHtml(`/`escAttr(`/`Number(`/`formatPrice(`, expect 0 (an unfiltered sweep reported 77
   and was useless — most hits were `textContent`, `alert()` and `fetch()` strings, none of which parse
   HTML). When measuring the fix, read the **raw `innerHTML`**, not `deepHtml()` — the latter re-adds
   decoded `_text` and cannot tell a parsed tag from text that looks like one — and count **unescaped**
   quotes, because the payload text still appears after escaping, preceded by a backslash.
+* **A guard that filters its inputs through the set it validates is a tautology.** `test_action_response_
+  contract.py` "checked" that every refusal the broker can emit is one the UI knows, by reading the status
+  literals and then intersecting with `{"FAILED","BLOCKED","REJECTED","ERROR"}` — so the set under test was
+  a subset of that literal *by construction* and a new status was filtered out **before** the assertion
+  could fail. The comment promised "a new one shows up"; the code made that impossible. Prove a guard with
+  a **mutation**: append a plausible new status (`{"status": "PARTIALLY_REJECTED"}`) and confirm the test
+  goes red — restore in a `finally` and assert byte-identity. The replacement classifies exhaustively
+  (`REFUSALS` / `COMPLETIONS` / `NON_2XX_ONLY`) so an unknown status *forces* a decision. Scope the
+  enumeration to the route's own dispatch (`do_POST`'s `/api/action/` block), not the whole file: the
+  status endpoint emits `SAFE_MODE`/`OPERATIONAL` about the system, a different vocabulary.
 
 ## Signal quality
 
