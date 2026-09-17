@@ -2,10 +2,25 @@
 HM Algo 2.0 — Autonomous Trade Quality Guard.
 Executes hard independent pre-flight checks before approving any trade for execution.
 """
+import math
 from typing import Dict, List, Any, Optional
 from datetime import datetime, timezone
 from jarvis.data.schemas import DecisionObject, AccountSnapshot, PositionSnapshot
 from jarvis.data.symbol_registry import resolve
+
+
+def _is_finite(value: Any) -> bool:
+    """True only for a real, finite number.
+
+    NaN compares False against everything, so `nan > cap` and `nan >= entry` are
+    both False and a NaN sails through every threshold below. An infinity passes
+    one direction of each pair. Neither is ever a tradeable order.
+    """
+    try:
+        return value is not None and math.isfinite(float(value))
+    except (TypeError, ValueError):
+        return False
+
 
 class TradeGuard:
     @staticmethod
@@ -53,6 +68,15 @@ class TradeGuard:
         # allowance differs between sessions, a form of look-ahead.
         _bar_ts = getattr(getattr(decision, "context", None), "timestamp", None)
         if _bar_ts is not None and hasattr(_bar_ts, "hour"):
+            # The window above is defined in UTC. Bar timestamps arrive with
+            # their tzinfo intact (market_context passes them straight through)
+            # and MT5 runs on the broker's clock, so an aware value has to be
+            # converted — `.hour` alone would shift the window by the offset.
+            if getattr(_bar_ts, "tzinfo", None) is not None:
+                try:
+                    _bar_ts = _bar_ts.astimezone(timezone.utc)
+                except (AttributeError, TypeError, ValueError):
+                    pass
             current_hour = int(_bar_ts.hour)
         else:
             current_hour = datetime.now(timezone.utc).hour
@@ -64,20 +88,39 @@ class TradeGuard:
         if is_crypto and is_asian_session:
             allowed_max_spread *= 2.0
 
-        if current_spread_pips > allowed_max_spread:
+        if not _is_finite(current_spread_pips):
+            reasons.append(f"Spread is not a finite number ({current_spread_pips} pips).")
+        elif current_spread_pips > allowed_max_spread:
             reasons.append(f"Spread ({current_spread_pips} pips) exceeds maximum threshold ({allowed_max_spread} pips).")
 
-        # Inverted or invalid stop loss check
-        if decision.bias == "BUY" and decision.stop_loss >= decision.entry_price:
-            reasons.append("Invalid BUY order geometry: Stop loss is above entry price.")
-        elif decision.bias == "SELL" and decision.stop_loss <= decision.entry_price:
-            reasons.append("Invalid SELL order geometry: Stop loss is below entry price.")
+        # A price that is not a real number is never a tradeable order, and it
+        # would otherwise slip past every comparison below.
+        for _label, _value in (
+            ("entry price", decision.entry_price),
+            ("stop loss", decision.stop_loss),
+            ("take profit", decision.take_profit),
+        ):
+            if not _is_finite(_value):
+                reasons.append(f"Invalid order geometry: {_label} is not a finite number ({_value}).")
 
-        # Fix #11: TP geometry validation
-        if decision.bias == "BUY" and decision.take_profit <= decision.entry_price:
-            reasons.append("Invalid BUY order geometry: Take profit is below entry price.")
-        elif decision.bias == "SELL" and decision.take_profit >= decision.entry_price:
-            reasons.append("Invalid SELL order geometry: Take profit is above entry price.")
+        # Inverted or invalid stop loss / take profit check. The `else` matters:
+        # geometry can only be judged against a direction, so a bias that is
+        # neither BUY nor SELL (including a lower-cased one) used to skip both
+        # checks and approve an inverted stop.
+        if decision.bias == "BUY":
+            if decision.stop_loss >= decision.entry_price:
+                reasons.append("Invalid BUY order geometry: Stop loss is above entry price.")
+            if decision.take_profit <= decision.entry_price:
+                reasons.append("Invalid BUY order geometry: Take profit is below entry price.")
+        elif decision.bias == "SELL":
+            if decision.stop_loss <= decision.entry_price:
+                reasons.append("Invalid SELL order geometry: Stop loss is below entry price.")
+            if decision.take_profit >= decision.entry_price:
+                reasons.append("Invalid SELL order geometry: Take profit is above entry price.")
+        else:
+            reasons.append(
+                f"Invalid order geometry: unrecognised bias '{decision.bias}' (expected BUY or SELL)."
+            )
 
         is_passed = len(reasons) == 0
         return {
