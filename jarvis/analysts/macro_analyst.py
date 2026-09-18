@@ -35,7 +35,10 @@ def _parse_metric(value: str) -> Optional[float]:
 class MacroAnalyst(BaseAnalyst):
     def __init__(self, news_calendar: Optional[List[Dict[str, Any]]] = None):
         super().__init__(AnalystRole.MACRO)
-        self.news_calendar = news_calendar or []
+        # Kept as `None` rather than coalesced to `[]`: `None` means "go and
+        # ask the global news engine", an explicit `[]` means "there is no
+        # news" and must not trigger a live lookup.
+        self.news_calendar = news_calendar
 
     def analyze(self, context: MarketContext, regime: RegimeOutput) -> AnalystReport:
         t0 = time.perf_counter()
@@ -58,7 +61,7 @@ class MacroAnalyst(BaseAnalyst):
                 score -= 10.0
 
         # 2. Real-Time Macro News Directional Shock Scoring
-        if not self.news_calendar:
+        if self.news_calendar is None:
             try:
                 from jarvis.market.news import GLOBAL_NEWS_ENGINE
                 active_news = GLOBAL_NEWS_ENGINE.get_news_calendar()

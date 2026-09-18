@@ -67,12 +67,18 @@ class StructureAnalyst(BaseAnalyst):
                 evidence.append("Institutional Buy Alignment: Price positioned in optimal DISCOUNT demand zone for longing.")
 
         # 4. Multi-timeframe trend alignment check
+        # `mtf_alignment` is populated per trade style (market_context.py:115):
+        # SWING -> D1/H4/H1/M15, DAY_TRADING -> H4/H1/M15/M5 (no D1),
+        # SCALP -> H1/M15/M5/M1 (neither). A frame that simply is not in the
+        # dict means "not computed for this style", NOT "opposes the bias", so
+        # it must not be reported as divergence.
         mtf = context.mtf_alignment
-        if mtf.get("H4") == bias and mtf.get("D1") == bias:
+        h4 = mtf.get("H4")
+        if h4 == bias and mtf.get("D1") == bias:
             score += 10.0
             evidence.append("Macro timeframe trend confluence (D1 & H4 aligned).")
-        elif mtf.get("H4") != bias and mtf.get("H4") != "NEUTRAL":
-            risk_factors.append(f"Higher timeframe structural divergence (H4 is {mtf.get('H4')}).")
+        elif h4 is not None and h4 != bias and h4 != "NEUTRAL":
+            risk_factors.append(f"Higher timeframe structural divergence (H4 is {h4}).")
 
         final_score = min(100.0, max(0.0, score))
         confidence = min(0.95, max(0.40, final_score / 100.0))
