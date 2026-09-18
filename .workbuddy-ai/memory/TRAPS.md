@@ -769,3 +769,29 @@ in a way that no error message explains.
   fixed total and therefore passed at 01:00 UTC and failed with 14 at 13:00 UTC, i.e. it was broken
   for ~8 hours of every weekday and looked fine overnight. When a test asserts a constant, check
   whether anything in the path defaults to `now()`; freeze it rather than assuming.
+
+## Mutation batteries (round 28) — the harness must survive being killed
+
+* **A mutation script that gets SIGTERM'd leaves a mutant applied to the real source.** It happened
+  twice in one session: `hunt3.py` left `span_fast = self.ema_fast` and `hunt4.py` left
+  `c_pdi = float(plus_di.iloc[-1])` in `jarvis/market/momentum.py`, both silently. Git does not
+  notice if it normalises line endings, and the next script then copies the corrupt file into its
+  own backup and measures against a *mutated baseline* — producing fixtures that are wrong in a way
+  that looks plausible (base `pers=9` on a frame that really scores 4).
+  **Every mutation script must install `signal.signal(signal.SIGTERM/SIGINT, restore)` that copies
+  the backup back and exits, and every run must end by asserting `source == backup`.** Keep the
+  pristine copy outside the script (`.scratch/_<module>_orig.py`) and restore from that, never from
+  a backup the same run may have overwritten.
+* **In-process mutation checks need `importlib.reload`.** Rewriting the source file does nothing to
+  an already-imported module, so a "does this mutant change anything" probe reports *every* mutant
+  as MISSED. Either reload or run pytest in a subprocess (the battery does the latter).
+* **Reading with `open(..., encoding="utf-8")` translates CRLF to LF, but writing translates LF back
+  to CRLF.** Multi-line mutation anchors therefore match on read and the file stays CRLF on write —
+  fine, but never assume the on-disk bytes match what you read.
+* **Batch, don't loop.** Applying a mutant once and comparing it against 1500 pre-computed baseline
+  verdicts takes seconds; applying it per frame with a reload each time times out at ~2 minutes and
+  is what triggered the kills above.
+* **A missed mutant is often dead code, and that is a finding.** Proving it is better than chasing
+  it: `np.clip(score, -100, 100)` never binds because its terms are bounded at 45+25+30; three of
+  the four stack constants in the persistence loop can never carry a bar across zero. Record the
+  proof *in the test suite* (assert the reachable value set) so the gap is not re-opened later.
