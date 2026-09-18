@@ -756,3 +756,16 @@ in a way that no error message explains.
   read-through. Same shape as the correlation check needing an `"EURUSD"` key in `mtf_alignment`,
   which only ever holds timeframes. For every `== "CONSTANT"`, `grep -rn 'CONSTANT'` and confirm at
   least one *assignment*, not just another comparison.
+* **Numpy integers are not Python integers, but numpy floats ARE Python floats.**
+  `isinstance(np.int64(0), int)` is **False**; `isinstance(np.float64(0.0), float)` is **True**. So
+  `isinstance(x, (int, float))` silently misses an int64 column while accepting a float one. In
+  `market_context.py:104` that means a bar-time column of integer epoch seconds is discarded in
+  favour of `datetime.now()` while the same value as floats is handled correctly. Use
+  `numbers.Real` / `np.integer` explicitly, or convert the column, when dtype is not controlled.
+* **A fallback to `datetime.now()` makes a result depend on the hour you run it.**
+  `SessionEngine.get_active_killzone(None)` reads the wall clock, and
+  `master_confluence:138` passes `getattr(context, "timestamp", None)` — so a context with no
+  timestamp scores its killzone component from *now*. `test_a_none_context_does_not_raise` asserted a
+  fixed total and therefore passed at 01:00 UTC and failed with 14 at 13:00 UTC, i.e. it was broken
+  for ~8 hours of every weekday and looked fine overnight. When a test asserts a constant, check
+  whether anything in the path defaults to `now()`; freeze it rather than assuming.

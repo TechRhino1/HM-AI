@@ -41,7 +41,7 @@ plainly that closing the window stops it.
 
 ## Baselines
 
-**pytest 2046 passed / 20 deselected** (883 → 887 with `test_history_window_filter.py`, → 914 with
+**pytest 2136 passed / 20 deselected** (883 → 887 with `test_history_window_filter.py`, → 914 with
 `test_copilot_intents.py`, → 922 with `test_action_response_contract.py`, → 924 when its drift guard was
 rebuilt, → 970 with `test_copilot_memory.py` (22) and `test_copilot_provider.py` (23) plus one restored
 branch test, → 998 with `test_measurement_spine.py` (28), → 1054 with `test_remote_auth.py` (56),
@@ -49,8 +49,8 @@ branch test, → 998 with `test_measurement_spine.py` (28), → 1054 with `test_
 `test_hrp_allocator.py` (32), → 1424 with `test_master_confluence.py` (68), → 1541 with
 `test_ai_dissector.py` (117), → 1609 with `test_drawdown_guard.py` (68), → **1663** with
 `test_broker_symbols.py` (54), → 1694 with `test_parallel_runner.py` (31), → **1896** with
-`test_analyst_scoring.py` (202), → **2046** with `test_devil_advocate.py` (150);
-657 when this skill
+`test_analyst_scoring.py` (202), → 2046 with `test_devil_advocate.py` (150), → **2136**
+with `test_market_context.py` (89); 657 when this skill
 was written). `tools/`:
 `verify_ui_live.py` (46 — was 44; two `/api/copilot/ask` probes. **Starts its own server on :8599** —
 nothing may be listening there, or its probes hit the engine-less scratch server and read as
