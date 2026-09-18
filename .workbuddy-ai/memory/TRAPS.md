@@ -748,3 +748,11 @@ in a way that no error message explains.
   followed by `if not self.news_calendar:` meant `MacroAnalyst(news_calendar=[])` still hit the live
   `GLOBAL_NEWS_ENGINE` — there was no way to say "no news", and no way to unit-test the analyst
   offline. Keep the `None` and test `is None` when the sentinel has to mean "go ask".
+* **A comparison against a string literal is a claim that the literal is ever produced — grep the
+  producers before believing the branch.** `devil_advocate` penalised a fresh sweep with
+  `sweep_type == "BUY_SIDE"` / `"SELL_SIDE"`, but the only producer (`liquidity.py:108,115`) writes
+  `"BULLISH_SWEEP"` / `"BEARISH_SWEEP"`, so the branch had never run. The strings it wanted do exist
+  — in `news.py:720`, for an unrelated narrative — which is exactly what makes this survive a
+  read-through. Same shape as the correlation check needing an `"EURUSD"` key in `mtf_alignment`,
+  which only ever holds timeframes. For every `== "CONSTANT"`, `grep -rn 'CONSTANT'` and confirm at
+  least one *assignment*, not just another comparison.
