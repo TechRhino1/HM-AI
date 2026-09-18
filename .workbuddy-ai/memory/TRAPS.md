@@ -823,3 +823,26 @@ in a way that no error message explains.
   the same test when the element is inside the window), four boundary equalities that a later
   gate makes unreachable, `np.maximum` re-bracketing (associative), and three regime thresholds
   blocked by the `+1e-9` epsilon. Each now has its proof asserted in the suite.
+
+## Picking the next module (round 30) — leverage, not size
+
+The "largest untested module" heuristic is wrong for this codebase. Most of the big untested files
+are one-off root scripts (`run_6month_backtest.py`, `verify_system.py`, `test_*_api.py` that never
+got moved into `tests/`). The real library modules without suites are small. Prefer **how many
+verdicts depend on the module**: `jarvis/backtesting/metrics.py` is 113 lines but produces every
+headline number the project quotes about itself, and it feeds `engine.py`, `walk_forward.py`,
+`optimizer.py` and `regime_optimizer.py`. When generating the inventory, strip root-level scripts
+and `tests/`-named files first or the ranking is meaningless.
+
+## Measurement-layer findings worth generalising (round 30)
+
+* **Two return paths in the same function usually disagree on their keys.** `metrics.py` returns 12
+  keys for empty input and 13 otherwise. Assert `set(full) - set(empty)` rather than eyeballing.
+* **A "perfect" input often hits a degenerate guard.** Zero dispersion fails `std > 1e-6`, so a
+  flawlessly profitable book reports Sharpe 0.0. Always test the all-winners and all-zeros cases.
+* **Sentinels masquerading as measurements.** Profit factor 99.0 and Calmar 10.0 are magic
+  constants for "undefined", and they then flow into a fitness score as if they were real.
+* **Two independently-tracked maxima can describe different events.** `max_dd_dollars` and
+  `max_dd_pct` are each updated on their own, against a running peak that never resets.
+* **`>` vs `>=` on a running maximum is a no-op** (recording an equal value changes nothing) — as is
+  clamping a value that an earlier `np.clip` has already bounded. Both are legitimate survivors.
