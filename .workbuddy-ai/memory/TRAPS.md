@@ -795,3 +795,31 @@ in a way that no error message explains.
   it: `np.clip(score, -100, 100)` never binds because its terms are bounded at 45+25+30; three of
   the four stack constants in the persistence loop can never carry a bar across zero. Record the
   proof *in the test suite* (assert the reachable value set) so the gap is not re-opened later.
+
+## Mutation batteries (round 29) — anchors and fixtures, not just signals
+
+* **A duplicated anchor silently mutates the WRONG occurrence.** `.replace(old, new, 1)` hits the
+  first match, and `volatility.py` has `max_allowed_spread_pips=max_allowed_spread_pips` in both the
+  early return (16-space) and the main path (12-space), and `current_spread_pips > max_allowed...`
+  with and without spaces around `=`. Both reported MISSED against tests that could only see the
+  main path. Anchor on the enclosing line, including its indentation.
+* **An anchor with hardcoded indentation is a coin flip.** Two of 98 missed on
+  `"* 100.0\n        eq_highs"` because the real code is 12 spaces, not 8. The battery already
+  reports ANCHOR-MISS — trust it, and fix the anchor rather than deleting the mutant.
+* **Symmetric fixtures make whole classes of mutant invisible.** A sine oscillation has four
+  identical troughs, so `swing_lows[-1]` vs `[0]` is unobservable; a symmetric sweep candle makes
+  `mag_high == mag_low`. Build fixtures where the discriminated quantity *differs* — a descending
+  zigzag for swing selection, an asymmetric candle for magnitude.
+* **`>=` vs `>` needs an exact hit, and floats will not give you one for free.** `97.9 - 97.0` is
+  `0.9000000000000001`, so `body_pct` is `0.45000000000000007`, not `0.45` — the `>= 0.45` mutant
+  survived until a search found `open=96.576, close=97.701, low=97.0, high=99.5`
+  (`1.125 / 2.5 == 0.45` exactly). Conversely `vol_ratio = cur / (median + 1e-9)` can essentially
+  never land exactly on a threshold: `0.625 / 0.25 == 2.5` but `0.625 / 0.250000001 < 2.5`.
+  When an exact hit is impossible, mutate the constant's *value* instead and pin the band.
+* **`numpy.bool_ is not Python `True`.** The engine reads levels with `float(...)`, so it compares
+  Python floats and returns a Python bool — but passing a `np.float64` in as a threshold makes the
+  comparison return `np.bool_`, and `np.True_ is True` is False. Convert with `float()`.
+* **A survivor is often a proof, not a gap.** Ten survived: two swing comparisons (`==` vs `>=` is
+  the same test when the element is inside the window), four boundary equalities that a later
+  gate makes unreachable, `np.maximum` re-bracketing (associative), and three regime thresholds
+  blocked by the `+1e-9` epsilon. Each now has its proof asserted in the suite.
