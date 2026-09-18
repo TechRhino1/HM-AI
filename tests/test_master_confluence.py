@@ -75,6 +75,30 @@ def closes_frame(values):
     return pd.DataFrame({"close": values, "open": values, "high": values, "low": values})
 
 
+_NO_KZ = {"active_killzone": None, "is_in_killzone": False,
+          "is_asian_range": False, "killzone_minutes_remaining": 0}
+_ACTIVE_KZ = {"active_killzone": "NY_OPEN", "is_in_killzone": True,
+              "is_asian_range": False, "killzone_minutes_remaining": 30}
+
+
+@pytest.fixture
+def frozen_killzone(monkeypatch):
+    """`SessionEngine.get_active_killzone(None)` falls back to `datetime.now()`.
+
+    `master_confluence:138` calls it with `getattr(context, "timestamp", None)`,
+    so any test that passes a context with no timestamp — including `None`
+    itself — scores `ict_killzone_amd` from the **wall clock**: +10 for the
+    eight hours a day a killzone is open, 0 otherwise. Pin it.
+    """
+    def _set(info):
+        monkeypatch.setattr(
+            "jarvis.market.sessions.SessionEngine.get_active_killzone",
+            staticmethod(lambda dt=None: dict(info)),
+        )
+        return info
+    return _set
+
+
 # ---------------------------------------------------------------------------
 # Result shape
 # ---------------------------------------------------------------------------
@@ -110,13 +134,31 @@ class TestResultShape:
         for v in score(ctx(), regime("TREND_BEAR"))["breakdown"].values():
             assert v >= 0
 
-    def test_a_none_context_does_not_raise(self):
+    def test_a_none_context_does_not_raise(self, frozen_killzone):
         """A missing context resolves every field to None; only the RANGE
-        default (4) can still accrue."""
+        default (4) can still accrue.
+
+        The killzone is pinned because it is not otherwise deterministic here —
+        see `test_a_none_context_reads_the_wall_clock_killzone`. This test
+        previously asserted `total == 4` unconditionally and so failed with 14
+        for eight hours of every weekday.
+        """
+        frozen_killzone(_NO_KZ)
         r = score(None)
         assert r["total"] == 4
         assert r["tier"] == "WEAK"
         assert set(r["breakdown"]) == COMPONENTS
+
+    def test_a_none_context_reads_the_wall_clock_killzone(self, frozen_killzone):
+        """🔴 With no context there is no timestamp, so the killzone component
+        is decided by the time of day the call happens: the identical input
+        scores 4 outside a killzone and 14 inside one. Harmless in production
+        (`decision_engine:857` always passes a real context) but it makes any
+        context-less score — and any test of one — time-dependent."""
+        frozen_killzone(_ACTIVE_KZ)
+        r = score(None)
+        assert r["breakdown"]["ict_killzone_amd"] == 10
+        assert r["total"] == 14
 
 
 # ---------------------------------------------------------------------------

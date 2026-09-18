@@ -41,8 +41,13 @@ class MarketContextEngine:
         Synthesizes multi-timeframe market data into a unified MarketContext object.
         Dynamically weights MTF confluence based on trade style:
         - SWING: D1 (40%), H4 (30%), H1 (20%), M15 (10%)
-        - DAY_TRADING / INTRADAY: H1 (40%), M15 (35%), M5 (25%)
+        - DAY_TRADING / INTRADAY: H4 (40%), H1 (35%), M15 (25%)
         - SCALP: H1 (40%), M15 (30%), M5 (20%), M1 (10%)
+
+        The DAY_TRADING row previously read "H1 (40%), M15 (35%), M5 (25%)",
+        which named the wrong frames: `df_macro` resolves to the **H4** frame
+        for this style, and M5 is written into `mtf_alignment` but carries no
+        weight. Corrected 2026-09-18 — the code was always self-consistent.
         """
         style = (trade_style or "SWING").upper()
         if style in ("DAY_TRADING", "INTRADAY", "DAY"):
