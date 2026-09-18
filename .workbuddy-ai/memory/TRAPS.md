@@ -737,3 +737,14 @@ in a way that no error message explains.
 * **Do not call `symbol_registry.resolve()` from a per-snapshot path.** It `logger.error`s for any
   unregistered symbol, so a loop over the universe turns into one ERROR line per symbol per snapshot.
   Use the registry for sizing/spread lookups (once per trade), not for classification in a hot loop.
+* **A dict keyed by timeframe is populated per trade style, so an absent key means "not computed",
+  never "opposes".** `market_context.py:115` fills `mtf_alignment` with D1/H4/H1/M15 for SWING,
+  H4/H1/M15/M5 for DAY_TRADING and H1/M15/M5/M1 for SCALP. `structure_analyst` read
+  `mtf.get("H4") != bias` as divergence, so **every SCALP decision** carried a fabricated
+  "structural divergence (H4 is None)" risk factor, and its +10 confluence bonus — which needs *both*
+  H4 and D1 — was dead code outside SWING. Whenever a lookup is `.get(...)`, ask which branch of the
+  producer could have skipped that key before treating a `None` as a value.
+* **A falsy default cannot express "explicitly empty".** `self.news_calendar = news_calendar or []`
+  followed by `if not self.news_calendar:` meant `MacroAnalyst(news_calendar=[])` still hit the live
+  `GLOBAL_NEWS_ENGINE` — there was no way to say "no news", and no way to unit-test the analyst
+  offline. Keep the `None` and test `is None` when the sentinel has to mean "go ask".
