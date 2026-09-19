@@ -1,7 +1,7 @@
 # HM-AI / HM Algo 2.0 — index
 
-Injected every session and **hard-truncated at ~6,520 bytes** — keep this file under that, or the tail
-disappears silently. Pointers and already-paid-for rules only; detail lives elsewhere.
+Injected every session and **hard-truncated at ~6,520 bytes** — keep under that or the tail vanishes.
+Pointers and already-paid-for rules only; detail lives elsewhere.
 
 * `TRAPS.md` — every trap (server/frontend/testing/data-source/data-integrity/CSS/tool-harnesses/risk).
   `AUDIT-2026-09.md` — signal-quality evidence + P0/P1/P2 backlog. `YYYY-MM-DD.md` — per-session detail.
@@ -18,14 +18,13 @@ disappears silently. Pointers and already-paid-for rules only; detail lives else
 * **The live server does not hot-reload.** Python edits need a restart; static CSS/JS/templates are
   re-read per request. *A hang that does not reproduce in a fresh interpreter is a stale process.*
   `py-spy dump --pid <pid>` attaches without restarting; `netstat -ano | grep 8501` for the pid.
-* **Push: credential-selector bypass, immediately.** A plain `git push` here produced a 0-byte log for
-  6m37s and never finished. The helper path **has a space in it**, so the usual
-  `-c credential.helper="!$GCM"` form fails with `/c/Program: No such file or directory` (the `!` form
-  goes through sh, which word-splits it). Use the wrapper: `.scratch/gcm_wrap.sh` execs GCM with the
-  path quoted, then `git -c credential.helper= -c credential.helper='!.scratch/gcm_wrap.sh' push origin main`
-  (~23s). `git status` always says `[gone]` (`.git/refs/remotes/*` is wiped right after being written)
-  — verify with `git ls-remote origin refs/heads/main` vs `git rev-parse HEAD`, never the push message
-  or the exit code. Backticks in `-m` are eaten by bash: use `git commit -F <file>`.
+* **Push: credential-selector bypass, immediately.** A plain `git push` produced a 0-byte log for
+  6m37s and never finished. The helper path **has a space in it**, so `-c credential.helper="!$GCM"`
+  fails with `/c/Program: No such file or directory` (`!` goes through sh, which word-splits it). Use
+  the tracked `tools/gcm_wrap.sh`: `git -c credential.helper= -c credential.helper='!tools/gcm_wrap.sh'
+  push origin main` (~23s). `git status` always says `[gone]` — verify with
+  `git ls-remote origin refs/heads/main` vs `git rev-parse HEAD`, never the push message or exit code.
+  Backticks in `-m` are eaten by bash: use `git commit -F <file>`.
 
 ## Running the platform
 
@@ -39,20 +38,21 @@ task** — point at `HM_dashboard.bat` and say plainly that closing the window s
 
 **Routes:** `/` = `dashboard.html` (primary). `/classic` = `index.html` (old terminal). `/stocks`,
 `/india`, `/options`, `/console`. **`verify_ui_layout.js` does not cover `/classic`** — measure it with
-`.scratch/classic_tabs.js` / `chart_more_probe.js`; `terminal.css` loads *only* in `index.html`,
-`dashboard.html` uses `theme_terminal.css`.
+`.scratch/classic_tabs.js`; `terminal.css` loads *only* in `index.html`, `dashboard.html` uses
+`theme_terminal.css`.
 
 ## Baselines
 
-**pytest 2531 tests / 2528 passed / 3 failed / 20 deselected.** The 3 failures are weekend-only:
-`tests/test_market_data_independence.py` asserts `freshness == STALE` while
+**pytest 2531 / 2528 passed / 3 failed / 20 deselected.** The 3 are weekend-only:
+`test_market_data_independence.py` asserts `freshness == STALE` while
 `SessionEngine.get_market_trading_status()` correctly answers `MARKET_CLOSED` on a Saturday — not a
-regression. Per-round history: each `YYYY-MM-DD.md`.
+regression. Per-round history: `YYYY-MM-DD.md`.
 
 `tools/` — `verify_ui_live` · `verify_dashboard_render` · `verify_terminal_render` ·
-`verify_copilot_render` · `verify_dashboard_nav` · `verify_ui_layout` · `audit_endpoints` ·
-`audit_wiring` · `audit_encoding`; all green. **Counts + each one's failure mode (most look like a
-regression): `TRAPS.md` § Tool harnesses.**
+`verify_copilot_render` · `verify_dashboard_nav` · `verify_ui_layout` · `verify_phone_nav` ·
+`audit_endpoints` · `audit_wiring` · `audit_encoding`; all green. **Counts + each one's failure mode
+(most look like a regression): `TRAPS.md` § Tool harnesses, § Measuring layout.**
+`tools/gcm_wrap.sh` is the required push credential helper (see Non-negotiables).
 
 ## Rules worth repeating
 
@@ -77,18 +77,17 @@ regression): `TRAPS.md` § Tool harnesses.**
   (fixed in `38830eb`). Re-anchor a baseline only via `tools/reset_risk_baseline.py`. Mechanism + the
   wrong diagnosis it caused: **`TRAPS.md` § Risk control.**
 
-## Signal quality — **the entry signal has no measured edge (several independent ways).**
+## Signal quality — **the entry signal has no measured edge (several ways).**
 
 It loses money on real MT5 data (94,937 trades: mean R −0.0509, t −3.04, p 0.0067, CI excludes 0);
 3/20 symbols beat always-long in both windows vs 5 by chance; refitted calibration 0/20 skillful;
-**DSR > 0.95 is met by 0/20 symbols** once overlapping trades are counted honestly (94,937 rows =
-**327 independent bets, 0.3%**). Evidence + backlog: **`AUDIT-2026-09.md`**. **Consume `spread_pips`;
-never multiply the bars' raw `spread` by `pip_size` (MT5 reports points).**
+**DSR > 0.95 is met by 0/20** once overlapping trades are counted honestly (94,937 rows = **327
+independent bets, 0.3%**). Evidence + backlog: **`AUDIT-2026-09.md`**. **Consume `spread_pips`; never
+multiply the bars' raw `spread` by `pip_size` (MT5 reports points).**
 
 ## Environment
 
 Writes outside the project dir are refused. Bash, not PowerShell; `taskkill` needs
 `MSYS_NO_PATHCONV=1`. Python 3.13.12 managed at `…\binaries\python\versions\3.13.12\python.exe`.
-`rm -rf X && cmd` swallows the command's stdout — run the `rm` separately. Running a script *by path*
-puts the **script's** dir on `sys.path`. The server binds **127.0.0.1 only**, so
-`http://<LAN-IP>:8501` never works.
+`rm -rf X && cmd` swallows the command's stdout — run the `rm` separately. A script run *by path* puts
+its own dir on `sys.path`. The server binds **127.0.0.1 only**.

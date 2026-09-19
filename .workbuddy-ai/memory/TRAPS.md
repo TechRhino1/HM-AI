@@ -1046,3 +1046,46 @@ ever reads it — the only two references are the writes in that file. `RiskEngi
 with **no arguments** at `orchestrator.py:98`, so the constructor's hardcoded literals win, and they
 differ from the declared config in the *looser* direction (`max_open_positions` 2 declared → 3
 effective; `max_symbol_positions` 1 → 2; `max_daily_loss_pct` 5.0 declared → 4.0 effective).
+
+## Measuring layout: rows, vacuous selectors, and probes that blame the server (round 38)
+
+Four traps, all of which produced a confident wrong answer before being caught.
+
+* **Distinct `top` values are not distinct rows.** `.terminal-hud`'s children reported
+  `tops=[10, 14]` at `h=50`, which reads as two lines. It is ONE row: two centre-aligned children of
+  different heights get different `top` values by construction. Cluster rows by **vertical-interval
+  overlap** (`[top, bottom]` intervals merged greedily), never by `top` equality. With the corrected
+  detector the whole "the classic header is two lines" finding evaporated.
+* **A selector that matches nothing passes vacuously.** The probe used `.stocks-hud` as the header on
+  all four market pages; only `stocks.html` has that class (`india.html` → `.india-hud`,
+  `india_options.html` → `.opt-hud`, `index.html` → `.terminal-hud`). Three pages were never measured
+  and reported clean. **Assert the element was FOUND before asserting anything about it**, or "0
+  failures" means "0 measurements".
+* **`scrollWidth > clientWidth` is a scroller working, not a defect.** Flag overflow only when the
+  computed `overflow-x` is not `auto`/`scroll`. A native tab strip and a swipeable metric strip are
+  *supposed* to report overflow.
+* **Assert each surface against its own documented bound, not a blanket rule.** `.stocks-hud`,
+  `.india-hud` and `.opt-hud` are an explicit 2–3 row CSS grid at ≤900px (`hm_ui.css` § "Header: two
+  rows, brand + account share the first"), row 3 being the search. A blanket "≤1 row / ≤120px" rule
+  flagged all three as broken. Flagging deliberately-designed working code is how a "fix" becomes a
+  regression — read the block comment above the rule before overriding it.
+
+**A child cannot escape an ancestor's `display: none`.** `#auth-header-widget` sits inside
+`.tt-rail__group--secondary`, and `theme_terminal.css:1252` sets that group to `display: none` at
+≤767px. Overriding the child is impossible; the whole subtree is out of the box tree. `dashboard.html`
+has zero other `HM_AUTH` references, so the dashboard had **no login/logout on a phone at all** — a
+functional loss that no layout assertion catches, because "the element exists" stayed true throughout.
+`auth.js` now renders one markup string into `#auth-header-widget` *and* every `[data-auth-mount]`.
+**When hiding a container on mobile, enumerate what is inside it and check each thing is reachable
+elsewhere.** `/classic` also has its auth widget inline-`display:none` (`index.html:266`) and that one
+is *correct* — it has its own auth dropdown; the difference only shows up if you look.
+
+**Probe flakiness, two kinds, both of which look like regressions:**
+* **An engine-less server cannot bootstrap the app.** `auth.js` fills its mount only once auth state
+  resolves, and `dashboard.js` wires the drawer controller; against `.scratch/srv8611.py` neither
+  completes, and a fixed sleep reported "drawer does not open" + "no login control" — properties of the
+  *server*. Gate the probe on the app actually bootstrapping and print a NOTE naming the cause, instead
+  of asserting. Measured: the same probe was 13/13 on the live engine and 9/13 on the scratch server.
+* **Sampling during a CSS transition catches `opacity: 0`.** A fixed sleep after a viewport change or a
+  click intermittently failed a visibility check. Use `page.waitForFunction(<the condition>)` with a
+  timeout, then assert. Fixed 3 flaky checks; 4 consecutive clean runs afterwards.
