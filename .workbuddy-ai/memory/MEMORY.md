@@ -1,6 +1,7 @@
 # HM-AI / HM Algo 2.0 — index
 
-Injected every session and **hard-truncated at ~6,520 chars — stay under 6,400.** Pointers and
+Injected every session and **hard-truncated at ~6,520 chars** (measured, not guessed: the injected copy
+cut mid-word, and searching the committed file for that fragment locates the limit). Pointers and
 already-paid-for rules only; detail lives elsewhere.
 
 * `TRAPS.md` — every trap (server/frontend/testing/data-source/data-integrity/CSS/tool-harnesses/risk).
@@ -29,11 +30,12 @@ already-paid-for rules only; detail lives elsewhere.
 ## Running the platform
 
 `HM_start.py [paper|live]` boots engine + MT5 client + web server — **real MT5 data; `paper` =
-simulated fills**. `HM_dashboard.bat` is **UI + REST API only** (`mt5_client=None`, so
-`auto-selection` → **503** and `MT5` → `DISCONNECTED`: expected, not a fault). Check
-`psutil.Process(pid).cmdline()` before calling the data path broken. **Never finish a task with the
-dashboard alive only as a session background task** — point at `HM_dashboard.bat` and say plainly
-that closing the window stops it.
+simulated fills**. **The account is a DEMO one** (`trade_mode == 0`) despite LIVE execution mode, and
+`XMGlobal-MT5 5` *looks* like XM's real-account naming — **read `trade_mode`, never the server name**.
+`HM_dashboard.bat` is **UI + REST API only** (`mt5_client=None`, so `auto-selection` → **503** and
+`MT5` → `DISCONNECTED`: expected, not a fault). Check `psutil.Process(pid).cmdline()` before calling
+the data path broken. **Never finish a task with the dashboard alive only as a session background
+task** — point at `HM_dashboard.bat` and say plainly that closing the window stops it.
 
 **Routes:** `/` = `dashboard.html` (primary). `/classic` = `index.html` (old terminal). `/stocks`,
 `/india`, `/options`, `/console`. **`verify_ui_layout.js` does not cover `/classic`** — measure it with
@@ -42,8 +44,8 @@ that closing the window stops it.
 
 ## Baselines
 
-**pytest 2509 passed / 20 deselected.** On a weekend it reads 2506/3: the 3 are
-`tests/test_market_data_independence.py`, which assert `freshness == STALE` while
+**pytest 2531 tests / 2528 passed / 3 failed / 20 deselected.** The 3 failures are weekend-only:
+`tests/test_market_data_independence.py` asserts `freshness == STALE` while
 `SessionEngine.get_market_trading_status()` correctly answers `MARKET_CLOSED` on a Saturday — not a
 regression. Per-round history: each `YYYY-MM-DD.md`.
 
@@ -71,18 +73,16 @@ regression): `TRAPS.md` § Tool harnesses.**
   `closed_at`. **When a defect is shared, grep the other front end before calling it done.**
 * **`curl -s -o /dev/null -w '%{http_code}'` exits 23**, so an `&&` chain built on it silently skips
   every later step. Use `;` between probes.
-* **Risk control: paper and live shared one drawdown db, poisoning live.** `peak_equity` moves up only
-  and never resets daily, so a paper peak of 10150 vs a live 777 = 92.34% vs a 10% cap = **every trade
-  refused**. `daily_start_equity` self-heals, so the daily cap was never it. Also
-  `config/settings.json`'s `risk` block is **dead config** — nothing reads `cfg.risk` and
-  `RiskEngine()` takes no arguments. **`TRAPS.md` § Risk control.**
+* **Risk-control state is scoped by execution mode; the risk limits come from `config/settings.json`**
+  (fixed in `38830eb`). Re-anchor a baseline only via `tools/reset_risk_baseline.py`. Mechanism + the
+  wrong diagnosis it caused: **`TRAPS.md` § Risk control.**
 
 ## Signal quality — **the entry signal has no measured edge (several independent ways).**
 
-Loses money on real MT5 data (H1 365d, 94,937 trades: mean R −0.0509, t −3.04, p 0.0067, CI excludes
-0); 3/20 beat always-long in both windows vs 5 by chance; refitted calibration 0/20 skillful in both
-windows; **DSR > 0.95 met by 0/20 symbols** once overlapping trades are counted honestly — 94,937 rows
-are worth **327 independent bets (0.3%)**. Evidence: **`AUDIT-2026-09.md`**. **Consume `spread_pips`;
+It loses money on real MT5 data (94,937 trades: mean R −0.0509, t −3.04, p 0.0067, CI excludes 0);
+3/20 symbols beat always-long in both windows vs 5 by chance; refitted calibration 0/20 skillful;
+**DSR > 0.95 is met by 0/20 symbols** once overlapping trades are counted honestly (94,937 rows =
+**327 independent bets, 0.3%**). Evidence + backlog: **`AUDIT-2026-09.md`**. **Consume `spread_pips`;
 never multiply the bars' raw `spread` by `pip_size` (MT5 reports points).**
 
 ## Environment
