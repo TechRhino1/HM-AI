@@ -1,5 +1,5 @@
 /**
- * HM Algo 2.0 â€” Advanced Institutional Financial Trading Terminal Controller
+ * HM Algo 2.0 — Advanced Institutional Financial Trading Terminal Controller
  * 
  * Features:
  * - TradingView Lightweight Charts v4 Integration (Live MT5 Candles + Volume + S/R Price Lines)
@@ -374,9 +374,9 @@
 
             let contextTag = "Standard Market Liquidity";
             if (candle.high >= state.supportResistance.r1) {
-                contextTag = "âš  Approaching Key Institutional Resistance Zone";
+                contextTag = "⚠ Approaching Key Institutional Resistance Zone";
             } else if (candle.low <= state.supportResistance.s1) {
-                contextTag = "âœ“ Institutional Demand Zone Support Absorption";
+                contextTag = "✓ Institutional Demand Zone Support Absorption";
             }
 
             const dateStr = typeof param.time === "number"
@@ -393,7 +393,7 @@
                     <div class="tooltip-row"><span>High:</span> <b>${candle.high.toFixed(digits)}</b></div>
                     <div class="tooltip-row"><span>Low:</span> <b>${candle.low.toFixed(digits)}</b></div>
                     <div class="tooltip-row"><span>Close:</span> <b style="color:${color};">${candle.close.toFixed(digits)}</b></div>
-                    <div class="tooltip-structure-tag">âœ¦ ${contextTag}</div>
+                    <div class="tooltip-structure-tag">✦ ${contextTag}</div>
                 `;
                 el.smartTooltip.style.display = "block";
                 el.smartTooltip.style.left = `${Math.min(window.innerWidth - 220, param.point.x + 15)}px`;
@@ -862,7 +862,7 @@
         state.chartExpanded = isExpanded;
 
         if (btn) {
-            btn.innerHTML = isExpanded ? "âœ• Minimize" : "â›¶ Expand";
+            btn.innerHTML = isExpanded ? "✕ Minimize" : "⛶ Expand";
             btn.classList.toggle("is-expanded-btn", isExpanded);
         }
 
