@@ -915,3 +915,69 @@ and `tests/`-named files first or the ranking is meaningless.
   it gets measured in the state where it is reachable.
 
 
+
+## Frontend: `display: contents` must be proved by unwrapping, not asserted
+
+Adding a wrapper element to an existing flex row (so a phone can collapse it behind a
+disclosure) risks changing the desktop layout. Asserting `getComputedStyle(wrap).display ===
+'contents'` proves **nothing** — that is a claim about the property, not about layout, and it
+passes even when the wrapper is being laid out as a box. Measure the live geometry, then
+`unwrap()` the element in the DOM (`insertBefore` each child, `removeChild` the wrapper), measure
+again, and require the two to be identical. That compares against the *actual* pre-change
+structure rather than a guess at it. Also note `parent.children` still lists a
+`display: contents` element — it affects layout, not the DOM tree.
+
+Related: `display: contents` is only half the story when the same selector also needs to be a
+positioned box at another breakpoint. Base `.panel { display: contents }` + a later media block
+`.panel { position: absolute; display: none }` works purely on source order (equal specificity,
+later wins) — but the media block must come *after* the base rule in the same file.
+
+## Frontend: `nowrap` + `flex-shrink: 0` is the "can neither fit nor yield" combination
+
+A row that cannot wrap and whose children cannot shrink has no way to resolve a shortage, so it
+overflows. If an ancestor is `overflow: hidden` — `.terminal-panel` is — the overflow is **not**
+visible as a scrollbar or a cramped layout: the trailing controls are simply gone. They remain in
+the DOM, keep their handlers, and are absent from every screenshot at a width nobody tested.
+
+This is invisible to any assertion that does not measure a box, and it is width-dependent, so a
+single-viewport check misses it. On `/classic` the chart header needed ~1071px against panels of
+786px (1440), 488px (1024), 365px (901) and 374px (390) — so the controls vanished at *every*
+width tested, and the repo's layout harness does not cover `/classic` at all. **Sweep widths, and
+sweep the pages the harness does not name.** The fixes, in order: let the row wrap; give children
+`flex-shrink: 1` + `min-width: 0` so they may shrink; only then hide what still does not fit.
+
+`min-width: 0` is load-bearing and non-obvious: a flex item's automatic minimum size is its
+min-content size, so a strip containing a `white-space: nowrap` badge is pinned at that badge's
+width no matter how small the container gets. `min-width: 0` lifts that floor and lets the strip
+wrap its own children instead.
+
+Do **not** combine `flex-direction: column` with `flex-wrap: wrap` on the same element — a column
+container wraps into extra *columns*, which reintroduces exactly the horizontal overflow you were
+trying to remove. Use `width: 100%` on the children and let the row wrap.
+
+## Frontend: a flex item's computed `display` is blockified
+
+`display: inline-flex` on an element that is itself a flex item computes as `flex`. Asserting the
+authored value fails on a correct stylesheet. Assert `flex` or `inline-flex`, or assert the box.
+
+## Tooling: text-mode `open()` rewrites CRLF, so a repair pass churns the whole file
+
+`open(path, encoding='utf-8')` without `newline=''` enables universal-newline translation: a CRLF
+file is read as LF, and a repair that rewrites only five lines also rewrites all 3429 line
+endings. It is invisible in `git diff` when `core.autocrlf=true` (the index is normalised to LF
+either way), so it looks harmless while the working tree silently diverges from the checkout.
+Always pass `newline=''` on both the read and the write when a tool rewrites a file in place, and
+verify with `raw.count(b'\r\n')` before and after — `terminal.js` and `terminal.css` are pure CRLF,
+`index.html` is pure LF.
+
+## Tooling: a unified diff is "corrupt" if it does not end with a newline
+
+Filtering `git diff` output into per-hunk patches (to stage two independent fixes that live in one
+file without interactive staging or `git stash`) fails with `corrupt patch at <last line>` when the
+last kept hunk's final context line is a single space — a blank source line — and the join leaves
+the file ending in that space. Append `"\n"` to the joined output. Also note the *content* lines of
+a CRLF file's diff carry a trailing `\r`, so the patch must be read and written with `newline=''`
+or the round-trip mangles them.
+
+Staging a subset of hunks this way is worth the trouble here: `git stash` is forbidden in this
+repo, and `git add -p` is interactive.

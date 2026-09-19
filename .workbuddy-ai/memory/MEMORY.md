@@ -42,15 +42,17 @@ the dashboard alive only as a session background task** — point the user at `H
 say plainly that closing the window stops it.
 
 **Routes:** `/` = `dashboard.html` (the primary surface). `/classic` = `index.html` (the old
-terminal). `/stocks`, `/india`, `/options`, `/console`.
+terminal). `/stocks`, `/india`, `/options`, `/console`. **`verify_ui_layout.js` does not cover
+`/classic`** — measure it with `.scratch/classic_tabs.js` / `chart_more_probe.js`, and remember
+`terminal.css` is loaded *only* by `index.html` while `dashboard.html` has `theme_terminal.css`.
 
 ## Baselines
 
-**pytest 2490 passed / 20 deselected.** Currently 2487/3 on a weekend — the 3 are
-`tests/test_market_data_independence.py`, which assert `freshness == STALE` while
-`SessionEngine.get_market_trading_status()` correctly answers `MARKET_CLOSED` on a Saturday. Not a
-regression; they pass on weekdays. (History: 657 → 2490 across rounds; each new suite is listed in
-its `YYYY-MM-DD.md`.)
+**pytest 2509 passed / 20 deselected** (2490 + `test_encoding_integrity.py` 19). Currently 2506/3
+on a weekend — the 3 are `tests/test_market_data_independence.py`, which assert
+`freshness == STALE` while `SessionEngine.get_market_trading_status()` correctly answers
+`MARKET_CLOSED` on a Saturday. Not a regression; they pass on weekdays. (History: 657 → 2509
+across rounds; each new suite is listed in its `YYYY-MM-DD.md`.)
 
 `tools/` — current counts, all green:
 `verify_ui_live.py` **46** (starts its own server on **:8599** — nothing may listen there, or its
@@ -70,7 +72,8 @@ against markup **as rendered**, never `html.replace(/\s+/g,'')`) ·
 the FAIL lines, never the total**. `JARVIS_BASE` overrides the base) ·
 `audit_endpoints.py` **46** (add POST-only routes to its `POST_ONLY` set or they report DEAD; probe
 with `--base` against a server built from the current tree) · `audit_wiring.py` **136 modules, 0
-broken refs**.
+broken refs** · `audit_encoding.py` **0** (CP1252 double-encoding; `--fix` repairs it — it already
+had bitten `terminal.js`, where pressing Expand rewrote the button as mojibake).
 
 Screenshots: `.scratch/shot_one.js <tag> <page> [w] [h]` (honours `JARVIS_PORT`;
 **`agent-browser` does not support Windows** — drive real Chrome via `puppeteer-core` from the
