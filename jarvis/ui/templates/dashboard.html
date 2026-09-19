@@ -34,6 +34,17 @@
     HM Algo 2.0
   </div>
 
+  <!-- Phone-only navigation drawer trigger. It reuses the page's existing
+       dropdown controller (`data-dropdown-trigger` + `aria-controls`), so open,
+       close, Escape and click-outside are already handled and this adds no new
+       open/close state machine to keep in sync. Hidden from 768px up, where the
+       rail shows every destination inline. -->
+  <button type="button" class="tt-drawer-trigger" id="nav-drawer-trigger"
+          data-dropdown-trigger aria-haspopup="true" aria-expanded="false"
+          aria-controls="nav-drawer" aria-label="Open navigation">
+    <span class="tt-drawer-trigger__bars" aria-hidden="true"></span>
+  </button>
+
   <div class="tt-session" id="session-state" data-state="unknown"
        title="Market session">
     <span class="tt-session__dot" aria-hidden="true"></span>
@@ -887,6 +898,61 @@
 </aside>
 
 <div class="tt-toasts" id="toasts" aria-live="assertive" aria-atomic="false"></div>
+
+<!-- ═══ Navigation drawer (phone only) ═══════════════════════════════════
+     The rail's tab strip is a swipeable row: fast, but it only shows what fits
+     and gives no sense of structure. The drawer is the grouped counterpart -
+     every destination on the page, organised into Views / Panels / Markets.
+
+     Two properties make it safe rather than a parallel navigation system:
+
+       1. Every item carries the SAME `data-view-btn` / `data-pane-btn`
+          attribute the inline controls use, so dashboard.js wires them through
+          its existing delegated listeners and `setView`/`setPane` sync
+          `aria-selected` here for free. There is no second source of truth for
+          "which view am I on".
+       2. The Panels section is revealed from `body[data-view]`, which setView
+          already maintains. Panes only exist inside the Trade view, so the
+          drawer never offers a control that would do nothing. -->
+<aside class="tt-drawer" id="nav-drawer" data-dropdown-panel hidden
+       role="dialog" aria-modal="true" aria-label="Navigation">
+  <div class="tt-drawer__head">
+    <span class="tt-drawer__brand">
+      <span class="tt-brand__mark" aria-hidden="true"></span> HM Algo 2.0
+    </span>
+    <button type="button" class="tt-drawer__close" id="nav-drawer-close"
+            aria-label="Close navigation">✕</button>
+  </div>
+
+  <nav class="tt-drawer__body">
+    <p class="tt-drawer__section" id="drawer-sec-views">Views</p>
+    <div class="tt-drawer__group" role="group" aria-labelledby="drawer-sec-views">
+      <button type="button" class="tt-drawer__item" data-view-btn="trade" aria-selected="true"><span class="tt-drawer__ico" aria-hidden="true">⇅</span>Trade</button>
+      <button type="button" class="tt-drawer__item" data-view-btn="news"><span class="tt-drawer__ico" aria-hidden="true">▤</span>News</button>
+      <button type="button" class="tt-drawer__item" data-view-btn="analyst"><span class="tt-drawer__ico" aria-hidden="true">◎</span>Analyst</button>
+      <button type="button" class="tt-drawer__item" data-view-btn="markets"><span class="tt-drawer__ico" aria-hidden="true">◍</span>Markets</button>
+      <button type="button" class="tt-drawer__item" data-view-btn="analytics"><span class="tt-drawer__ico" aria-hidden="true">▥</span>Analytics</button>
+      <button type="button" class="tt-drawer__item" data-view-btn="backtest"><span class="tt-drawer__ico" aria-hidden="true">↻</span>Backtest</button>
+    </div>
+
+    <p class="tt-drawer__section tt-drawer__only-trade" id="drawer-sec-panes">Panels</p>
+    <div class="tt-drawer__group tt-drawer__only-trade" role="group" aria-labelledby="drawer-sec-panes">
+      <button type="button" class="tt-drawer__item" data-pane-btn="watchlist" aria-selected="true"><span class="tt-drawer__ico" aria-hidden="true">☰</span>Watchlist</button>
+      <button type="button" class="tt-drawer__item" data-pane-btn="chart"><span class="tt-drawer__ico" aria-hidden="true">◧</span>Chart</button>
+      <button type="button" class="tt-drawer__item" data-pane-btn="ticket"><span class="tt-drawer__ico" aria-hidden="true">⇥</span>Ticket</button>
+    </div>
+
+    <p class="tt-drawer__section" id="drawer-sec-markets">Markets</p>
+    <div class="tt-drawer__group" role="group" aria-labelledby="drawer-sec-markets">
+      <a class="tt-drawer__item" href="/"><span class="tt-drawer__ico" aria-hidden="true">⚡</span>Forex / Crypto</a>
+      <a class="tt-drawer__item" href="/stocks"><span class="tt-drawer__ico" aria-hidden="true">🇺🇸</span>US Stocks</a>
+      <a class="tt-drawer__item" href="/india"><span class="tt-drawer__ico" aria-hidden="true">🇮🇳</span>India Stocks</a>
+      <a class="tt-drawer__item" href="/options"><span class="tt-drawer__ico" aria-hidden="true">📊</span>India Options (F&amp;O)</a>
+    </div>
+  </nav>
+</aside>
+
+<div class="tt-drawer-scrim" id="nav-drawer-scrim" aria-hidden="true"></div>
 
 <script src="/static/js/vendor/lightweight-charts.standalone.production.js"></script>
 <script src="/static/js/hm_ui.js"></script>

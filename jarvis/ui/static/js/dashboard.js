@@ -4403,6 +4403,31 @@
   function bind() {
     wireDropdowns();
 
+    /* The phone navigation drawer reuses the dropdown controller above for
+       open/close, Escape and click-outside. That controller deliberately
+       IGNORES clicks inside a panel, because inside a normal dropdown a click is
+       usually a link you are about to follow anyway. A navigation drawer wants
+       the opposite: choosing a destination should dismiss it. This is the only
+       behaviour the drawer adds, and it is scoped to the drawer element so no
+       existing dropdown changes.
+
+       The view/pane buttons themselves need no wiring here - they carry the
+       same `data-view-btn` / `data-pane-btn` attributes as the inline controls,
+       so the listeners added below and `setView`/`setPane`'s aria-selected sync
+       already cover them. */
+    var drawer = $('nav-drawer');
+    if (drawer) {
+      drawer.addEventListener('click', function (ev) {
+        var t = ev.target;
+        if (!t || typeof t.closest !== 'function') return;
+        if (t.closest('[data-view-btn], [data-pane-btn], a')) closeDropdown(false);
+      });
+    }
+    var drawerClose = $('nav-drawer-close');
+    if (drawerClose) {
+      drawerClose.addEventListener('click', function () { closeDropdown(true); });
+    }
+
     Array.prototype.forEach.call(document.querySelectorAll('[data-view-btn]'), function (btn) {
       btn.addEventListener('click', function () { setView(btn.getAttribute('data-view-btn')); });
     });

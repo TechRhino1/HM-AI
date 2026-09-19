@@ -81,10 +81,14 @@ const PAGES = [
   { name: 'console', url: '/console' },
 ];
 
-/* Controls WCAG 2.5.5 applies to: the primary way in and out of every view. */
+/* Controls WCAG 2.5.5 applies to: the primary way in and out of every view.
+   Elements with no box (display:none, or a closed drawer) are skipped by the
+   probe below, so listing a control that is only visible in one state is
+   correct - it is measured in the state where it is actually reachable. */
 const TAP_SELECTORS = [
   '.tt-tab', '.tt-pane-bar__btn', '.mob-tab-btn',
   '.market-nav-item', '.tt-nav-trigger', '.btn-nav-switch',
+  '.tt-drawer-trigger', '.tt-drawer__item',
 ];
 
 /* Surfaces that must carry the liquid-glass treatment. */

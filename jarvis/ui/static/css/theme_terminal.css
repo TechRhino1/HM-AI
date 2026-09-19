@@ -2155,6 +2155,212 @@
 }
 
 
+/* ── E2. Navigation drawer (phone) ──────────────────────────────────────────
+   The rail's tab strip is a swipeable row: fast to use, but it can only show
+   what fits and it conveys no structure. The drawer is the grouped counterpart
+   - every destination on the page under Views / Panels / Markets.
+
+   It is deliberately built on the existing dropdown controller rather than a
+   second open/close mechanism: the trigger carries `data-dropdown-trigger` and
+   `aria-controls`, so `setDropdown`/`closeDropdown` in dashboard.js already
+   give it toggle, Escape-to-close, click-outside-to-dismiss and correct
+   `aria-expanded`. Only two things are added here - the off-canvas geometry
+   and the item styling. */
+
+.tt-drawer-trigger {
+  display: none;            /* desktop shows every destination inline */
+  align-items: center;
+  justify-content: center;
+  width: var(--hm-touch-target);
+  min-width: var(--hm-touch-target);
+  height: var(--hm-touch-target);
+  padding: 0;
+  border: 1px solid var(--hm-glass-edge);
+  border-radius: var(--hm-radius-lg);
+  background-image: var(--hm-glass-sheen), var(--hm-glass-tint);
+  backdrop-filter: var(--hm-glass-blur-sm);
+  -webkit-backdrop-filter: var(--hm-glass-blur-sm);
+  color: var(--hm-text-secondary);
+  cursor: pointer;
+}
+.tt-drawer-trigger__bars,
+.tt-drawer-trigger__bars::before,
+.tt-drawer-trigger__bars::after {
+  display: block;
+  width: 16px;
+  height: 2px;
+  border-radius: 2px;
+  background: currentColor;
+}
+.tt-drawer-trigger__bars { position: relative; }
+.tt-drawer-trigger__bars::before,
+.tt-drawer-trigger__bars::after { content: ""; position: absolute; left: 0; }
+.tt-drawer-trigger__bars::before { top: -5px; }
+.tt-drawer-trigger__bars::after { top: 5px; }
+.tt-drawer-trigger[aria-expanded="true"] {
+  color: var(--hm-accent);
+  border-color: rgba(56, 189, 248, 0.5);
+}
+
+/* Off-canvas geometry. Overrides `.tt-dropdown__panel`'s absolute anchoring;
+   same specificity, later in the file, so this wins.
+
+   `z-index` must be set EXPLICITLY here. The drawer carries the
+   `data-dropdown-panel` attribute (that is what dashboard.js reads to decide
+   whether a click landed inside a panel) but deliberately not the
+   `.tt-dropdown__panel` class - so none of that rule's properties apply,
+   including its `z-index`. Without this line the drawer computes to
+   `z-index: auto` and the scrim, which is explicitly at `--hm-z-drawer - 1`,
+   paints straight over the top of it: the drawer opens, works, and is dimmed
+   to the point of being unreadable. */
+.tt-drawer {
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  right: auto;
+  z-index: var(--hm-z-drawer);
+  width: min(84vw, 320px);
+  min-width: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 0 var(--hm-radius-xl) var(--hm-radius-xl) 0;
+  border-left: none;
+  background-image: var(--hm-glass-sheen), var(--hm-glass-tint-strong);
+  backdrop-filter: var(--hm-glass-blur);
+  -webkit-backdrop-filter: var(--hm-glass-blur);
+  box-shadow: var(--hm-glass-lift), var(--hm-shadow-lg);
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+  padding-left: env(safe-area-inset-left);
+}
+.tt-drawer[hidden] { display: none; }
+
+.tt-drawer__head {
+  display: flex;
+  align-items: center;
+  gap: var(--hm-space-2);
+  padding: var(--hm-space-3) var(--hm-space-3) var(--hm-space-2);
+  border-bottom: 1px solid var(--hm-border-subtle);
+}
+.tt-drawer__brand {
+  display: flex;
+  align-items: center;
+  gap: var(--hm-space-2);
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: var(--hm-text-xs);
+  font-weight: var(--hm-weight-bold);
+  letter-spacing: var(--hm-tracking-caps);
+  text-transform: uppercase;
+  color: var(--hm-text-primary);
+}
+.tt-drawer__close {
+  flex: 0 0 auto;
+  width: var(--hm-touch-target);
+  height: var(--hm-touch-target);
+  border: 1px solid var(--hm-border-subtle);
+  border-radius: var(--hm-radius-lg);
+  background: transparent;
+  color: var(--hm-text-secondary);
+  font-size: var(--hm-text-base);
+  cursor: pointer;
+}
+.tt-drawer__close:hover { background: var(--hm-bg-hover); color: var(--hm-text-primary); }
+
+.tt-drawer__body {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  padding: var(--hm-space-2) var(--hm-space-2) var(--hm-space-4);
+}
+.tt-drawer__section {
+  margin: var(--hm-space-3) var(--hm-space-2) var(--hm-space-1);
+  font-size: var(--hm-text-2xs);
+  font-weight: var(--hm-weight-bold);
+  letter-spacing: var(--hm-tracking-caps);
+  text-transform: uppercase;
+  color: var(--hm-text-dim);
+}
+.tt-drawer__group { display: flex; flex-direction: column; gap: 2px; }
+
+.tt-drawer__item {
+  display: flex;
+  align-items: center;
+  gap: var(--hm-space-3);
+  width: 100%;
+  min-height: var(--hm-touch-target);
+  padding: var(--hm-space-2) var(--hm-space-3);
+  border: 1px solid transparent;
+  border-radius: var(--hm-radius-lg);
+  background: transparent;
+  color: var(--hm-text-secondary);
+  font-family: var(--hm-font-sans);
+  font-size: var(--hm-text-sm);
+  font-weight: var(--hm-weight-medium);
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+.tt-drawer__item:hover { background: var(--hm-bg-hover); color: var(--hm-text-primary); }
+.tt-drawer__item[aria-selected="true"] {
+  background-image: var(--hm-glass-sheen),
+    linear-gradient(160deg, rgba(56, 189, 248, 0.26), rgba(56, 189, 248, 0.08));
+  border-color: rgba(56, 189, 248, 0.45);
+  color: var(--hm-accent);
+  font-weight: var(--hm-weight-bold);
+}
+.tt-drawer__ico {
+  flex: 0 0 auto;
+  width: 1.25em;
+  text-align: center;
+  opacity: 0.85;
+}
+
+/* Panes exist only inside the Trade view, so the Panels section is revealed
+   from the state setView already maintains - the drawer can never offer a
+   control that would do nothing. */
+.tt-drawer__only-trade { display: none; }
+body[data-view="trade"] .tt-drawer__only-trade { display: flex; }
+p.tt-drawer__only-trade { display: none; }
+body[data-view="trade"] p.tt-drawer__only-trade { display: block; }
+
+.tt-drawer-scrim {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: calc(var(--hm-z-drawer) - 1);
+  background: var(--hm-glass-scrim);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+}
+/* The scrim is driven from the drawer's own open state, so there is no second
+   flag to keep in sync with the dropdown controller's `openDropdown`. */
+body:has(.tt-drawer:not([hidden])) .tt-drawer-scrim { display: block; }
+
+@media (max-width: 767px) {
+  .tt-drawer-trigger { display: inline-flex; order: 0; }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  /* Slide in from the leading edge. Declared after the generic
+     `.tt-dropdown__panel:not([hidden])` scale-in, which would otherwise
+     animate a full-height drawer by scaling it. */
+  .tt-drawer:not([hidden]) {
+    animation: hm-drawer-in var(--hm-dur-normal) var(--hm-ease-out) both;
+  }
+  .tt-drawer-scrim { transition: opacity var(--hm-dur-normal) var(--hm-ease); }
+}
+
+@keyframes hm-drawer-in {
+  from { transform: translateX(-100%); }
+  to   { transform: none; }
+}
+
+
 /* ── Print ──────────────────────────────────────────────────────────────── */
 @media print {
   .tt-rail, .tt-status, .tt-pane-bar, .tt-toasts { display: none !important; }
