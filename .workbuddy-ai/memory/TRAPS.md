@@ -883,3 +883,35 @@ and `tests/`-named files first or the ranking is meaningless.
   burns its full timeout on every navigation. Use `waitUntil: 'load'` plus a fixed settle delay, or
   a six-page sweep takes minutes and looks hung.
 
+## Frontend: a `data-*` attribute is not the class of the same name (round 31, part 2)
+
+* **The attribute and the class are separate contracts, and a component can satisfy one while
+  missing the other.** The nav drawer carries `data-dropdown-panel` (what `dashboard.js` reads to
+  decide whether a click landed inside a panel) but deliberately not `.tt-dropdown__panel` (what
+  the CSS targets). It therefore inherited **none** of that rule's properties — including
+  `z-index`. The drawer computed to `z-index: auto` while its scrim sat at an explicit
+  `--hm-z-drawer - 1`, so **the scrim painted over the drawer**. It opened, closed, switched
+  views, moved focus and passed every functional assertion while being dimmed to unreadability.
+  Before assuming a component inherits a rule, check which selector the rule actually uses.
+* **Assert paint order, not just behaviour.** "It works" and "it is visible" are different
+  claims. `getComputedStyle(el).zIndex` plus
+  `document.elementFromPoint(centreOf(el))` catches "renders underneath its own backdrop" — a
+  class of defect that no functional assertion and no contrast check will report. Add it to any
+  probe for an overlay.
+* **Prefer the controller that is already on the page to a second state machine.** The drawer
+  reuses the existing `[data-dropdown-trigger]`/`aria-controls` handler (toggle, Escape,
+  click-outside, `aria-expanded`) and the existing `[data-view-btn]`/`[data-pane-btn]` delegation
+  (`setView`/`setPane` sync `aria-selected` across every carrier). Result: ~12 lines of new JS and
+  no second source of truth for the active view. The only new logic needed is the case the old
+  controller deliberately excludes — it ignores clicks *inside* a panel, which is right for a menu
+  and wrong for a navigation drawer — and that handler is scoped to the new element so nothing
+  existing changes.
+* **An `aria-selected` that only a click can set is unset on first load.** `setView` syncs it on
+  every change, but nothing runs at boot, so a new control that relies on it looks inactive until
+  the user interacts. Mirror the inline controls' initial state in the markup.
+* **A tool that measures a control only if you list it will exempt the control you forgot.** Add
+  new interactive elements to `tools/verify_ui_layout.js`'s `TAP_SELECTORS`; the probe already
+  skips elements with no box, so listing a control that is visible in only one state is correct —
+  it gets measured in the state where it is reachable.
+
+
