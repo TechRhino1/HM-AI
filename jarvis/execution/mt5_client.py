@@ -545,7 +545,17 @@ class MT5Client:
                     "comment": result.comment
                 }
 
-        return TimeoutGuard.run_sync(_send, timeout_sec=5.0, default={"status": "FAILED", "reason": "Timeout"}, task_name=f"MT5_SendOrder_{symbol}")
+        # "UNKNOWN", not "FAILED": a timed-out order_send may well have filled at
+        # the broker. Reporting FAILED made the caller release the risk
+        # reservation and skip the cooldown, so the next sweep could re-send the
+        # same order and DOUBLE the position. An indeterminate outcome is its own
+        # category and must be reconciled against the broker before any retry.
+        return TimeoutGuard.run_sync(
+            _send,
+            timeout_sec=5.0,
+            default={"status": "UNKNOWN", "reason": "Timeout"},
+            task_name=f"MT5_SendOrder_{symbol}",
+        )
 
     def place_pending_order(
         self,

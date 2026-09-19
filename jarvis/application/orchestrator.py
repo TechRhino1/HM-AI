@@ -48,11 +48,32 @@ class JarvisOrchestrator:
         trade_style: str = "ALL"
     ):
 
-        self.symbols = symbols or [
+        # The configured universe is the real one. `allowed_symbols` in
+        # config/settings.json (and JARVIS_SYMBOLS) was parsed into
+        # `SETTINGS.trading.symbols` but nothing ever read it, so narrowing the
+        # universe in config silently did nothing and all 13 hardcoded symbols
+        # below kept being scanned and traded.
+        _hardcoded = [
             "XAUUSD", "BTCUSD", "ETHUSD", "SOLUSD",
             "EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCHF",
             "US500", "NAS100", "US30", "WTI"
         ]
+        try:
+            _configured = [str(s).strip().upper() for s in (SETTINGS.trading.symbols or []) if str(s).strip()]
+        except Exception:
+            _configured = []
+        if symbols:
+            self.symbols = list(symbols)
+        else:
+            self.symbols = _configured or _hardcoded
+            if _configured and set(_configured) != set(_hardcoded):
+                logger.warning(
+                    "Symbol universe comes from config (%d): %s. The previously "
+                    "hardcoded list had %d (%s). Add any you still want to "
+                    "trading.allowed_symbols in config/settings.json.",
+                    len(_configured), ", ".join(_configured),
+                    len(_hardcoded), ", ".join(_hardcoded),
+                )
         self.mode = verify_execution_mode(mode)
         self.trade_style = trade_style
         logger.info(f"JarvisOrchestrator initialized in [{self.mode.upper()}] mode.")
@@ -606,18 +627,34 @@ class JarvisOrchestrator:
             else:
                 try:
                     exec_res = self.execution_engine.execute_decision(decision, lots)
-                    if exec_res and exec_res.get("status") == "FILLED":
+                    status = (exec_res or {}).get("status")
+                    if status == "FILLED":
                         self.risk_engine.commit_risk(canonical_sym)
+                    elif status == "UNKNOWN":
+                        # The order may be live at the broker. Keep the risk
+                        # reservation held rather than releasing it (releasing
+                        # would let another trade spend capacity we may already
+                        # be using), and do NOT treat this as a clean refusal:
+                        # the next sync reconciles it against real positions.
+                        logger.error(
+                            "Order for %s TIMED OUT with an unknown outcome -- the "
+                            "position may be open. Holding the risk reservation and "
+                            "refusing to retry until the broker state is confirmed.",
+                            canonical_sym,
+                        )
                     else:
                         self.risk_engine.release_risk(canonical_sym)
                 except Exception as e:
                     self.risk_engine.release_risk(canonical_sym)
                     logger.error(f"Execution error for {canonical_sym}: {e}", exc_info=True)
                 finally:
-                    # Always release in-progress lock; update cooldown only on successful fill
+                    # Always release in-progress lock. Start the cooldown for a
+                    # fill AND for an unknown outcome -- an unconfirmed order
+                    # must not be re-sent on the next sweep.
                     with self._execution_lock:
                         self._execution_in_progress.discard(canonical_sym)
-                        if exec_res and exec_res.get("status") == "FILLED":
+                        _st = (exec_res or {}).get("status")
+                        if _st in ("FILLED", "UNKNOWN"):
                             self._last_execution_time[canonical_sym] = time.time()
                             logger.info(f"Execution lock released for {canonical_sym}. Cooldown {self._SAME_SYMBOL_COOLDOWN_SEC}s started.")
             # Record pending features for online learning and journal entry (§17)

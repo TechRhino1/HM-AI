@@ -499,10 +499,23 @@ class TestRegressionFixes(unittest.TestCase):
         """D1-LEARNING: Verify orchestrator populates _pending_features, journals trade, and updates ML on trade close."""
         orch = JarvisOrchestrator(mode="paper")
 
-        orch.mt5_client.get_account_snapshot = MagicMock(return_value=AccountSnapshot(
+        account_snapshot = AccountSnapshot(
             login=123, server="Test", balance=10000.0, equity=10000.0, margin=0.0,
             free_margin=10000.0, margin_level=0.0, leverage=100, trade_allowed=True
-        ))
+        )
+        orch.mt5_client.get_account_snapshot = MagicMock(return_value=account_snapshot)
+        # The mock above is installed AFTER construction, so it cannot reach the
+        # account the constructor already cached. `MT5StateSynchronizer` runs a
+        # sync at startup (`state_synchronizer.py:56`), and a paper client whose
+        # terminal is connected falls through to `mt5.account_info()`
+        # (`mt5_client.py:150`) -- so once ANY earlier test in this process has
+        # initialised MT5, `state_manager.account` holds the REAL demo balance
+        # (measured: 762.51) and the cycle is sized against that instead of the
+        # 10 000 this test assumes. Measured consequence: at 0.01 lots XAUUSD
+        # risks 1.31% of 762.51, which the sizer refuses, so the whole learning
+        # loop below was skipped and the outcome depended on the broker's account
+        # size and on test ordering. Pinning the state makes the test hermetic.
+        orch.state_manager.update_account(account_snapshot)
         orch.circuit_breaker.reset()
         orch.risk_engine.circuit_breaker.reset()
 

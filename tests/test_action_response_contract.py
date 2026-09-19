@@ -158,6 +158,12 @@ class RefusalStatusesAgreeWithTheUiTest(unittest.TestCase):
     # Refusals the server only ever pairs with a non-2xx code, so `res.ok`
     # already rejects them and the body-level guard never sees them.
     NON_2XX_ONLY = {"UNAUTHORIZED", "FORBIDDEN", "BAD_REQUEST", "NOT_FOUND", "LOCKED"}
+    # We genuinely do not know whether the action happened -- the broker call
+    # timed out and the order may have filled. This is its own class on
+    # purpose: calling it a COMPLETION would render an unconfirmed order as a
+    # filled trade, and calling it a REFUSAL would invite a blind retry that
+    # can double a position. It must be surfaced as "not confirmed".
+    INDETERMINATE = {"UNKNOWN"}
 
     def _ui_refusal_set(self):
         src = DASHBOARD_JS.read_text(encoding="utf-8")
@@ -199,13 +205,33 @@ class RefusalStatusesAgreeWithTheUiTest(unittest.TestCase):
                                   / "jarvis/execution/mt5_client.py")
                    | self._action_route_statuses())
         self.assertTrue(emitted, "expected to find status literals to classify")
-        known = self.REFUSALS | self.COMPLETIONS | self.NON_2XX_ONLY
+        known = self.REFUSALS | self.COMPLETIONS | self.NON_2XX_ONLY | self.INDETERMINATE
         unclassified = emitted - known
         self.assertFalse(
             unclassified,
             f"the action path can emit {sorted(unclassified)}, which is not "
             f"classified as a refusal, a completion or a non-2xx-only status. "
             f"Decide which it is — an unclassified failure renders as success.",
+        )
+
+    def test_an_indeterminate_outcome_is_never_rendered_as_success(self):
+        """`UNKNOWN` (broker timeout) must not be classified as a completion.
+
+        An order we cannot confirm is not an order that happened. If this drifted
+        into COMPLETIONS the dashboard would show a filled trade that may not
+        exist, and the caller would release the risk reservation and retry --
+        potentially opening a second position.
+        """
+        self.assertFalse(
+            self.INDETERMINATE & self.COMPLETIONS,
+            "an indeterminate status must never be classified as a completion",
+        )
+        ui_refusals = self._ui_refusal_set()
+        missing = self.INDETERMINATE - ui_refusals
+        self.assertFalse(
+            missing,
+            f"the UI must treat {sorted(missing)} as 'not confirmed'; otherwise "
+            f"an unconfirmed order renders as a completed trade",
         )
 
     def test_every_refusal_the_action_path_can_emit_is_treated_as_one(self):

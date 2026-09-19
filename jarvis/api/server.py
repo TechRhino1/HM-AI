@@ -168,7 +168,16 @@ class JarvisRequestHandler(BaseHTTPRequestHandler):
             from jarvis.analysts.parallel_runner import ParallelAnalystCluster
             from jarvis.intelligence.decision_engine import DecisionEngine
 
-            symbols = ["XAUUSD", "EURUSD", "GBPUSD", "BTCUSD", "USDJPY"]
+            # Third hardcoded universe. `trading.allowed_symbols` is the single
+            # source of truth; this fallback matches it so the telemetry sweep
+            # and the trading engine cannot disagree about what we cover.
+            try:
+                symbols = [str(s).strip().upper()
+                           for s in (SETTINGS.trading.symbols or []) if str(s).strip()]
+            except Exception:
+                symbols = []
+            if not symbols:
+                symbols = ["XAUUSD", "EURUSD", "GBPUSD", "BTCUSD", "USDJPY"]
             ce = MarketContextEngine()
             rc = MarketRegimeClassifier()
             ac = ParallelAnalystCluster(parallel=False)

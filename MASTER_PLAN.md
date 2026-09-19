@@ -88,6 +88,7 @@ recommendations were rejected on verification (see §6) — one of them would ha
 | A1 | Two radar producers, two contracts, three sort keys | H | M | UI can rank a different "best" than the engine that trades |
 | A2 | Parallel scan is a no-op — two process-wide MT5 locks | H | M | 39-task fan-out serializes; measured 2.16s cold sweep |
 | D1 | Paper and live fills share one table, no discriminator | H | S | 135/246 rows are paper; no column to filter |
+| **A18** | **Paper mode sizes against the live broker balance** | **H** | **S** | *Found during implementation, not in any agent report.* `get_account_snapshot()` queries `mt5.account_info()` before checking `mode` (`mt5_client.py:150-169`), so a paper client that is connected returns the **real** account — measured 762.51 while a test had mocked 10,000. `MT5StateSynchronizer` then caches it into `state_manager.account`, and every sizing decision is made against the broker's equity. It also makes test outcomes depend on test order and on the size of a real account. |
 
 ### P2 — capability and ceiling (weeks 3–6)
 
@@ -145,6 +146,38 @@ P1, P4, P9 (`_initial_sl` race), P7 (dead cached-regime branch).
 C1, C2, D4, D2, A3, P2.
 **Exit:** no trade can open that exceeds `equity × max_risk_per_trade_pct`; zero new rows with a
 fabricated price over a 24h run; `.db` alone contains 100% of `trade_records`.
+
+**Status (2026-09-20): 4 of 6 done.**
+
+| Item | Status | Result |
+|---|---|---|
+| **C1** risk ceiling | ✅ Done | `position_sizing.py` now clamps to the configured `max_risk_per_trade_pct` with multipliers applied *inside* the clamp. Verified pre-fix → post-fix on the worst case (conviction 1.35 × evidence 1.15): **$70.00 → $50.00** on $10k, i.e. 1.40% → exactly 0.500%. Also required a test-isolation fix — see the note below. |
+| **D4** WAL checkpoint | ✅ Done | `TradeMemory` checkpoints (TRUNCATE) after every write and before close. Verified pre-fix: a copy of the `.db` alone did not even contain the `trade_records` **table** — schema and rows were both trapped in a 16KB WAL. |
+| **A3** symbol universe | ✅ Done | `JarvisOrchestrator` defaults to `SETTINGS.trading.symbols`. **⚠ Behaviour change: the effective universe drops 13 → 5** (`XAUUSD, EURUSD, GBPUSD, USDJPY, BTCUSD`). If the wider set is wanted, add it to `trading.allowed_symbols`. |
+| **P2** timeout status | ✅ Done | `place_market_order` timeout now returns `UNKNOWN`, not `FAILED`; the orchestrator holds the risk reservation and starts the cooldown instead of releasing and retrying; the UI treats `UNKNOWN` as "not confirmed" so it can never render as a filled trade. Classified in the response-contract test as its own `INDETERMINATE` class. |
+| **C2** fabricated prices | ⏸ Deferred — see below | |
+| **D2** position-id join | ⏳ Not started | |
+
+**C1 — what it exposed.** Tightening the clamp made `test_d1_online_ml_and_trade_memory_learning_loop`
+red. It was not the clamp. The test mocks `mt5_client.get_account_snapshot` for $10,000, but the
+mock is installed *after* construction and `MT5StateSynchronizer` (`state_synchronizer.py:56`) has
+already cached an account — and a paper client whose terminal is connected falls through to
+`mt5.account_info()` (`mt5_client.py:150`), so the cached value is the **real demo balance**
+(measured: **762.51**, not 10,000). The cycle was therefore sized against the broker's account, and
+outcome depended on whether an earlier test in the same process had initialised MT5 and on how big
+that account happened to be. At 0.01 lots XAUUSD risks 1.31% of $762.51 — inside the old 2× grace
+(2 × 0.776% = 1.55%) and outside the honest one (2 × 0.575% = 1.15%), so the test had been passing
+by arithmetic accident. Fixed by pinning `orch.state_manager.update_account(...)` in the test; the
+underlying leak (paper mode reads the live balance) is now **finding A18**, below.
+
+**C2 — why deferred.** The provider already tags fallback quotes with `is_fallback: True`, but
+exactly one consumer checks it (`mt5_client.py:311`, the already-fixed `_paper_fill_price`). The
+trade prices reach the journal via `execution_engine.py:92`
+(`fill_price = res.get("price", decision.entry_price)`), so the ongoing fabricated rows originate
+in the **decision engine's** price, not the provider's fallback — that chain needs its own
+investigation. Half-fixing it by deleting the fallback would also break the stocks/india display
+paths, which legitimately need a reference price. Cheapest correct next step: add an `origin`
+column and refuse to log a trade whose price carries `is_fallback`.
 
 ### M2 — Make the data trustworthy *(~1 week)*
 D3 migrations, D1 `origin` column, D5 bar provenance, D10/D11 real labels, A10 read-only reads.

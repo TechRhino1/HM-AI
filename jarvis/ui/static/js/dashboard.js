@@ -312,7 +312,11 @@
      was announced to the user as submitted. Anything in this set means the
      action did not happen; every other status is left alone, so a status this
      list has not heard of can never turn a real success into a false failure. */
-  var ACTION_REFUSED = { FAILED: 1, BLOCKED: 1, REJECTED: 1, ERROR: 1 };
+  /* `UNKNOWN` means the broker call timed out and we cannot tell whether the
+     order filled. It belongs here, with the refusals, for one reason: the
+     alternative is rendering an unconfirmed order as a completed trade. Treat
+     "we do not know" as "not confirmed", never as success. */
+  var ACTION_REFUSED = { FAILED: 1, BLOCKED: 1, REJECTED: 1, ERROR: 1, UNKNOWN: 1 };
 
   function actionRefused(data) {
     return !!ACTION_REFUSED[String((data || {}).status || '').toUpperCase()];

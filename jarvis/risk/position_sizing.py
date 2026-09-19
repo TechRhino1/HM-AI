@@ -83,10 +83,38 @@ class PositionSizer:
 
         combined_scaler = max(0.65, min(1.40, conviction_factor * evidence_factor))
 
-        effective_risk_pct = max(
-            0.10,
-            min(1.50, risk_pct * invalidation_risk_coefficient * combined_scaler),
-        )
+        # The configured ceiling is a real ceiling.
+        #
+        # This clamped to a HARDCODED literal 1.50 while `max_risk_per_trade_pct`
+        # (config/settings.json, default 0.5) is the documented limit -- and it
+        # applied `invalidation_risk_coefficient` and `combined_scaler` OUTSIDE
+        # the clamp, so a high-conviction trade scaled the 0.5 base by up to
+        # ~1.55x and the setting was never actually enforced. Measured on the
+        # live book: 27 real trades breached it, the worst risking 39% of equity
+        # (78x the limit).
+        #
+        # The multipliers may now only REDUCE risk below the caller's ceiling,
+        # never inflate past it -- which is what "max risk per trade" means.
+        # ``RiskEngine`` passes ``max_risk_per_trade_pct`` here, so in production
+        # the ceiling IS the configured limit; clamping to the caller's own value
+        # keeps this function honest about its contract rather than silently
+        # overriding an explicit argument with a hardcoded global.
+        #
+        # Consequence worth knowing: the micro-account floor further down allows
+        # the broker minimum lot whenever the risk it forces is <= 2x the target,
+        # so tightening the target also tightens that floor. On a $762 account
+        # XAUUSD at a 0.01 minimum lot risks 1.31%, which is under 2x the old
+        # inflated 0.776% but over 2x the honest 0.575% -- so such a trade is now
+        # refused. That is the correct answer to "you cannot risk 0.5% here",
+        # but it does mean small accounts stop trading wide-stop symbols.
+        ceiling = float(risk_pct) if risk_pct and risk_pct > 0 else 0.0
+        scaled = risk_pct * invalidation_risk_coefficient * combined_scaler
+        effective_risk_pct = min(ceiling, max(0.10, scaled)) if ceiling > 0 else max(0.10, scaled)
+        if ceiling > 0 and scaled > ceiling + 1e-9:
+            logger.debug(
+                "[%s] risk clamped: multipliers wanted %.2f%%, ceiling is %.2f%% "
+                "(max_risk_per_trade_pct)", sym_name, scaled, ceiling,
+            )
         logger.debug(
             f"[{sym_name}] risk target {effective_risk_pct:.2f}% "
             f"(base {risk_pct:.2f}% after vol_scalar {vol_scalar:.2f}; "

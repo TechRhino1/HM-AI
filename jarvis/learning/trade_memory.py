@@ -5,11 +5,14 @@ Logs rich execution records, market snapshots, MFE/MAE excursions, and decision 
 import os
 import sqlite3
 import json
+import logging
 import threading
 from typing import Dict, List, Any, Optional
 from datetime import datetime, timezone
 
 from jarvis.config.paths import resolve_db_path
+
+logger = logging.getLogger("JARVIS_TradeMemory")
 
 class TradeMemory:
     def __init__(self, db_path: str = "jarvis_trade_memory.db"):
@@ -23,9 +26,35 @@ class TradeMemory:
         self._conn.execute("PRAGMA cache_size=-32000;")
         self._init_db()
 
+    def _checkpoint_locked(self) -> None:
+        """Do the checkpoint. Caller must already hold `_lock`."""
+        if not self._conn:
+            return
+        try:
+            self._conn.execute("PRAGMA wal_checkpoint(TRUNCATE);")
+        except Exception as e:
+            logger.debug(f"trade_memory checkpoint failed: {e}")
+
+    def checkpoint(self) -> None:
+        """Fold the WAL back into the main database file.
+
+        With `journal_mode=WAL` and `synchronous=NORMAL`, committed rows live in
+        `jarvis_trade_memory.db-wal`, not in the `.db`. Measured here: the `.db`
+        alone held 16 of 35 trades while `.db` + `-wal` held all 35, so **any
+        backup, copy or zip of the `.db` file by itself silently loses more than
+        half the journal**. TRUNCATE also resets the WAL so it cannot grow
+        without bound.
+        """
+        with self._lock:
+            self._checkpoint_locked()
+
     def close(self):
         with self._lock:
             if self._conn:
+                # Checkpoint BEFORE closing: otherwise everything committed in
+                # this session stays in the -wal and a copy of the .db alone
+                # loses it.
+                self._checkpoint_locked()
                 try:
                     self._conn.close()
                 except Exception:
@@ -107,6 +136,9 @@ class TradeMemory:
             ))
 
             self._conn.commit()
+            # Fold the WAL in now so the `.db` file alone always holds every
+            # committed trade -- see `checkpoint()`.
+            self._checkpoint_locked()
 
     def fetch_all_trades(self) -> List[Dict[str, Any]]:
         with self._lock:
@@ -149,3 +181,6 @@ class TradeMemory:
                 int(ticket)
             ))
             self._conn.commit()
+            # A closed trade is the most valuable row in the table; make sure it
+            # is in the `.db` itself, not only the WAL.
+            self._checkpoint_locked()
