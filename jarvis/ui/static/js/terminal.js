@@ -861,6 +861,19 @@
         const isExpanded = panel.classList.toggle("is-expanded");
         state.chartExpanded = isExpanded;
 
+        /* The expanded panel is pinned below the sticky header, and its `top`
+           used to be a hardcoded 44px -- a copy of an old header height. The
+           header measures 50px at <=900px and 56px on desktop, and it can grow
+           (safe-area insets, a wrapped row), so read it instead of assuming it.
+           An inline style needs its own `important` to override the
+           `top: ... !important` in the stylesheet, hence the third argument. */
+        const hud = document.querySelector(".terminal-hud");
+        if (isExpanded && hud) {
+            panel.style.setProperty("top", Math.round(hud.getBoundingClientRect().height) + "px", "important");
+        } else {
+            panel.style.removeProperty("top");
+        }
+
         if (btn) {
             btn.innerHTML = isExpanded ? "✕ Minimize" : "⛶ Expand";
             btn.classList.toggle("is-expanded-btn", isExpanded);

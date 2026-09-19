@@ -911,10 +911,24 @@ header.terminal-hud {
 /* Fullscreen / Expanded Chart Mode */
 .terminal-panel.chart-panel.is-expanded {
     position: fixed !important;
+    /* `top: 44px` was a copy of an OLD header height. The header now measures
+       50px at <=900px and 56px on desktop, so the expanded chart overlapped it
+       at EVERY width -- and that mismatch is why .btn-expand-chart was
+       display:none on mobile instead of being fixed. terminal.js sets the real
+       measured header height inline; an inline style needs its own `important`
+       to beat this rule, hence setProperty(..., 'important'). 44px survives only
+       as the fallback for the case where that JS has not run.
+       height/max-height/min-height must be released too: .chart-panel carries
+       min-height: 280px and a flex-derived height, and with top AND bottom set
+       a specified height over-constrains the box and silently wins over
+       `bottom: 0` -- measured as a 320px-tall "fullscreen" panel at 360px. */
     top: 44px !important;
     left: 0 !important;
     right: 0 !important;
     bottom: 0 !important;
+    height: auto !important;
+    max-height: none !important;
+    min-height: 0 !important;
     z-index: 150 !important;
     border-radius: 0 !important;
     border: none !important;
@@ -3109,8 +3123,11 @@ header.terminal-hud {
         justify-content: center;
     }
 
+    /* Was display:none, which hid a WORKING feature on phones because the
+       expanded panel was pinned to a stale 44px header height (see the
+       .is-expanded rule). Now that the top is measured, the button stays. */
     .btn-expand-chart {
-        display: none;
+        min-height: var(--hm-touch-target, 44px);
     }
 
     /* Order Desk Touch Controls on Mobile */
