@@ -167,9 +167,39 @@
                 <button class="filter-pill" style="border-color:var(--neon-purple);" onclick="window.openCompareModal()">
                     ⚔️ Compare Tickers
                 </button>
-                <button class="filter-pill" style="margin-left:auto; border-color:var(--neon-amber);" onclick="window.toggleWatchlistOnly(this)">
+                <button class="filter-pill js-watchlist-only" style="margin-left:auto; border-color:var(--neon-amber);" onclick="window.toggleWatchlistOnly(this)">
                     ★ Watchlist Only
                 </button>
+            </div>
+
+            <!-- Mobile filter dropdowns (shown <=900px, where the pill row above is
+                 hidden: 19 pills wrapped to 12 rows and 274px at 360px wide).
+                 Each <select> is a PROJECTION of the pills, not a parallel control:
+                 its options are built from the pill labels at runtime and choosing
+                 one clicks the matching pill, so the pill's own onclick still owns
+                 state.filters, the .active marker and the refetch. The two sets are
+                 never visible at the same time, so they cannot visually disagree. -->
+            <div class="filter-dropdowns-row" id="filter-dropdowns-row">
+                <label class="fd-field">
+                    <span class="fd-label">Horizon</span>
+                    <select class="fd-select" id="mob-filter-horizon" data-pills=".type-pill"
+                            onchange="window.applyMobileFilterSelect(this, '.type-pill')"></select>
+                </label>
+                <label class="fd-field">
+                    <span class="fd-label">Sector</span>
+                    <select class="fd-select" id="mob-filter-sector" data-pills=".sector-pill"
+                            onchange="window.applyMobileFilterSelect(this, '.sector-pill')"></select>
+                </label>
+                <label class="fd-field">
+                    <span class="fd-label">Timeframe</span>
+                    <select class="fd-select" id="mob-filter-tf" data-pills=".tf-pill"
+                            onchange="window.applyMobileFilterSelect(this, '.tf-pill')"></select>
+                </label>
+                <div class="fd-actions">
+                    <button class="fd-action" onclick="window.toggleSectorHeatmap()">🗺️ Heatmap</button>
+                    <button class="fd-action" onclick="window.openCompareModal()">⚔️ Compare</button>
+                    <button class="fd-action js-watchlist-only" onclick="window.toggleWatchlistOnly(this)">★ Watchlist</button>
+                </div>
             </div>
         </div>
 

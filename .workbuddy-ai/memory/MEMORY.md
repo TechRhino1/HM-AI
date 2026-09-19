@@ -1,12 +1,10 @@
 # HM-AI / HM Algo 2.0 — index
 
-Injected every session and **hard-truncated at ~6,520 chars** (measured, not guessed: the injected copy
-cut mid-word, and searching the committed file for that fragment locates the limit). Pointers and
-already-paid-for rules only; detail lives elsewhere.
+Injected every session and **hard-truncated at ~6,520 bytes** — keep this file under that, or the tail
+disappears silently. Pointers and already-paid-for rules only; detail lives elsewhere.
 
 * `TRAPS.md` — every trap (server/frontend/testing/data-source/data-integrity/CSS/tool-harnesses/risk).
-  `AUDIT-2026-09.md` — signal-quality evidence + P0/P1/P2 backlog. `YYYY-MM-DD.md` — per-session
-  detail. `docs/PLAN-2026-09-17-six-ui-items.md` — six UI items, all implemented (round 31).
+  `AUDIT-2026-09.md` — signal-quality evidence + P0/P1/P2 backlog. `YYYY-MM-DD.md` — per-session detail.
 * Skills: `diagnose-git-push-auth`, `recover-vanished-working-tree`, `audit-trading-system-integrity`
   (§5 = measurement traps; §§1-4 wiring only).
 

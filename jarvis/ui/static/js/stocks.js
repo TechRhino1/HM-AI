@@ -1049,7 +1049,10 @@ window.setTypeFilter = function (bType, btn) {
 
 window.toggleWatchlistOnly = function (btn) {
     state.filters.showWatchlistOnly = !state.filters.showWatchlistOnly;
-    if (btn) btn.classList.toggle("active", state.filters.showWatchlistOnly);
+    const on = state.filters.showWatchlistOnly;
+    // Two representations exist — the desktop pill and the mobile dropdown action.
+    // Drive both from state so they cannot disagree after a resize.
+    document.querySelectorAll(".js-watchlist-only").forEach((b) => b.classList.toggle("active", on));
     renderScreenerTableDOM();
 };
 
@@ -1164,6 +1167,48 @@ window.selectSearchResult = function (symbol) {
 };
 
 /* ==========================================================================
+   10b. MOBILE FILTER DROPDOWNS
+
+   At <=900px the 19-pill filter row is hidden (it wrapped to 12 rows / 274px at
+   360px wide) and replaced by three <select>s. The selects do not duplicate any
+   filter logic: they are built FROM the pills and dispatch by clicking one, so
+   the pill's own onclick remains the single owner of state.filters, the .active
+   marker and the refetch. That also means no synchronisation is needed — the two
+   control sets are never visible at the same time (CSS hides one per breakpoint),
+   and rebuilding on resize re-reads whichever pill is currently active.
+   ========================================================================== */
+
+function buildMobileFilterSelects() {
+    document.querySelectorAll(".fd-select").forEach((sel) => {
+        const pillSel = sel.getAttribute("data-pills");
+        if (!pillSel) return;
+        const pills = Array.from(document.querySelectorAll(pillSel));
+        if (!pills.length) return;
+
+        const previous = sel.value;
+        sel.innerHTML = pills
+            .map((p, i) => `<option value="${i}">${p.textContent.trim()}</option>`)
+            .join("");
+
+        // Prefer the pill that is actually active; fall back to whatever the user
+        // had chosen, then to the first option.
+        const activeIdx = pills.findIndex((p) => p.classList.contains("active"));
+        if (activeIdx >= 0) sel.value = String(activeIdx);
+        else if (previous && pills[Number(previous)]) sel.value = previous;
+        else sel.value = "0";
+    });
+}
+
+window.applyMobileFilterSelect = function (selectEl, pillSelector) {
+    if (!selectEl) return;
+    const pills = Array.from(document.querySelectorAll(pillSelector));
+    const pill = pills[parseInt(selectEl.value, 10)];
+    if (!pill) return;
+    // Let the pill's own handler do everything, exactly as a tap would.
+    pill.click();
+};
+
+/* ==========================================================================
    11. MOBILE DOCK NAVIGATION CONTROLLER
    ========================================================================== */
 
@@ -1200,7 +1245,15 @@ window.switchMobileStocksView = function (view) {
             if (secScreener) secScreener.style.display = "none";
             if (secHeatmap) {
                 secHeatmap.style.display = "flex";
-                if (!state.heatmapLoaded) fetchHeatmapData();
+                // Was `if (!state.heatmapLoaded) fetchHeatmapData();` — a function that
+                // does not exist anywhere in the tree, so this threw a ReferenceError on
+                // EVERY tap of the Heatmap tab. The section is switched to visible just
+                // above, so the user got an empty panel and no error. The real fetcher is
+                // fetchSectorHeatmap(), which is what toggleSectorHeatmap() already calls.
+                // The old guard was dead too: nothing ever writes state.heatmapLoaded, so
+                // it never suppressed a fetch. Fetch every time, like the toggle does —
+                // a heatmap wants fresh data anyway.
+                fetchSectorHeatmap();
             }
         } else if (view === "all") {
             if (secBuyNow) secBuyNow.style.display = "flex";
@@ -1217,6 +1270,7 @@ window.switchMobileStocksView = function (view) {
 
 document.addEventListener("DOMContentLoaded", () => {
     initSearchController();
+    buildMobileFilterSelects();
     fetchScreenerData();
     fetchAlerts();
     startAutoScanTicker();
@@ -1233,6 +1287,9 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 
 window.addEventListener("resize", () => {
+    // The pills and the dropdowns are swapped by a media query, so whichever set
+    // just became visible must reflect the current filter state.
+    buildMobileFilterSelects();
     if (window.innerWidth <= 900) {
         window.switchMobileStocksView(state.activeMobileView || "setups");
     } else {

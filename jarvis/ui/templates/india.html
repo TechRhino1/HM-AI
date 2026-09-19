@@ -160,6 +160,30 @@
                 </div>
             </div>
 
+            <!-- Mobile filter dropdowns (shown <=900px, where .filter-row is hidden:
+                 15 pills wrapped to 8 rows and 233px at 360px wide). Each <select>
+                 projects the pills below it — options are built from the pill labels
+                 and choosing one clicks the matching pill, so the pill's own onclick
+                 still owns state and the .active marker. See stocks.html for the
+                 same pattern. -->
+            <div class="filter-dropdowns-row" id="filter-dropdowns-row">
+                <label class="fd-field">
+                    <span class="fd-label">Sector</span>
+                    <select class="fd-select" id="mob-filter-sector" data-pills=".sector-pill"
+                            onchange="window.applyMobileFilterSelect(this, '.sector-pill')"></select>
+                </label>
+                <label class="fd-field">
+                    <span class="fd-label">CPR structure</span>
+                    <select class="fd-select" id="mob-filter-cpr" data-pills=".cpr-pill"
+                            onchange="window.applyMobileFilterSelect(this, '.cpr-pill')"></select>
+                </label>
+                <label class="fd-field">
+                    <span class="fd-label">Min AI probability</span>
+                    <select class="fd-select" id="mob-filter-prob" data-pills=".prob-pill"
+                            onchange="window.applyMobileFilterSelect(this, '.prob-pill')"></select>
+                </label>
+            </div>
+
             <!-- Action Ribbon (Heatmap, Option Chain, Strategy Builder, CSV) -->
             <div class="toolbar-bottom-row">
                 <div class="toolbar-left-actions">

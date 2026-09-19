@@ -1020,7 +1020,12 @@
                 if (secScreener) secScreener.style.display = "none";
                 if (secHeatmap) {
                     secHeatmap.style.display = "flex";
-                    if (!state.heatmapLoaded) fetchHeatmapData();
+                    // Same defect as stocks.js: fetchHeatmapData() does not exist, so
+                    // this threw a ReferenceError on every Heatmap tap and left the
+                    // just-revealed panel empty. The real fetcher is
+                    // fetchSectorHeatmap(). The `state.heatmapLoaded` guard was dead —
+                    // nothing writes it — so fetch unconditionally, as the toggle does.
+                    fetchSectorHeatmap();
                 }
             } else if (view === "all") {
                 if (secBuyNow) secBuyNow.style.display = "flex";
@@ -1032,11 +1037,51 @@
     };
 
     /* ==========================================================================
+       10b. MOBILE FILTER DROPDOWNS
+
+       At <=900px the 15-pill filter row is hidden (it wrapped to 8 rows / 233px at
+       360px wide) and replaced by three <select>s. The selects duplicate no filter
+       logic: they are built FROM the pills and dispatch by clicking one, so the
+       pill's own onclick stays the single owner of state, the .active marker and
+       the refetch. The two sets are never visible together, so they cannot drift.
+       Same pattern as stocks.js.
+       ========================================================================== */
+
+    function buildMobileFilterSelects() {
+        document.querySelectorAll(".fd-select").forEach((sel) => {
+            const pillSel = sel.getAttribute("data-pills");
+            if (!pillSel) return;
+            const pills = Array.from(document.querySelectorAll(pillSel));
+            if (!pills.length) return;
+
+            const previous = sel.value;
+            sel.innerHTML = pills
+                .map((p, i) => `<option value="${i}">${p.textContent.trim()}</option>`)
+                .join("");
+
+            const activeIdx = pills.findIndex((p) => p.classList.contains("active"));
+            if (activeIdx >= 0) sel.value = String(activeIdx);
+            else if (previous && pills[Number(previous)]) sel.value = previous;
+            else sel.value = "0";
+        });
+    }
+
+    window.applyMobileFilterSelect = function (selectEl, pillSelector) {
+        if (!selectEl) return;
+        const pills = Array.from(document.querySelectorAll(pillSelector));
+        const pill = pills[parseInt(selectEl.value, 10)];
+        if (!pill) return;
+        // Let the pill's own handler do everything, exactly as a tap would.
+        pill.click();
+    };
+
+    /* ==========================================================================
        11. INITIALIZATION
        ========================================================================== */
 
     document.addEventListener("DOMContentLoaded", () => {
         initSearchController();
+        buildMobileFilterSelects();
         fetchIndicesTelemetry();
         fetchFiiDiiData();
         fetchScannerData();
@@ -1054,6 +1099,9 @@
     });
 
     window.addEventListener("resize", () => {
+        // The pills and the dropdowns are swapped by a media query, so whichever
+        // set just became visible must reflect the current filter state.
+        buildMobileFilterSelects();
         if (window.innerWidth <= 900) {
             window.switchMobileIndiaView(state.activeMobileView || "buys");
         } else {

@@ -371,6 +371,70 @@ body {
     margin-right: 4px;
 }
 
+/* Mobile filter dropdowns. Hidden above the breakpoint, where the pill row is the
+   control; the two sets are never visible at the same time. */
+.filter-dropdowns-row {
+    display: none;
+}
+
+.fd-field {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    flex: 1 1 92px;
+    min-width: 0;
+}
+
+.fd-label {
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.fd-select {
+    width: 100%;
+    min-width: 0;
+    min-height: 36px;
+    padding: 6px 8px;
+    font-size: 12.5px;
+    font-weight: 600;
+    border-radius: 6px;
+    background: var(--bg-card);
+    border: 1px solid var(--border-subtle);
+    color: var(--text-primary);
+    appearance: none;
+    -webkit-appearance: none;
+    cursor: pointer;
+}
+
+.fd-actions {
+    display: flex;
+    gap: 6px;
+    width: 100%;
+}
+
+.fd-action {
+    flex: 1 1 0;
+    min-height: 36px;
+    padding: 6px 8px;
+    font-size: 11.5px;
+    font-weight: 600;
+    border-radius: 6px;
+    background: var(--bg-card);
+    border: 1px solid var(--border-subtle);
+    color: var(--text-secondary);
+    cursor: pointer;
+}
+
+.fd-action.active {
+    background: rgba(0, 212, 255, 0.14);
+    border-color: var(--accent-cyan);
+    color: var(--accent-cyan);
+    font-weight: 700;
+}
+
 .filter-pill {
     padding: 4px 10px;
     border-radius: 4px;
@@ -1596,18 +1660,38 @@ body {
         flex-shrink: 0;
     }
 
-    /* Filter Pills Row */
+    /* Filter Pills Row — replaced by the dropdowns below at this width.
+       The old rule here asked for a horizontal scroller (overflow-x:auto,
+       white-space:nowrap) but never reset the desktop rule's `flex-wrap: wrap`,
+       so instead of scrolling it wrapped into 12 rows / 274px at 360px wide and
+       pushed the results off screen. Grouping the three filter groups into
+       <select>s is both what was asked for and far cheaper vertically. */
     .filter-pills-row {
-        display: flex !important;
-        overflow-x: auto !important;
-        -webkit-overflow-scrolling: touch !important;
-        white-space: nowrap !important;
-        width: 100% !important;
-        gap: 6px !important;
-        padding: 4px 0 !important;
-        scrollbar-width: none;
+        display: none !important;
     }
-    .filter-pills-row::-webkit-scrollbar { display: none; }
+
+    .filter-dropdowns-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        width: 100%;
+        align-items: flex-end;
+    }
+
+    .fd-select,
+    .fd-action {
+        min-height: var(--hm-touch-target, 40px);
+        font-size: 13px;
+        touch-action: manipulation;
+    }
+
+    .fd-field {
+        flex: 1 1 100px;
+    }
+
+    .fd-actions {
+        margin-top: 2px;
+    }
 
     .filter-group-label {
         font-size: 10px;
