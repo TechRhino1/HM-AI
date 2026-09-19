@@ -2146,6 +2146,103 @@
   .tt-pane-bar__btn { min-height: var(--hm-touch-target); }
 }
 
+/* ── Phone app bar: three deliberate bands instead of whatever wraps ────────
+   The rail above is a wrapping flex row, and on a phone that produced FOUR
+   bands and 229px of a 844px screen at 360px. The identity band needs
+   hamburger 44 + wordmark 100 + session chip 188 + markets button 80 = 412px of
+   content in 336px of space, so it split in two -- and the markets button ended
+   up alone on its own full-width row with the rest of that row empty.
+
+   Measured, not guessed: `.scratch/rail_dump.js` and `.scratch/navbar_lines_probe.js`
+   report the band contents and heights at each width.
+
+   A grid replaces "wrap wherever it breaks" with an explicit layout:
+     band 1  hamburger · wordmark · session chip
+     band 2  account strip   (swipeable)
+     band 3  tab strip       (swipeable)
+   229px -> ~156px at 360px.
+
+   Exactly two things are dropped at this width, and neither removes a
+   destination or a control:
+   - the markets dropdown, because the drawer behind the hamburger already
+     lists the same four destinations with the same hrefs and labels
+     (dashboard.html drawer vs .tt-dropdown), so nothing becomes unreachable;
+   - the spacer, whose only job was to push the desktop groups apart.
+   The account/auth controls that the secondary group hides are re-provided in
+   the drawer via [data-auth-mount] -- see .tt-drawer__auth below. */
+@media (max-width: 767px) {
+  .tt-rail {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas:
+      "drawer brand session"
+      "account account account"
+      "tabs tabs tabs";
+    align-items: center;
+    align-content: start;
+    column-gap: var(--hm-space-2);
+    row-gap: var(--hm-space-1);
+  }
+
+  .tt-drawer-trigger { grid-area: drawer; }
+
+  /* The wordmark yields first: it is decoration, the chip beside it is state. */
+  .tt-brand { grid-area: brand; min-width: 0; }
+  .tt-brand__text {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .tt-session { grid-area: session; min-width: 0; }
+  /* Only the label truncates. The dot is the state signal and keeps its shape. */
+  .tt-session #session-label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .tt-rail__spacer { display: none; }
+  .tt-rail > .tt-dropdown { display: none; }
+
+  #account-strip { grid-area: account; }
+  .tt-tabs { grid-area: tabs; }
+
+  /* Let a swipe settle on a metric boundary. Without snapping the strip stops
+     wherever the finger lifts, which leaves a number sliced in half at the
+     container edge and reads as a rendering fault rather than as "scroll me". */
+  .tt-rail__group { scroll-snap-type: x proximity; }
+  .tt-rail__group .tt-metric { scroll-snap-align: start; }
+
+  /* Even with snapping, the strip at rest still shows a part-item, and a value
+     cut mid-digit ("8,860.:") reads as a bug rather than as an affordance. The
+     fade is the native signal that there is more to the right. Applied to the
+     scroller itself, so it moves with the content edge, not with the page. */
+  .tt-rail__group,
+  .tt-tabs {
+    -webkit-mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 28px), transparent 100%);
+    mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 28px), transparent 100%);
+  }
+}
+
+/* Account control inside the phone drawer. It is the phone's only login/logout
+   (see the [data-auth-mount] note in dashboard.html), so it is given the same
+   tap height as every other drawer row. */
+.tt-drawer__auth {
+  display: flex;
+  align-items: center;
+  gap: var(--hm-space-2);
+  margin-top: var(--hm-space-3);
+  padding-top: var(--hm-space-3);
+  border-top: 1px solid var(--hm-glass-edge);
+  flex-wrap: wrap;
+}
+.tt-drawer__auth:empty { display: none; }
+.tt-drawer__auth .auth-login-btn,
+.tt-drawer__auth .auth-logout-btn { min-height: var(--hm-touch-target); }
+
 /* Very narrow handsets (360px and below): drop the icon row height and let the
    tabs stay legible rather than shrinking the labels below 11px. */
 @media (max-width: 380px) {

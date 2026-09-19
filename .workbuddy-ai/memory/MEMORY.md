@@ -19,11 +19,13 @@ disappears silently. Pointers and already-paid-for rules only; detail lives else
   re-read per request. *A hang that does not reproduce in a fresh interpreter is a stale process.*
   `py-spy dump --pid <pid>` attaches without restarting; `netstat -ano | grep 8501` for the pid.
 * **Push: credential-selector bypass, immediately.** A plain `git push` here produced a 0-byte log for
-  6m37s and never finished. Run
-  `GCM=".../git-credential-manager.exe"; timeout 180 git -c credential.helper= -c credential.helper="!$GCM" push origin main`
-  (~23s). `git status` always says `[gone]` (`.git/refs/remotes/*` is wiped right after being
-  written) — verify with `git ls-remote origin refs/heads/main` vs `git rev-parse HEAD`, never the
-  push message or the exit code. Backticks in `-m` are eaten by bash: use `git commit -F <file>`.
+  6m37s and never finished. The helper path **has a space in it**, so the usual
+  `-c credential.helper="!$GCM"` form fails with `/c/Program: No such file or directory` (the `!` form
+  goes through sh, which word-splits it). Use the wrapper: `.scratch/gcm_wrap.sh` execs GCM with the
+  path quoted, then `git -c credential.helper= -c credential.helper='!.scratch/gcm_wrap.sh' push origin main`
+  (~23s). `git status` always says `[gone]` (`.git/refs/remotes/*` is wiped right after being written)
+  — verify with `git ls-remote origin refs/heads/main` vs `git rev-parse HEAD`, never the push message
+  or the exit code. Backticks in `-m` are eaten by bash: use `git commit -F <file>`.
 
 ## Running the platform
 

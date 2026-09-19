@@ -125,6 +125,32 @@
             this.openLoginModal("Session ended. Please log in to continue.");
         },
 
+        /* The markup is rendered into #auth-header-widget AND into every
+           [data-auth-mount]. Two mounts exist because the dashboard's rail copy
+           sits in .tt-rail__group--secondary, which theme_terminal.css hides at
+           <=767px; a child cannot escape an ancestor's display:none, so the
+           dashboard had no login/logout on a phone at all. Rendering one string
+           into both keeps them from ever disagreeing. */
+        authMarkup: function (user) {
+            if (user && user.username) {
+                return `
+                    <div class="auth-user-pill" title="Logged in as ${user.full_name || user.username}">
+                        <span>👤</span>
+                        <span style="font-family:'JetBrains Mono',monospace;">${user.username}</span>
+                        <span class="auth-user-role-tag">${user.role || 'USER'}</span>
+                    </div>
+                    <button class="auth-logout-btn" onclick="window.HM_AUTH.logout()" title="Logout from terminal">
+                        <span>🚪</span> Logout
+                    </button>
+                `;
+            }
+            return `
+                    <button class="auth-login-btn" onclick="window.HM_AUTH.openLoginModal()" title="Login to terminal">
+                        <span>🔒</span> Login
+                    </button>
+                `;
+        },
+
         updateHeaderUI: function (user) {
             const dropUserName = document.getElementById("dropdown-user-name");
             const dropUserRole = document.getElementById("dropdown-user-role");
@@ -145,26 +171,9 @@
                 }
             }
 
-            if (!container) return;
-
-            if (user && user.username) {
-                container.innerHTML = `
-                    <div class="auth-user-pill" title="Logged in as ${user.full_name || user.username}">
-                        <span>👤</span>
-                        <span style="font-family:'JetBrains Mono',monospace;">${user.username}</span>
-                        <span class="auth-user-role-tag">${user.role || 'USER'}</span>
-                    </div>
-                    <button class="auth-logout-btn" onclick="window.HM_AUTH.logout()" title="Logout from terminal">
-                        <span>🚪</span> Logout
-                    </button>
-                `;
-            } else {
-                container.innerHTML = `
-                    <button class="auth-login-btn" onclick="window.HM_AUTH.openLoginModal()" title="Login to terminal">
-                        <span>🔒</span> Login
-                    </button>
-                `;
-            }
+            const html = this.authMarkup(user);
+            if (container) container.innerHTML = html;
+            document.querySelectorAll("[data-auth-mount]").forEach((m) => { m.innerHTML = html; });
         },
 
         openLoginModal: function (msg) {

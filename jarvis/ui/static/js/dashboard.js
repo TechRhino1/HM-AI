@@ -3433,7 +3433,14 @@
     if (sessionEl) {
       var st = String(ms.status || '').toUpperCase();
       sessionEl.setAttribute('data-state', st === 'OPEN' ? 'open' : (st === 'CLOSED' ? 'closed' : 'pre'));
-      setText($('session-label'), ms.status ? ms.status + (ms.countdown_formatted ? ' · ' + ms.countdown_formatted : '') : '—');
+      var sessionText = ms.status
+        ? ms.status + (ms.countdown_formatted ? ' · ' + ms.countdown_formatted : '')
+        : '—';
+      setText($('session-label'), sessionText);
+      // The phone app bar caps the chip's width and ellipsises the label, which
+      // would otherwise swallow the countdown. Keep the untruncated string as a
+      // tooltip so the value is still reachable rather than merely lost.
+      sessionEl.setAttribute('title', 'Market session: ' + sessionText);
     }
 
     var ver = $('status-version');

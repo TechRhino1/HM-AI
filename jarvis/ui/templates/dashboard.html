@@ -31,7 +31,10 @@
 <header class="tt-rail" role="banner">
   <div class="tt-brand">
     <span class="tt-brand__mark" aria-hidden="true"></span>
-    HM Algo 2.0
+    <!-- The wordmark is its own span so the phone app bar can ellipsise it: a
+         bare text node cannot be truncated. It truncates BEFORE the session
+         chip beside it, because the chip is state and the wordmark is not. -->
+    <span class="tt-brand__text">HM Algo 2.0</span>
   </div>
 
   <!-- Phone-only navigation drawer trigger. It reuses the page's existing
@@ -949,6 +952,14 @@
       <a class="tt-drawer__item" href="/india"><span class="tt-drawer__ico" aria-hidden="true">🇮🇳</span>India Stocks</a>
       <a class="tt-drawer__item" href="/options"><span class="tt-drawer__ico" aria-hidden="true">📊</span>India Options (F&amp;O)</a>
     </div>
+
+    <!-- Account. The rail's own copy of this control lives in
+         .tt-rail__group--secondary, which is display:none at <=767px -- and a
+         child cannot escape an ancestor's display:none, so on a phone the
+         dashboard previously had NO login/logout anywhere. auth.js renders into
+         every [data-auth-mount] as well as #auth-header-widget, so this is a
+         second mount point, not a second implementation. -->
+    <div class="tt-drawer__auth" data-auth-mount></div>
   </nav>
 </aside>
 
