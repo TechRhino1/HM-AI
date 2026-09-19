@@ -846,3 +846,40 @@ and `tests/`-named files first or the ranking is meaningless.
   `max_dd_pct` are each updated on their own, against a running peak that never resets.
 * **`>` vs `>=` on a running maximum is a no-op** (recording an equal value changes nothing) — as is
   clamping a value that an earlier `np.clip` has already bounded. Both are legitimate survivors.
+
+## Frontend layout: the two-line nav, and why the CSS was not at fault (round 31)
+
+* **A shared JS widget that picks its own parent will pick the wrong one.** `auth.js:137` resolves
+  its host as `document.querySelector(".nav-links-wrapper") || ".hud-actions" || "header"` and
+  *appends into it*. Three of the six pages declare a real `#auth-header-widget`; the other three
+  did not, so the account pill landed **inside** the four-pill market nav — one `flex-wrap: wrap`
+  row holding five items, which then broke onto two lines at 1440px and three at 390px. Fix at the
+  source (declare the slot, in the header, as a **sibling** of the nav), then defensively
+  (`flex-wrap: nowrap` + horizontal scroll). Grep every page for the element a shared widget
+  targets before styling around its absence.
+* **`flex: 1 0 auto` is the "never fits" flex shorthand.** `flex-shrink: 0` with an auto basis
+  pins every item to its intrinsic width, so a 5-tab bar needed 567px inside a 390px viewport and
+  the last tab was clipped off-screen. `flex: 1 1 0` + `min-width: 0` fits any count at any width.
+  A `flex-shrink: 0` on a horizontal tab strip is almost always the clipping bug.
+* **Load order differs per page, so an "override" layer only overrides where it loads last.**
+  `stocks/india/india_options` load `page.css → auth.css → hm_ui.css` (design system last, so it
+  wins); `dashboard.html` loads `hm_ui.css` **first**, then `theme_terminal.css`. A rule added to
+  the design system governs the market pages and *not* the dashboard. Read the `<link>` order of
+  the specific page first.
+* **A page sheet's `!important` beats the design system's plain rule, however late the sheet
+  loads.** `stocks.css` forces `display: flex !important` on `.nav-links-wrapper` inside its mobile
+  query, defeating `hm_ui.css`'s `display: none`. `!important` in the later sheet wins; without it,
+  source order wins. Both halves are needed to predict the result.
+* **Do not "fix" a layout defect a bounding-box comparison cannot reproduce.** The rail *looked*
+  overlapped in a 1440 screenshot — the account pill apparently sitting on the session badge.
+  Measuring every child's rect proved zero overlap at 1440/1280/1024/820/390: it was the rail's
+  secondary band wrapping to a second row, left-aligned under the brand. Screenshot-then-measure,
+  never screenshot-then-edit.
+* **`/` is `dashboard.html`, not `index.html`.** `server.py:381` maps
+  `"/", "/index.html", "/dashboard", "/dashboard.html"` → `_serve_dashboard_ui()`; the classic
+  terminal is `/classic` → `index.html`. Probing "root" and expecting the terminal reports a
+  missing `.mobile-nav-bar` that was never in that template.
+* **`networkidle2` never settles against these pages** — every one polls on a timer, so the wait
+  burns its full timeout on every navigation. Use `waitUntil: 'load'` plus a fixed settle delay, or
+  a six-page sweep takes minutes and looks hung.
+
