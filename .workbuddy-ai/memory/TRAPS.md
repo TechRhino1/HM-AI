@@ -1089,3 +1089,43 @@ is *correct* — it has its own auth dropdown; the difference only shows up if y
 * **Sampling during a CSS transition catches `opacity: 0`.** A fixed sleep after a viewport change or a
   click intermittently failed a visibility check. Use `page.waitForFunction(<the condition>)` with a
   timeout, then assert. Fixed 3 flaky checks; 4 consecutive clean runs afterwards.
+
+
+## Auditing trade data: sentinels, origin, and counting only what is real (round 39)
+
+Tool: `tools/audit_trades.py` (read-only). Run:
+`AUDIT_EQUITY=<equity> python tools/audit_trades.py --db data [--json OUT]`.
+Full findings: `AUDIT-TRADES-2026-09.md`.
+
+* **`0.0` is a sentinel, not a value.** `sl=0`/`tp=0` mean "unset"; `pnl=0` means "not closed".
+  Excluding them cut a confident **44-row "inverted take-profit" false positive down to the real
+  20**. Before any direction test, exclude `sl=0`/`tp=0`; before any realised-P&L test, exclude
+  `pnl=0`. (One true negative did slip through: `sl = -40.28` on ticket 37779531 — a sentinel of
+  0.0 hides it because 0.0 is filtered and negatives are not. Check `sl < 0 or tp < 0` too.)
+* **Never compute risk from `|entry - sl|` on an inverted row** — that is not risk. And **never
+  on a synthetic row**: doing so inflated the breach count **150 -> 27 (5.5x)**. Always split a
+  finding real vs synthetic before quoting it.
+* **Timestamp precision is a reliable origin discriminator.** Derived from the code, not guessed:
+  `sync_mt5_history` (`database.py:228`) formats an int epoch -> **whole seconds**;
+  `log_trade` (`database.py:161`) formats `datetime.now()` -> **microseconds**. So
+  `timestamp like '%.%'` == locally stamped and never reconciled to a broker deal. 136/245 rows
+  here. Those rows carry fabricated prices from the **still-live** fallback at
+  `tradingview_provider.py:583` (`base_p = 1.0850` EURUSD, 65000 BTC, 3500 ETH, 150 SOL).
+  `mt5_client._paper_fill_price` was already fixed for the same bug; the provider was not.
+* **A defect's apparent cause is often not its real one.** "closed_at == timestamp on 109/109"
+  looks like a bad close time; it is actually `database.py:287` writing the EXIT time into
+  `timestamp`, destroying the entry time (which also breaks id-order chronology). Read the
+  UPDATE, not just the symptom.
+* **Let the outcome arbitrate an ambiguous field.** 20 rows had `sl` on the wrong side — could be
+  an inverted bracket or a flipped `action`. The 16 closed ones were **16/16 winners**, which a
+  real stop cannot produce, so `sl` is holding the take-profit. `tp` was never wrong (0/245),
+  which localises the corruption to `sl`.
+* **One root cause, one finding.** Four "two live copies of <db>" entries hid that a single
+  path-resolution defect produces all four. Likewise do not report the same 15 `pnl=0` rows at
+  two severities.
+* **Quote a rate against the right denominator.** "114/245 rows have pnl == expected_value"
+  understates a 100% defect, because 131 open rows have no realised result at all. It is
+  **109/109 closed rows**.
+* `executed_trades` has **no `exit_price`**, and neither table has `commission`/`swap` — so
+  realised P&L cannot be recomputed and the gross-vs-net split
+  (`database.py:226` vs `state_synchronizer.py:73`) cannot even be measured from the data.
