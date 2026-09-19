@@ -166,7 +166,10 @@ class ExecutionEngine:
                     spread_pips=spread_pips,
                     mtf_alignment=mtf_str,
                     threats_json=threats_json,
-                    features_json=features_json
+                    features_json=features_json,
+                    # D2: the position id, not the order ticket, is what the exit
+                    # deal will be keyed on. Without it the row can never close.
+                    position_id=res.get("position_id")
                 )
             except Exception as e:
                 logger.error(f"Failed to log trade to DB: {e}")

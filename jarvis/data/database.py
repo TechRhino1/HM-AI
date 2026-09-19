@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 import threading
 import os
 import re
+from typing import Optional
 
 from jarvis.config.paths import resolve_db_path, ensure_data_dir
 from jarvis.data.broker_time import broker_utc_offset
@@ -61,6 +62,10 @@ class SQLiteTradeDB:
                 CREATE TABLE IF NOT EXISTS executed_trades (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     ticket INTEGER,
+                    -- The MT5 POSITION id, which is not the same number as the
+                    -- order ticket `send_market_order` returns. See `position_id`
+                    -- in the migration map below.
+                    position_id INTEGER,
                     symbol TEXT,
                     action TEXT,
                     entry_price REAL,
@@ -110,7 +115,16 @@ class SQLiteTradeDB:
                 # for one synced from a closed broker deal. `closed_at` is
                 # unambiguous: null unless the row really is a closed trade, so
                 # a chart can draw an exit marker without guessing.
-                "closed_at": "TEXT"
+                "closed_at": "TEXT",
+                # D2: `log_trade` stored whatever the broker call returned as
+                # "ticket", which for a market order is `result.order` -- the
+                # ORDER ticket. `sync_mt5_history` closes rows by
+                # `deal.position_id`, the POSITION id. Those are different
+                # numbers, so a row written at entry could never be matched by
+                # the exit deal and stayed open forever (measured: 155 rows with
+                # closed_at NULL and realized_pnl 0.0 on data/jarvis_history.db).
+                # Persist both and join on the position id.
+                "position_id": "INTEGER",
             }
             for col_name, col_def in new_cols.items():
                 if col_name not in cols:
@@ -118,6 +132,13 @@ class SQLiteTradeDB:
                         conn.execute(f"ALTER TABLE executed_trades ADD COLUMN {col_name} {col_def}")
                     except Exception:
                         pass
+
+            # AFTER the migration: an index on a column the table does not have
+            # yet raises, and because this whole block is one try/except that
+            # would abort the migration too — on an existing database it left
+            # `position_id` (and every other pending column) missing while
+            # looking like a successful init.
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_executed_trades_position_id ON executed_trades(position_id);")
             conn.commit()
 
             logger.info("SQLite database initialized successfully.")
@@ -145,20 +166,28 @@ class SQLiteTradeDB:
         spread_pips: float = 0.0,
         mtf_alignment: str = "",
         threats_json: str = "[]",
-        features_json: str = "{}"
+        features_json: str = "{}",
+        position_id: Optional[int] = None
     ):
+        """Journal an entry.
+
+        `ticket` is the order ticket the broker call returned; `position_id` is
+        the MT5 position id the exit deal will later be keyed on. They are
+        different numbers — pass both, or the row can never be closed (D2).
+        """
         conn = self._get_conn()
         try:
             conn.execute('''
                 INSERT INTO executed_trades (
-                    ticket, symbol, action, entry_price, sl, tp, volume, timestamp,
+                    ticket, position_id, symbol, action, entry_price, sl, tp, volume, timestamp,
                     ai_score, regime, expected_value, executor, session_name,
                     is_prime_session, adx, plus_di, minus_di, spread_pips,
                     mtf_alignment, threats_json, features_json
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
-                ticket, symbol, action, entry, sl, tp, volume, datetime.now(timezone.utc).isoformat(),
+                ticket, position_id, symbol, action, entry, sl, tp, volume,
+                datetime.now(timezone.utc).isoformat(),
                 score, regime, ev, executor, session_name, int(is_prime_session),
                 adx, plus_di, minus_di, spread_pips, mtf_alignment, threats_json, features_json
             ))
@@ -261,32 +290,50 @@ class SQLiteTradeDB:
                     except Exception:
                         pass
 
-                # Check if ticket already exists
+                # Find the row this position belongs to.
+                #
+                # D2: `pid` is the POSITION id. The row written when the trade
+                # opened may hold it in `position_id`, or — for every row that
+                # predates that column — in `ticket`, because the old code stored
+                # `result.order` there and `ticket` was all we had. Matching on
+                # `ticket` alone silently missed both cases: an engine-logged row
+                # keyed by order ticket never equalled a position id, so it was
+                # never updated and stayed open with realized_pnl 0.0 forever.
+                # Prefer the position id; fall back to the ticket for legacy rows.
                 cur = conn.cursor()
-                cur.execute("SELECT id FROM executed_trades WHERE ticket = ?", (pid,))
+                cur.execute(
+                    "SELECT id FROM executed_trades "
+                    "WHERE position_id = ? OR (position_id IS NULL AND ticket = ?) "
+                    "ORDER BY (position_id IS NOT NULL) DESC, id ASC LIMIT 1",
+                    (pid, pid),
+                )
                 row = cur.fetchone()
                 if not row:
                     regime_str = "TREND_BULL" if side == "BUY" else "TREND_BEAR"
                     conn.execute('''
-                        INSERT INTO executed_trades (ticket, symbol, action, entry_price, sl, tp, volume, timestamp, ai_score, regime, expected_value, realized_pnl, executor, closed_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ''', (pid, clean_sym, side, entry_p, sl_val, tp_val, vol, dt_str, 85.0, regime_str, pnl, pnl, exec_label,
+                        INSERT INTO executed_trades (ticket, position_id, symbol, action, entry_price, sl, tp, volume, timestamp, ai_score, regime, expected_value, realized_pnl, executor, closed_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (pid, pid, clean_sym, side, entry_p, sl_val, tp_val, vol, dt_str, 85.0, regime_str, pnl, pnl, exec_label,
                           dt_str if exit_deal else None))
                 else:
                     # Update realized PnL, executor, and close timestamp for completed positions.
                     # `closed_at` is only ever written when there really is an exit
                     # deal — rewriting it to null on a later sync would erase a
                     # close time we already knew.
+                    # Keyed on the matched row id, not re-matched, so the UPDATE
+                    # can never hit a different row than the SELECT just found.
                     conn.execute('''
-                        UPDATE executed_trades 
-                        SET realized_pnl = ?, expected_value = ?, executor = ?, timestamp = ?, 
+                        UPDATE executed_trades
+                        SET realized_pnl = ?, expected_value = ?, executor = ?, timestamp = ?,
+                            position_id = CASE WHEN ? IS NOT NULL THEN ? ELSE position_id END,
                             closed_at = CASE WHEN ? IS NOT NULL THEN ? ELSE closed_at END,
-                            sl = CASE WHEN ? > 0 THEN ? ELSE sl END, 
+                            sl = CASE WHEN ? > 0 THEN ? ELSE sl END,
                             tp = CASE WHEN ? > 0 THEN ? ELSE tp END
-                        WHERE ticket = ?
+                        WHERE id = ?
                     ''', (pnl, pnl, exec_label, dt_str,
+                          pid, pid,
                           dt_str if exit_deal else None, dt_str if exit_deal else None,
-                          sl_val, sl_val, tp_val, tp_val, pid))
+                          sl_val, sl_val, tp_val, tp_val, row[0]))
             conn.commit()
 
         except Exception as e:

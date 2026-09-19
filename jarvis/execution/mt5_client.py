@@ -436,6 +436,9 @@ class MT5Client:
                 return {
                     "status": "FILLED",
                     "ticket": ticket,
+                    # Paper has one synthetic id for both: there is no separate
+                    # order ticket and position id to confuse.
+                    "position_id": ticket,
                     "symbol": resolved,
                     "type": order_type,
                     "volume": volume,
@@ -537,9 +540,35 @@ class MT5Client:
 
 
                 logger.info(f"⚡ ULTRA-FAST ORDER FILLED: Ticket={result.order} {order_type} {volume} {resolved} @ {result.price}")
+                # `result.order` is the ORDER ticket. The position it opened has a
+                # DIFFERENT identifier, and that identifier — `deal.position_id` —
+                # is the only key the exit deal will later be reported under.
+                # Returning only the order ticket meant the journal row written at
+                # entry could never be matched to its exit (D2), so the trade
+                # stayed open forever with realized_pnl 0.0.
+                position_id = None
+                try:
+                    deal_ticket = int(getattr(result, "deal", 0) or 0)
+                    if deal_ticket > 0:
+                        deals = mt5.history_deals_get(ticket=deal_ticket)
+                        if deals:
+                            position_id = int(getattr(deals[0], "position_id", 0)) or None
+                    if position_id is None:
+                        # Netting accounts and some brokers report no deal on the
+                        # result; the position itself is the fallback.
+                        opened = mt5.positions_get(ticket=int(getattr(result, "order", 0) or 0))
+                        if opened:
+                            position_id = int(getattr(opened[0], "ticket", 0)) or None
+                except Exception as e:
+                    logger.warning(
+                        "Could not resolve the position id for order %s (%s); the "
+                        "journal row will only be matchable by order ticket.",
+                        getattr(result, "order", "?"), e,
+                    )
                 return {
                     "status": "FILLED",
                     "ticket": result.order,
+                    "position_id": position_id,
                     "volume": result.volume,
                     "price": result.price,
                     "comment": result.comment

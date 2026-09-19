@@ -99,7 +99,7 @@ recommendations were rejected on verification (see §6) — one of them would ha
 | AI10 | Calibration fitted to its own output on ≤20 rows | H | M |
 | AI4 | Gate/sizing probability excludes the only fitted model | H | M |
 | A10 / A9 | `/api/history` re-syncs 30 days on every read; SSE pushes 144KB/s | M | M |
-| P5 | Live MT5 connection at **import** time | M | S |
+| P5 | Live MT5 connection at **import** time — and it can deadlock | H | S | *Measured 2026-09-20:* `server.py:34` builds `MT5Client(mode="live")` in the **class body**. With no terminal running, `mt5.initialize()` blocks in a native call **holding the GIL**, so `Thread.start()` can never complete and `import jarvis.api.server` never returns — the whole suite becomes uncollectable (observed: 13min+ with no output). `TimeoutGuard` cannot help: a timeout cannot interrupt a thread, and no new thread can be created while the GIL is held. Promote it out of P2. |
 | P6 | sklearn on the critical import path (2.35s of 2.91s) | M | S |
 | P10 | No `pyproject.toml`, no lockfile, undeclared `scipy`/`tabulate` | M | M |
 | P11 | No coverage / lint / type / timeout tooling | M | S |
@@ -147,16 +147,16 @@ C1, C2, D4, D2, A3, P2.
 **Exit:** no trade can open that exceeds `equity × max_risk_per_trade_pct`; zero new rows with a
 fabricated price over a 24h run; `.db` alone contains 100% of `trade_records`.
 
-**Status (2026-09-20): 4 of 6 done.**
+**Status (2026-09-20): 5 of 6 done** (C2 deliberately deferred — see below).
 
 | Item | Status | Result |
 |---|---|---|
 | **C1** risk ceiling | ✅ Done | `position_sizing.py` now clamps to the configured `max_risk_per_trade_pct` with multipliers applied *inside* the clamp. Verified pre-fix → post-fix on the worst case (conviction 1.35 × evidence 1.15): **$70.00 → $50.00** on $10k, i.e. 1.40% → exactly 0.500%. Also required a test-isolation fix — see the note below. |
 | **D4** WAL checkpoint | ✅ Done | `TradeMemory` checkpoints (TRUNCATE) after every write and before close. Verified pre-fix: a copy of the `.db` alone did not even contain the `trade_records` **table** — schema and rows were both trapped in a 16KB WAL. |
 | **A3** symbol universe | ✅ Done | `JarvisOrchestrator` defaults to `SETTINGS.trading.symbols`. **⚠ Behaviour change: the effective universe drops 13 → 5** (`XAUUSD, EURUSD, GBPUSD, USDJPY, BTCUSD`). If the wider set is wanted, add it to `trading.allowed_symbols`. |
-| **P2** timeout status | ✅ Done | `place_market_order` timeout now returns `UNKNOWN`, not `FAILED`; the orchestrator holds the risk reservation and starts the cooldown instead of releasing and retrying; the UI treats `UNKNOWN` as "not confirmed" so it can never render as a filled trade. Classified in the response-contract test as its own `INDETERMINATE` class. |
+| **P2** timeout status | ✅ Done | `send_market_order` timeout now returns `UNKNOWN`, not `FAILED`; the orchestrator holds the risk reservation and starts the cooldown instead of releasing and retrying; the UI treats `UNKNOWN` as "not confirmed" so it can never render as a filled trade. Classified in the response-contract test as its own `INDETERMINATE` class. |
 | **C2** fabricated prices | ⏸ Deferred — see below | |
-| **D2** position-id join | ⏳ Not started | |
+| **D2** position-id join | ✅ Done | `executed_trades` gains `position_id` (migrated via the existing `ALTER TABLE` map); `send_market_order` resolves and returns it from the deal; both `log_trade` callers persist it; `sync_mt5_history` joins `position_id = ? OR (position_id IS NULL AND ticket = ?)` so legacy rows still close. Measured on `jarvis_history.db`: **155 rows** with `closed_at` NULL and `realized_pnl` 0.0. Proven pre-fix: the sync INSERTED a duplicate row instead of closing the original. |
 
 **C1 — what it exposed.** Tightening the clamp made `test_d1_online_ml_and_trade_memory_learning_loop`
 red. It was not the clamp. The test mocks `mt5_client.get_account_snapshot` for $10,000, but the

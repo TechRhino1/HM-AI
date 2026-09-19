@@ -1041,7 +1041,9 @@ class JarvisRequestHandler(BaseHTTPRequestHandler):
                             score=100.0,
                             regime="MANUAL_EXECUTION",
                             ev=0.0,
-                            executor="MANUAL_AI_ASSISTED"
+                            executor="MANUAL_AI_ASSISTED",
+                            # D2: so the exit deal can find this row again.
+                            position_id=res.get("position_id")
                         )
                     except Exception as ex:
                         logger.error(f"Error logging manual trade to DB: {ex}")
