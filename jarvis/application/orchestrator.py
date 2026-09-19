@@ -583,25 +583,43 @@ class JarvisOrchestrator:
             est_risk_usd = lots * (_spec.contract_size or 100000.0) * risk_dist
             self.risk_engine.reserve_risk(canonical_sym, est_risk_usd)
 
+            # Claim atomically. The guard ~90 lines above reads
+            # `_execution_in_progress` and then RELEASES the lock, so two sweeps
+            # can both observe "not executing" and both reach this point. Only
+            # the one that wins this compare-and-claim may send an order; the
+            # loser releases its risk reservation and skips, instead of opening
+            # a second position on the same symbol.
             with self._execution_lock:
-                self._execution_in_progress.add(canonical_sym)
-
-            try:
-                exec_res = self.execution_engine.execute_decision(decision, lots)
-                if exec_res and exec_res.get("status") == "FILLED":
-                    self.risk_engine.commit_risk(canonical_sym)
+                if canonical_sym in self._execution_in_progress:
+                    claimed = False
                 else:
-                    self.risk_engine.release_risk(canonical_sym)
-            except Exception as e:
+                    self._execution_in_progress.add(canonical_sym)
+                    claimed = True
+
+            if not claimed:
+                logger.warning(
+                    "%s was claimed by a concurrent sweep while this one was still "
+                    "authorising; skipping to avoid a duplicate order.", canonical_sym,
+                )
                 self.risk_engine.release_risk(canonical_sym)
-                logger.error(f"Execution error for {canonical_sym}: {e}", exc_info=True)
-            finally:
-                # Always release in-progress lock; update cooldown only on successful fill
-                with self._execution_lock:
-                    self._execution_in_progress.discard(canonical_sym)
+                exec_res = None
+            else:
+                try:
+                    exec_res = self.execution_engine.execute_decision(decision, lots)
                     if exec_res and exec_res.get("status") == "FILLED":
-                        self._last_execution_time[canonical_sym] = time.time()
-                        logger.info(f"Execution lock released for {canonical_sym}. Cooldown {self._SAME_SYMBOL_COOLDOWN_SEC}s started.")
+                        self.risk_engine.commit_risk(canonical_sym)
+                    else:
+                        self.risk_engine.release_risk(canonical_sym)
+                except Exception as e:
+                    self.risk_engine.release_risk(canonical_sym)
+                    logger.error(f"Execution error for {canonical_sym}: {e}", exc_info=True)
+                finally:
+                    # Always release in-progress lock; update cooldown only on successful fill
+                    with self._execution_lock:
+                        self._execution_in_progress.discard(canonical_sym)
+                        if exec_res and exec_res.get("status") == "FILLED":
+                            self._last_execution_time[canonical_sym] = time.time()
+                            logger.info(f"Execution lock released for {canonical_sym}. Cooldown {self._SAME_SYMBOL_COOLDOWN_SEC}s started.")
             # Record pending features for online learning and journal entry (§17)
             if exec_res and exec_res.get("status") == "FILLED":
                 ticket = exec_res.get("ticket")

@@ -14,6 +14,7 @@ the single shared policy, exactly like the monitor and the backtester.
 """
 import time
 import logging
+import threading
 from typing import Dict, List, Any, Optional
 from jarvis.data.schemas import PositionSnapshot, MarketContext
 from jarvis.execution.mt5_client import MT5Client
@@ -29,6 +30,8 @@ class OrderManager:
     def __init__(self, mt5_client: MT5Client):
         self.mt5_client = mt5_client
         # Per-ticket immutable 1R reference and policy (frozen at first sight).
+        # Guarded by `_state_lock`: the sweep calls in from a 32-thread pool.
+        self._state_lock = threading.RLock()
         self._initial_sl: Dict[int, float] = {}
         self._initial_volume: Dict[int, float] = {}
         self._exit_policy: Dict[int, ExitPolicy] = {}
@@ -81,18 +84,24 @@ class OrderManager:
 
         # Freeze 1R and the policy on first sight of the ticket. Recomputing
         # against the *current* stop would make R drift as the stop ratchets.
-        if position.ticket not in self._initial_sl:
-            fallback_risk = atr * 1.5
-            self._initial_sl[position.ticket] = (
-                position.sl if position.sl > 0
-                else (position.open_price - fallback_risk if position.type == "BUY"
-                      else position.open_price + fallback_risk)
-            )
-        if position.ticket not in self._exit_policy:
-            self._exit_policy[position.ticket] = ExitPolicy.for_symbol(position.symbol, spec)
-        policy = self._exit_policy[position.ticket]
+        #
+        # This runs on the sweep's worker pool (up to 32 threads), so the
+        # check-then-set below must be atomic: two workers seeing a new ticket
+        # at once would both compute a baseline and the second write would
+        # silently move 1R, corrupting every R-multiple for that position.
+        with self._state_lock:
+            if position.ticket not in self._initial_sl:
+                fallback_risk = atr * 1.5
+                self._initial_sl[position.ticket] = (
+                    position.sl if position.sl > 0
+                    else (position.open_price - fallback_risk if position.type == "BUY"
+                          else position.open_price + fallback_risk)
+                )
+            if position.ticket not in self._exit_policy:
+                self._exit_policy[position.ticket] = ExitPolicy.for_symbol(position.symbol, spec)
+            policy = self._exit_policy[position.ticket]
 
-        initial_sl = self._initial_sl[position.ticket]
+            initial_sl = self._initial_sl[position.ticket]
         risk_dist = abs(position.open_price - initial_sl)
         if risk_dist <= 0:
             logger.debug(
@@ -176,7 +185,8 @@ class OrderManager:
 
     def forget_ticket(self, ticket: int) -> None:
         """Drop per-ticket state once a position closes (prevents unbounded growth)."""
-        self._initial_sl.pop(ticket, None)
-        self._initial_volume.pop(ticket, None)
-        self._exit_policy.pop(ticket, None)
-        self._be_locked.discard(ticket)
+        with self._state_lock:
+            self._initial_sl.pop(ticket, None)
+            self._initial_volume.pop(ticket, None)
+            self._exit_policy.pop(ticket, None)
+            self._be_locked.discard(ticket)

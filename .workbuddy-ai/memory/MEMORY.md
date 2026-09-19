@@ -3,6 +3,8 @@
 Injected every session and **hard-truncated at ~6,520 bytes** — keep under that or the tail vanishes.
 Pointers and already-paid-for rules only; detail lives elsewhere.
 
+* Root: **`MASTER_PLAN.md`** — ranked backlog + milestones M0–M5. **`AGENT_SYSTEM.md`** — the
+  multi-agent coding system (roster, workflow, Definition of Done).
 * `TRAPS.md` — every trap (server/frontend/testing/data-source/data-integrity/CSS/tool-harnesses/
   risk/trade-data). `AUDIT-2026-09.md` — signal quality. **`AUDIT-TRADES-2026-09.md`** — trade-data
   audit. `YYYY-MM-DD.md` — per-session detail.
@@ -38,9 +40,8 @@ the data path broken. **Never leave the platform alive only as a session backgro
 at `HM_dashboard.bat`.
 
 **Routes:** `/` = `dashboard.html` (primary). `/classic` = `index.html` (old terminal). `/stocks`,
-`/india`, `/options`, `/console`. **`verify_ui_layout.js` does not cover `/classic`** — measure it with
-`.scratch/classic_tabs.js`; `terminal.css` loads *only* in `index.html`, `dashboard.html` uses
-`theme_terminal.css`.
+`/india`, `/options`, `/console`. **`verify_ui_layout.js` does not cover `/classic`**; `terminal.css`
+loads *only* in `index.html` (`dashboard.html` uses `theme_terminal.css`).
 
 ## Baselines
 
@@ -53,7 +54,7 @@ regression.
 `verify_copilot_render` · `verify_dashboard_nav` · `verify_ui_layout` · `verify_phone_nav` ·
 `audit_endpoints` · `audit_wiring` · `audit_encoding` · `audit_trades` (read-only; needs
 `AUDIT_EQUITY=`); all green. Counts + each one's failure mode
-(most look like a regression): `TRAPS.md` § Tool harnesses, § Measuring layout.
+(most look like a regression): `TRAPS.md` § Tool harnesses.
 `tools/gcm_wrap.sh` = the required push credential helper.
 
 ## Rules worth repeating
@@ -82,15 +83,14 @@ regression.
 
 ## Signal quality — **the entry signal has no measured edge (several ways).**
 
-It loses money on real MT5 data (94,937 trades: mean R −0.0509, t −3.04, p 0.0067, CI excludes 0);
-3/20 symbols beat always-long in both windows vs 5 by chance; refitted calibration 0/20 skillful;
-**DSR > 0.95 is met by 0/20** once overlapping trades are counted honestly (94,937 rows = **327
-independent bets, 0.3%**). Evidence + backlog: **`AUDIT-2026-09.md`**. **Consume `spread_pips`; never
-multiply the bars' raw `spread` by `pip_size` (MT5 reports points).**
+Loses money on real MT5 data (94,937 trades: mean R −0.0509, t −3.04, p 0.0067); 3/20 symbols beat
+always-long vs 5 by chance; refitted calibration 0/20 skillful; **DSR > 0.95 met by 0/20** once
+overlapping trades are counted honestly (94,937 rows = **327 independent bets**). Evidence:
+**`AUDIT-2026-09.md`**. **Consume `spread_pips`; never multiply raw `spread` by `pip_size`.**
 
 ## Environment
 
 Writes outside the project dir are refused. Bash, not PowerShell; `taskkill` needs
 `MSYS_NO_PATHCONV=1`. Python 3.13.12 managed at `…\binaries\python\versions\3.13.12\python.exe`.
-`rm -rf X && cmd` swallows the command's stdout — run the `rm` separately. A script run *by path* puts
+`rm -rf X && cmd` swallows stdout — run the `rm` separately. A script run *by path* puts
 its own dir on `sys.path`. The server binds **127.0.0.1 only**.

@@ -987,12 +987,17 @@ class PositionMonitorEngine:
     def _get_cached_regime(self, symbol: str) -> Optional[Any]:
         """Get the last known regime from state manager decisions."""
         try:
-            decisions = self.state_manager._decisions  # type: ignore
+            # `latest_decisions`, not `_decisions`. The typo raised
+            # AttributeError on every call and the bare `except: pass` below
+            # swallowed it, so this branch had never once executed -- the
+            # caller silently fell through to a fresh classification.
+            decisions = self.state_manager.latest_decisions  # type: ignore
             dec = decisions.get(symbol)
             if dec and hasattr(dec, "regime"):
                 return dec.regime
-        except Exception:
-            pass
+        except Exception as e:
+            # Never swallow silently: that is what hid the typo for so long.
+            logger.debug(f"_get_cached_regime({symbol}) fell back to None: {e}")
         return None
 
     def get_status(self) -> Dict[str, Any]:

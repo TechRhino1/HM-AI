@@ -113,12 +113,26 @@ class MetaLabeler:
     MIN_PROB = 0.55  # gate threshold; below this the meta-labeler distrusts the setup
 
     def __init__(self, model_path=None):
+        # NOTE: this default deliberately does NOT match the trainer's default
+        # (`data/models/meta_labeler.joblib`, tools/train_meta_labeler.py). That
+        # is not an oversight to "fix": the gate is intentionally inert because
+        # the trained model carries no out-of-sample information (see `_load`).
+        # Pointing this at the trainer's output would silently activate a veto
+        # measured to make results worse. Enabling it requires a different
+        # feature set first, and must be an explicit, reviewed change -- not a
+        # path correction.
         self.model_path = model_path or os.path.join(
             os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
             "jarvis_data", "meta_labeler.joblib"
         )
         self.model = None
         self._load()
+        if self.model is None:
+            logger.info(
+                "MetaLabeler gate inactive (no model loaded from %s). This is the "
+                "intended state -- see _load() for the measured evidence.",
+                self.model_path,
+            )
 
     def build_dataset(self, candles, horizon=20, label_frac=0.5):
         """Create (X, y) from a candle series.
