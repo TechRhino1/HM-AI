@@ -53,6 +53,13 @@
                 <span>📊 India Options (F&O)</span>
             </a>
         </div>
+
+        <!-- Explicit auth slot. Without it auth.js falls back to appending the
+             widget INTO .nav-links-wrapper (auth.js:137), which put the four
+             market pills and the account pill in one flex-wrap:wrap row - the
+             row overflowed and broke into two and three lines. The header is
+             the flex parent, so the widget belongs here as a sibling. -->
+        <div id="auth-header-widget" class="auth-header-widget"></div>
     </header>
 
     <!-- ==========================================================================

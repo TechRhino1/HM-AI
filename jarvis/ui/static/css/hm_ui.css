@@ -537,7 +537,26 @@ header.terminal-hud {
     display: flex;
     align-items: center;
     gap: var(--hm-space-2);
-    flex-wrap: wrap;
+    /* This row must never wrap. It carries four market destinations plus - on
+       any page with no explicit auth slot - the account widget, and with
+       `flex-wrap: wrap` it broke into two lines at 1440px and three at 390px.
+       A navigation bar that reflows onto a second line is the most visible
+       defect on these pages, so the row is pinned to one line and scrolls
+       horizontally when it genuinely cannot fit. */
+    flex-wrap: nowrap;
+    min-width: 0;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+}
+.nav-links-wrapper::-webkit-scrollbar {
+    display: none;
+}
+/* Items keep their intrinsic width; the row scrolls instead of compressing
+   labels into unreadable stubs. */
+.nav-links-wrapper > * {
+    flex: 0 0 auto;
 }
 
 .btn-nav-switch {
@@ -636,7 +655,14 @@ header.terminal-hud {
 }
 
 .mob-tab-btn {
-    flex: 1 0 auto;
+    /* 1 1 0, not 1 0 auto. `flex-shrink: 0` with an auto basis held every tab
+       at its intrinsic width, so the five-tab options bar needed 567px inside a
+       390px viewport and the last tab ("All View") was clipped off-screen. An
+       equal share with a zero basis fits any tab count at any width, and the
+       label truncates rather than overflowing. The 44px min-height below keeps
+       the WCAG 2.5.5 touch target intact. */
+    flex: 1 1 0;
+    min-width: 0;
     display: inline-flex;
     flex-direction: column;
     align-items: center;
@@ -666,6 +692,10 @@ header.terminal-hud {
 }
 .mob-tab-label {
     line-height: 1.2;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 .mob-tab-btn:hover {
     background: var(--hm-bg-hover);
@@ -1326,7 +1356,221 @@ html {
 
 
 /* ==========================================================================
-   15. PRINT
+   15. MOBILE SHELL  (iPhone-style liquid glass, <= 900px)
+   --------------------------------------------------------------------------
+   The mobile chrome is rebuilt here rather than in the four page sheets, for
+   one reason: those sheets load BEFORE this file, so a page-level rule cannot
+   be overridden from within them - they each carried their own `!important`
+   copy of the same header, and the copies had drifted into a layout where the
+   brand, the navigation row and the account widget each claimed their own
+   line. This section is the single source of truth for the phone layout.
+
+   Shape on a phone:
+       row 1   brand (shrinks)            account / login (pinned right)
+       row 2   cross-market navigation    (one line, swipes sideways)
+       row 3   search                     (india / options only)
+       ...     content
+       bottom  fixed glass tab bar        (safe-area aware)
+
+   `!important` is used deliberately and only where a page sheet already uses
+   it; at equal specificity the later file wins, which is this one.
+   ========================================================================== */
+
+@keyframes hm-liquid-pop {
+    0%   { transform: scale(0.93); }
+    55%  { transform: scale(1.05); }
+    100% { transform: scale(1); }
+}
+@keyframes hm-liquid-sheen {
+    from { background-position: -140% 0; }
+    to   { background-position: 240% 0; }
+}
+
+@media (max-width: 900px) {
+
+    /* --- Header: two rows, brand + account share the first ---------------- */
+    .stocks-hud,
+    .india-hud,
+    .opt-hud {
+        display: grid !important;
+        grid-template-columns: minmax(0, 1fr) auto !important;
+        align-items: center !important;
+        column-gap: var(--hm-space-2) !important;
+        row-gap: var(--hm-space-1) !important;
+        padding: var(--hm-space-2) var(--hm-space-3) !important;
+        padding-top: max(var(--hm-space-2), env(safe-area-inset-top)) !important;
+        position: sticky !important;
+        top: 0 !important;
+        z-index: var(--hm-z-nav) !important;
+        width: 100% !important;
+        box-sizing: border-box !important;
+        background-image: var(--hm-glass-sheen), var(--hm-glass-tint-strong) !important;
+        backdrop-filter: var(--hm-glass-blur) !important;
+        -webkit-backdrop-filter: var(--hm-glass-blur) !important;
+        border-bottom: 1px solid var(--hm-glass-edge) !important;
+        box-shadow: var(--hm-glass-lift) !important;
+    }
+
+    .stocks-hud > .brand-wrapper,
+    .india-hud > .brand-wrapper,
+    .opt-hud > .brand-wrapper {
+        grid-column: 1 !important;
+        grid-row: 1 !important;
+        min-width: 0 !important;
+        gap: var(--hm-space-2) !important;
+        flex-wrap: nowrap !important;
+    }
+    /* The wordmark is the only element allowed to truncate; the badge beside
+       it is state, and a clipped state badge reads as a different state. */
+    .stocks-hud > .brand-wrapper .brand-text,
+    .india-hud > .brand-wrapper .brand-text,
+    .opt-hud > .brand-wrapper .brand-text {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    .stocks-hud > .brand-wrapper .badge,
+    .india-hud > .brand-wrapper .badge,
+    .opt-hud > .brand-wrapper .badge {
+        flex: 0 0 auto;
+    }
+
+    .stocks-hud > #auth-header-widget,
+    .india-hud > #auth-header-widget,
+    .opt-hud > #auth-header-widget {
+        grid-column: 2 !important;
+        grid-row: 1 !important;
+        justify-self: end !important;
+        margin-left: 0 !important;
+        min-width: 0 !important;
+        flex-wrap: nowrap !important;
+    }
+
+    .stocks-hud > .nav-links-wrapper,
+    .india-hud > .nav-links-wrapper,
+    .opt-hud > .nav-links-wrapper {
+        grid-column: 1 / -1 !important;
+        grid-row: 2 !important;
+        width: 100% !important;
+        padding: 2px 0 !important;
+        gap: var(--hm-space-1) !important;
+        /* One line, always. The row scrolls; it never reflows. */
+        flex-wrap: nowrap !important;
+        overflow-x: auto !important;
+        overflow-y: hidden !important;
+        scrollbar-width: none;
+    }
+
+    .stocks-hud > .search-container,
+    .india-hud > .search-container,
+    .opt-hud > .search-container {
+        grid-column: 1 / -1 !important;
+        grid-row: 3 !important;
+        width: 100% !important;
+    }
+
+    /* --- Navigation pills: liquid glass, iOS proportions ------------------ */
+    .nav-links-wrapper .btn-nav-switch {
+        flex: 0 0 auto !important;
+        /* 44px, not 40px: verify_ui_layout.js measures this control against the
+           WCAG 2.5.5 minimum on a coarse pointer and fails below it. A
+           pill-shaped nav item is exactly where a designer is tempted to shave
+           the height, so the floor is the token, not a hand-picked number. */
+        min-height: var(--hm-touch-target) !important;
+        padding: var(--hm-space-2) var(--hm-space-3) !important;
+        border-radius: var(--hm-radius-pill) !important;
+        background-image: var(--hm-glass-sheen), var(--hm-glass-tint) !important;
+        background-color: transparent !important;
+        backdrop-filter: var(--hm-glass-blur-sm) !important;
+        -webkit-backdrop-filter: var(--hm-glass-blur-sm) !important;
+        border: 1px solid var(--hm-glass-edge) !important;
+        box-shadow: var(--hm-glass-lift) !important;
+        color: var(--hm-text-secondary) !important;
+        font-size: var(--hm-text-xs) !important;
+    }
+    .nav-links-wrapper .btn-nav-switch.btn-nav-active,
+    .nav-links-wrapper .btn-nav-switch.active,
+    .nav-links-wrapper .btn-nav-switch[aria-current="page"] {
+        background-image: var(--hm-glass-sheen),
+            linear-gradient(160deg, rgba(56, 189, 248, 0.30), rgba(56, 189, 248, 0.10)) !important;
+        border-color: rgba(56, 189, 248, 0.55) !important;
+        color: var(--hm-accent) !important;
+        box-shadow: 0 0 16px rgba(56, 189, 248, 0.26), var(--hm-glass-lift) !important;
+    }
+
+    /* --- Bottom tab bar: floating glass, safe-area aware ------------------ */
+    .mobile-nav-bar {
+        display: flex !important;
+        position: fixed !important;
+        left: 0 !important;
+        right: 0 !important;
+        bottom: 0 !important;
+        height: auto !important;
+        min-height: 56px !important;
+        align-items: stretch !important;
+        justify-content: space-between !important;
+        gap: 2px !important;
+        padding: 6px max(6px, env(safe-area-inset-right))
+                 calc(6px + env(safe-area-inset-bottom))
+                 max(6px, env(safe-area-inset-left)) !important;
+        background-image: var(--hm-glass-sheen), var(--hm-glass-tint-strong) !important;
+        backdrop-filter: var(--hm-glass-blur) !important;
+        -webkit-backdrop-filter: var(--hm-glass-blur) !important;
+        border-top: 1px solid var(--hm-glass-edge) !important;
+        border-bottom: none !important;
+        box-shadow: 0 -10px 34px rgba(0, 0, 0, 0.55), var(--hm-glass-lift) !important;
+        z-index: var(--hm-z-nav) !important;
+    }
+
+    .mob-tab-btn {
+        flex: 1 1 0 !important;
+        min-width: 0 !important;
+        min-height: 44px !important;
+        border-radius: var(--hm-radius-lg) !important;
+        color: var(--hm-text-dim) !important;
+        font-size: 10px !important;
+    }
+    .mob-tab-btn.active,
+    .mob-tab-btn[aria-selected="true"] {
+        background-image: var(--hm-glass-sheen),
+            linear-gradient(160deg, rgba(56, 189, 248, 0.30), rgba(56, 189, 248, 0.08)) !important;
+        border: 1px solid rgba(56, 189, 248, 0.5) !important;
+        border-radius: var(--hm-radius-lg) !important;
+        color: var(--hm-accent) !important;
+        box-shadow: 0 0 18px rgba(56, 189, 248, 0.28), var(--hm-glass-lift) !important;
+    }
+    /* The bar is fixed, so the last row of content would otherwise sit
+       underneath it. All six pages expose their content region as #hm-main
+       (the four market pages had four different container names but agreed on
+       this id), so one rule clears the bar everywhere. */
+    #hm-main {
+        padding-bottom: calc(72px + env(safe-area-inset-bottom)) !important;
+    }
+}
+
+/* Motion is opted into, never out of - a user who asked their OS for reduced
+   motion gets the same layout with no movement. */
+@media (prefers-reduced-motion: no-preference) and (max-width: 900px) {
+    .mob-tab-btn:active {
+        animation: hm-liquid-pop 260ms var(--hm-ease-out, ease-out) both;
+    }
+    .mob-tab-btn.active {
+        animation: hm-liquid-pop 300ms var(--hm-ease-out, ease-out) both;
+    }
+    .nav-links-wrapper .btn-nav-switch {
+        transition: transform 180ms var(--hm-ease-out, ease-out),
+                    box-shadow 180ms var(--hm-ease, ease),
+                    color 180ms var(--hm-ease, ease);
+    }
+    .nav-links-wrapper .btn-nav-switch:active {
+        transform: scale(0.96);
+    }
+}
+
+
+/* ==========================================================================
+   16. PRINT
    ========================================================================== */
 
 @media print {
