@@ -880,6 +880,38 @@
         }, 80);
     };
 
+    /* The chart header's secondary controls (timeframe, overlay levels) do not
+       fit beside the symbol strip on a phone, so below 901px CSS moves them into
+       a disclosure. Above that width the panel is `display: contents` and this
+       is never reachable. The panel's own buttons keep their inline handlers, so
+       a pick applies and then the same bubbling click closes the panel - which
+       is the behaviour you want from a picker. */
+    window.toggleChartMore = function (ev) {
+        // Load-bearing: the document listener installed below would otherwise
+        // see this very click and shut the panel in the same tick it opened.
+        if (ev && ev.stopPropagation) ev.stopPropagation();
+
+        const panel = document.getElementById("chart-more-panel");
+        const btn = document.getElementById("btn-chart-more");
+        if (!panel || !btn) return;
+
+        const open = panel.getAttribute("data-open") !== "true";
+        panel.setAttribute("data-open", open ? "true" : "false");
+        btn.setAttribute("aria-expanded", open ? "true" : "false");
+
+        if (!open || window.__chartMoreWired) return;
+        window.__chartMoreWired = true;
+
+        const close = () => {
+            const p = document.getElementById("chart-more-panel");
+            const b = document.getElementById("btn-chart-more");
+            if (p) p.setAttribute("data-open", "false");
+            if (b) b.setAttribute("aria-expanded", "false");
+        };
+        document.addEventListener("click", close);
+        document.addEventListener("keydown", (e) => { if (e.key === "Escape") close(); });
+    };
+
     /* ==========================================================================
        2. REAL-TIME DATA FETCHING & TELEMETRY
        ========================================================================== */

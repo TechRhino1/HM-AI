@@ -441,26 +441,44 @@
                             <span id="chart-market-status" class="market-status-pill market-closed">🔴 CLOSED (WEEKEND) — Re-opens Mon 02:30 AM IST</span>
                         </div>
 
-                        <!-- Chart Engine Mode Switcher & Controls -->
+                        <!-- Chart Engine Mode Switcher & Controls.
+                             At 390px this row is ~990px of content inside a
+                             ~356px box, and both blocks are flex-shrink:0, so
+                             everything after the engine switcher used to sit
+                             past the right edge of the screen - the whole
+                             timeframe row, the overlay toggle and Expand were
+                             present but unreachable on a phone. The secondary
+                             controls now collapse behind `btn-chart-more`
+                             below 901px. The panel is `display: contents`
+                             above that, so it generates no box and the
+                             desktop row lays out exactly as before. -->
                         <div class="chart-controls-group">
                             <div class="tab-switcher">
                                 <button id="btn-mode-tv-live" class="tab-btn active" onclick="switchChartMode('tv_live')">⚡ Live MT5</button>
                                 <button id="btn-mode-tv-pro" class="tab-btn" onclick="switchChartMode('tv_pro')">📈 TV Pro</button>
                             </div>
-                            <div class="timeframe-selector" id="timeframe-selector">
-                                <button class="tf-btn" onclick="setTimeframe('M1')">M1</button>
-                                <button class="tf-btn" onclick="setTimeframe('M5')">M5</button>
-                                <button class="tf-btn" onclick="setTimeframe('M15')">M15</button>
-                                <button class="tf-btn active" onclick="setTimeframe('H1')">H1</button>
-                                <button class="tf-btn" onclick="setTimeframe('H4')">H4</button>
-                                <button class="tf-btn" onclick="setTimeframe('D1')">D1</button>
+                            <button id="btn-chart-more" class="chart-more-btn" type="button"
+                                    onclick="toggleChartMore(event)"
+                                    aria-expanded="false" aria-controls="chart-more-panel"
+                                    title="Timeframe, overlays and chart size">
+                                ⚙ Chart
+                            </button>
+                            <div id="chart-more-panel" class="chart-more-panel" data-open="false">
+                                <div class="timeframe-selector" id="timeframe-selector">
+                                    <button class="tf-btn" onclick="setTimeframe('M1')">M1</button>
+                                    <button class="tf-btn" onclick="setTimeframe('M5')">M5</button>
+                                    <button class="tf-btn" onclick="setTimeframe('M15')">M15</button>
+                                    <button class="tf-btn active" onclick="setTimeframe('H1')">H1</button>
+                                    <button class="tf-btn" onclick="setTimeframe('H4')">H4</button>
+                                    <button class="tf-btn" onclick="setTimeframe('D1')">D1</button>
+                                </div>
+                                <button id="btn-toggle-overlays" class="btn-toggle-overlays active" onclick="toggleChartOverlays()" title="Toggle Trade & S/R Level Overlays">
+                                    📍 Levels: ON
+                                </button>
+                                <button id="btn-expand-chart" class="btn-expand-chart" onclick="toggleExpandChart()" title="Toggle Fullscreen Chart">
+                                    ⛶ Expand
+                                </button>
                             </div>
-                            <button id="btn-toggle-overlays" class="btn-toggle-overlays active" onclick="toggleChartOverlays()" title="Toggle Trade & S/R Level Overlays">
-                                📍 Levels: ON
-                            </button>
-                            <button id="btn-expand-chart" class="btn-expand-chart" onclick="toggleExpandChart()" title="Toggle Fullscreen Chart">
-                                ⛶ Expand
-                            </button>
                         </div>
                     </div>
                 </div>

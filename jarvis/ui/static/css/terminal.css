@@ -1450,20 +1450,35 @@ header.terminal-hud {
     flex-direction: column;
 }
 
+/* Wraps instead of overflowing. At 1440px the chart panel is only 786px wide
+   but this row needs ~1071px: the symbol strip is 559px (mostly the
+   market-status pill, which cannot break) and the controls are 493px, and both
+   children were flex-shrink:0. The overflow was neither wrapped nor scrollable
+   and `.terminal-panel` is `overflow: hidden`, so the entire timeframe row, the
+   overlay toggle and Expand were clipped out of existence on a full desktop -
+   not cramped, gone. Wrapping puts the controls on their own row whenever the
+   two blocks cannot share one. */
 .chart-header-bar {
     display: flex;
+    flex-wrap: wrap;
     justify-content: space-between;
     align-items: center;
+    align-content: flex-start;
     width: 100%;
-    gap: 8px;
+    gap: 6px 8px;
 }
 
+/* Shrinkable, and free to wrap internally, so the strip uses the width it
+   actually has instead of forcing the row wider than the panel. `min-width: 0`
+   is what lifts the automatic min-content floor that would otherwise pin it at
+   the pill's 340px. */
 .chart-symbol-info {
     display: flex;
     align-items: center;
     gap: 6px;
-    flex-shrink: 0;
+    flex-shrink: 1;
     flex-wrap: wrap;
+    min-width: 0;
 }
 
 .active-symbol-title {
@@ -1516,11 +1531,34 @@ header.terminal-hud {
     border: 1px solid rgba(255, 59, 92, 0.35);
 }
 
+/* Also shrinkable, and free to wrap. Between 901px and ~1150px the terminal is
+   still multi-column but the chart panel is only 365-488px wide, while these
+   four controls need 493px - so a nowrap, flex-shrink:0 group clipped the
+   overlay toggle and Expand even though the mobile shell had already handed
+   over. Wrapping keeps every control reachable at every width rather than
+   silently dropping the ones that do not fit. */
 .chart-controls-group {
     display: flex;
     align-items: center;
     gap: 5px;
-    flex-shrink: 0;
+    flex-shrink: 1;
+    flex-wrap: wrap;
+    min-width: 0;
+}
+
+/* The timeframe / overlay / expand controls sit inside a wrapper so a phone can
+   collapse them behind one disclosure (see the <=900px block). Above 901px the
+   wrapper must not exist as far as layout is concerned, or the desktop row
+   gains a box it never had: `display: contents` drops the wrapper's own box and
+   promotes its children to direct flex items of `.chart-controls-group`, which
+   is exactly what they were before the wrapper was introduced. */
+.chart-more-panel {
+    display: contents;
+}
+
+/* The disclosure trigger exists only below 901px. */
+.chart-more-btn {
+    display: none;
 }
 
 .tab-switcher {
@@ -2974,18 +3012,101 @@ header.terminal-hud {
         flex-shrink: 0;
     }
 
+    /* Each block takes a full row, which the base rule's `flex-wrap` honours.
+       Deliberately NOT `flex-direction: column`: combined with `flex-wrap:
+       wrap` a column container wraps into additional *columns*, which is how
+       you reintroduce the horizontal overflow you were trying to remove. */
     .chart-header-bar {
         flex-direction: row;
-        align-items: center;
-        justify-content: space-between;
+        align-items: flex-start;
+        justify-content: flex-start;
         gap: 6px;
     }
 
+    .chart-symbol-info,
     .chart-controls-group {
-        width: auto;
-        justify-content: flex-end;
+        width: 100%;
+    }
+
+    /* terminal.js renders this badge as an inline-flex run of text + <b> + a
+       countdown <span>, and `white-space: nowrap` stopped it breaking. On a
+       360px phone the strip only has ~326px to give it while the badge wants
+       ~340px, which surfaced as a 14px horizontal overflow of the whole header.
+       Letting it wrap keeps the reopen time readable instead of truncating it. */
+    .market-status-pill {
+        max-width: 100%;
+        flex-wrap: wrap;
+        white-space: normal;
+        row-gap: 1px;
+    }
+
+    .chart-controls-group {
+        position: relative;          /* containing block for the dropdown */
+        justify-content: flex-start;
         flex-wrap: nowrap;
         gap: 4px;
+    }
+
+    /* The secondary controls, behind one trigger. They were laid out at
+       x=777..913 (timeframes) and x=919 (Levels) on a 390px screen - present in
+       the DOM, past the right edge, and unreachable. */
+    .chart-more-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        min-height: var(--hm-touch-target, 44px);
+        padding: 0 12px;
+        border-radius: 999px;
+        border: 1px solid rgba(56, 189, 248, 0.45);
+        background: rgba(56, 189, 248, 0.12);
+        color: var(--accent-cyan);
+        font-family: var(--font-sans);
+        font-size: 11px;
+        font-weight: 800;
+        white-space: nowrap;
+        cursor: pointer;
+        touch-action: manipulation;
+    }
+    .chart-more-btn[aria-expanded="true"] {
+        background: rgba(56, 189, 248, 0.26);
+    }
+
+    .chart-more-panel {
+        position: absolute;
+        top: calc(100% + 6px);
+        left: 0;
+        z-index: 40;
+        display: none;
+        flex-direction: column;
+        align-items: stretch;
+        gap: 6px;
+        min-width: 218px;
+        padding: 8px;
+        border-radius: 12px;
+        border: 1px solid var(--border-subtle);
+        background: rgba(18, 26, 43, 0.97);
+        box-shadow: 0 18px 40px rgba(0, 0, 0, 0.55);
+    }
+    .chart-more-panel[data-open="true"] {
+        display: flex;
+    }
+
+    /* On a phone these are the primary way to change the chart, so they get a
+       real touch target instead of the 21px-wide desktop chip. */
+    .chart-more-panel .timeframe-selector {
+        display: flex;
+        width: 100%;
+        gap: 4px;
+    }
+    .chart-more-panel .tf-btn {
+        flex: 1 1 0;
+        min-width: 0;
+        min-height: var(--hm-touch-target, 44px);
+        font-size: 12px;
+    }
+    .chart-more-panel .btn-toggle-overlays {
+        min-height: var(--hm-touch-target, 44px);
+        justify-content: center;
     }
 
     .btn-expand-chart {
