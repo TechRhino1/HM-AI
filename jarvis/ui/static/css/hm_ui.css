@@ -1563,6 +1563,18 @@ html {
     #hm-main {
         padding-bottom: calc(72px + env(safe-area-inset-bottom)) !important;
     }
+
+    /* The classic terminal stacks its panes in a column on a phone and hides
+       the left/right columns, but the surviving `.middle-column-stack` was
+       `flex: 0 1 auto` - grow 0 - so it kept its content height and the chart
+       sat at its 290px minimum with several hundred pixels of empty workspace
+       beneath it. Growing the stack lets the chart panel's own `flex: 1.8`
+       fill the column. Desktop is untouched: there the stack is a flex ROW
+       child, where growing would change its width instead. */
+    .terminal-workspace > .middle-column-stack {
+        flex: 1 1 auto !important;
+        min-height: 0;
+    }
 }
 
 /* Motion is opted into, never out of - a user who asked their OS for reduced
