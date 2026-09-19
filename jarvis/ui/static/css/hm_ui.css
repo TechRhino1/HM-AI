@@ -559,6 +559,22 @@ header.terminal-hud {
     flex: 0 0 auto;
 }
 
+/* Desktop and tablet: let the header WRAP rather than squeeze the nav.
+   `justify-content: space-between` makes the nav the only flexible child, so it
+   absorbed the entire shortfall - on /india at 1440px the four items total
+   1540px inside 1392px of usable rail and the nav was compressed to 374px while
+   its content needs 522px, cutting off "India Options (F&O)" on a desktop with
+   room to spare. Wrapping moves the whole nav block to its own full-width row,
+   where every destination is visible and nothing scrolls. */
+@media (min-width: 901px) {
+    .stocks-hud,
+    .india-hud,
+    .opt-hud {
+        flex-wrap: wrap;
+        row-gap: var(--hm-space-1);
+    }
+}
+
 .btn-nav-switch {
     display: inline-flex;
     align-items: center;
