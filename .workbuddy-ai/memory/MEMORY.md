@@ -102,6 +102,14 @@ managed node workspace). Run browser suites **one at a time**: three in parallel
   calling it done.**
 * **`curl -s -o /dev/null -w '%{http_code}'` exits 23**, so an `&&` chain built on it silently skips
   every later step. Use `;` between probes.
+* **Paper and live share `data/jarvis_drawdown_state.db`.** `RiskEngine` builds the guard with
+  `db_path="" if is_backtest else "jarvis_drawdown_state.db"`, and paper reports
+  `equity = 10000 + pnl` — so a paper session's `peak_equity` blocks the live account, and
+  `peak_equity` moves **up only** and never resets daily. A stale 10150 against a live 777 reads as
+  a 92.34% drawdown vs a 10% cap and refuses **every** trade (`risk_engine.py:201/:405`,
+  `orchestrator.py:551`). `daily_start_equity` *does* self-heal on a new day — the daily cap was
+  never the problem. Also: `config/settings.json`'s whole `risk` block is **dead config** —
+  `cfg.risk` is written and never read, and `RiskEngine()` is built with no arguments.
 * Testing discipline (mutations, tautological guards, un-failable assertions, CRLF round-trips,
   `innerHTML` escaping, `read_text()`): **`TRAPS.md` § Testing / § Frontend.**
 
