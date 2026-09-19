@@ -12,6 +12,8 @@ import threading
 from typing import Dict, List, Any, Optional
 from jarvis.data.schemas import DecisionObject, AccountSnapshot, PositionSnapshot, MarketContext
 from jarvis.data.symbol_registry import resolve as resolve_symbol
+from jarvis.config.paths import mode_scoped_db_path
+from jarvis.config.settings import SETTINGS
 from jarvis.risk.position_sizing import PositionSizer
 from jarvis.risk.drawdown import DrawdownGuard
 from jarvis.risk.exposure import ExposureManager, BASE_MAX_TRADES_PER_SYMBOL, HARD_MAX_TRADES_PER_SYMBOL, MAX_PORTFOLIO_RISK_PCT
@@ -25,20 +27,46 @@ logger = logging.getLogger("JARVIS_RiskEngine")
 class RiskEngine:
     def __init__(
         self,
-        max_daily_loss_pct: float = 4.0,
-        max_drawdown_pct: float = 10.0,
-        max_open_positions: int = 3,
-        max_symbol_positions: int = 2,
-        max_risk_per_trade_pct: float = 0.5,
-        max_portfolio_risk_pct: float = 2.5,
-        is_backtest: bool = False
+        max_daily_loss_pct: Optional[float] = None,
+        max_drawdown_pct: Optional[float] = None,
+        max_open_positions: Optional[int] = None,
+        max_symbol_positions: Optional[int] = None,
+        max_risk_per_trade_pct: Optional[float] = None,
+        max_portfolio_risk_pct: Optional[float] = None,
+        is_backtest: bool = False,
+        mode: str = "live"
     ):
         self._lock = threading.RLock()
+        self.mode = mode
+        # config/settings.json is the single source of truth for these limits.
+        # They used to be hardcoded here AND declared in that file, and only the
+        # hardcoded copy was ever read — so editing the config silently did
+        # nothing, and the two drifted apart in the looser direction
+        # (max_open_positions declared 2, effective 3). A None default means
+        # "take it from the config"; an explicit argument still wins, which is
+        # what the backtest engine and the risk tests rely on.
+        risk = SETTINGS.risk
+        max_daily_loss_pct = risk.max_daily_loss_pct if max_daily_loss_pct is None else max_daily_loss_pct
+        max_drawdown_pct = risk.max_drawdown_pct if max_drawdown_pct is None else max_drawdown_pct
+        max_open_positions = risk.max_open_positions if max_open_positions is None else max_open_positions
+        max_symbol_positions = risk.max_symbol_positions if max_symbol_positions is None else max_symbol_positions
+        max_risk_per_trade_pct = risk.max_risk_per_trade_pct if max_risk_per_trade_pct is None else max_risk_per_trade_pct
+        max_portfolio_risk_pct = risk.max_portfolio_risk_pct if max_portfolio_risk_pct is None else max_portfolio_risk_pct
+
+        self.max_daily_loss_pct = max_daily_loss_pct
+        self.max_drawdown_pct = max_drawdown_pct
+        self.max_open_positions = max_open_positions
+        self.max_symbol_positions = max_symbol_positions
         self.max_risk_per_trade_pct = max_risk_per_trade_pct
         self.max_portfolio_risk_pct = max_portfolio_risk_pct
+        # Persistence is scoped to the execution mode. Paper measures equity on a
+        # 10000.0 base while live may hold a few hundred dollars, so a shared file
+        # let a paper peak become the live account's peak — and `peak_equity` only
+        # ever moves up, so live then refused every trade as a >90% drawdown.
+        # See jarvis.config.paths.mode_scoped_db_path.
         self.drawdown_guard = DrawdownGuard(
             max_daily_loss_pct, max_drawdown_pct,
-            db_path="" if is_backtest else "jarvis_drawdown_state.db"
+            db_path=mode_scoped_db_path("jarvis_drawdown_state.db", mode, is_backtest)
         )
         self.exposure_manager = ExposureManager(
             max_open_positions=max_open_positions,
@@ -51,7 +79,7 @@ class RiskEngine:
             max_open_positions=max_open_positions
         )
         self.circuit_breaker = CircuitBreaker(
-            db_path="" if is_backtest else "jarvis_circuit_state.db"
+            db_path=mode_scoped_db_path("jarvis_circuit_state.db", mode, is_backtest)
         )
         # Injectable clock so a backtest can advance on BAR time instead of wall
         # time (see CircuitBreaker.set_clock). Risk reservations (below) expire on

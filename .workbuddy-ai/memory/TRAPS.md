@@ -981,3 +981,68 @@ or the round-trip mangles them.
 
 Staging a subset of hunks this way is worth the trouble here: `git stash` is forbidden in this
 repo, and `git add -p` is interactive.
+
+## Tool harnesses (moved out of MEMORY.md to keep the injected file small)
+
+Counts as of round 35: `verify_ui_live.py` 46 · `verify_dashboard_render.js` 209 ·
+`verify_terminal_render.js` 55 + 5 FIND/CLEAR · `verify_copilot_render.js` 23 ·
+`verify_dashboard_nav.js` 31 · `verify_ui_layout.js` 238 · `audit_endpoints.py` 46 ·
+`audit_wiring.py` 136 modules / 0 broken · `audit_encoding.py` 0.
+
+* **`verify_ui_live.py` starts its own server on :8599.** Nothing may be listening there. If
+  something is, its probes hit that server instead — and an engine-less server answers
+  `attached=False` / `503`, which reads exactly like a regression in the code you just changed.
+  Run the browser suites against **`.scratch/srv8611.py` on :8611**.
+* **`tools/dom_stub.js` is not under `lib/`** — a bare `lib/` line in `.gitignore` matches at *any*
+  depth, so `tools/lib/dom_stub.js` worked locally and was absent from every clone. Check a new file
+  with `git check-ignore -v <path>`.
+* **A stub must mirror the real markup's initial state.** The Analyst/News strip's panels ship
+  `hidden` + `data-state="loading"` in `dashboard.html`, and both renderers early-return on a hidden
+  host — leave them visible and the full panel's refresh makes `setContext()`'s own render look
+  redundant, so the assertion passes for the wrong reason.
+* **Build nodes with `elementFor(id)`, never `registry.get(id)`** — the registry is a lazy Map, so
+  an un-queried id returns `undefined`.
+* **`verify_terminal_render.js`**: `terminal.js` registers `fetchHistory` *only* inside `setInterval`,
+  so an inert `setInterval` stub makes the history table — and every assertion on it — a silent
+  no-op. Capture the intervals and tick them.
+* **The dashboard chart stub must record `setMarkers`**; a no-op stub there made `drawTradeMarkers`
+  wholly unobservable.
+* **Assert against markup as rendered.** Never `html.replace(/\s+/g,'')` — it eats the space in
+  `<span class="…">` and makes a correct string fail. Bind a value to its own label via
+  `metricValue(html, label)`, or a swapped counter passes.
+* **`verify_ui_layout.js`'s total is not fixed** — it counts controls per viewport, so hiding a
+  control lowers it (238 → 229 was a ticket's pending row correctly disappearing, not a lost check).
+  Read the FAIL lines, never the total. `JARVIS_BASE` overrides the base; `verify_dashboard_nav.js`
+  takes `DASH_URL`.
+* **`audit_endpoints.py`**: add POST-only routes to its `POST_ONLY` set or they report DEAD, and
+  probe with `--base` against a server built from the *current* tree, or a stale engine makes new
+  routes look dead.
+* **Run browser suites one at a time.** Three in parallel plus a probe starved `forex`/`options`
+  into 45s navigation timeouts, which read exactly like a regression.
+* Screenshots: `.scratch/shot_one.js <tag> <page> [w] [h]`, honours `JARVIS_PORT`.
+  **`agent-browser` does not support Windows** — drive real Chrome via `puppeteer-core` from the
+  managed node workspace.
+
+## Risk control: paper and live share one drawdown database (round 35)
+
+`RiskEngine.__init__` builds its guard with
+`db_path="" if is_backtest else "jarvis_drawdown_state.db"` — so **paper and live share a file**, and
+paper reports `equity = 10000.0 + paper_pnl`. A paper session that runs to 10,150 leaves that as
+`peak_equity`; `peak_equity` moves **up only** and is **never reset daily** (only `daily_start_equity`
+re-anchors on a date change). A live account of $777 then reads as a **92.34% drawdown against a 10%
+cap**, so `check_limits().passed` is False, `get_risk_multiplier()` returns `0.0`, and the engine
+refuses **every** trade at `risk_engine.py:201`, `:405` (`authorized: False, lots: 0.0`) and
+`orchestrator.py:551` (the EXECUTE→WAIT backstop).
+
+Note the asymmetry, which cost a wrong diagnosis for several rounds: `daily_start_equity` *does*
+self-heal to the current equity on a new UTC day, so the **daily** cap was never the problem. Only
+the portfolio peak is permanently poisoned. The re-anchor is operator-only, by design —
+`DrawdownGuard.reset_baselines(current_equity)` is the sole supported way to move a baseline down
+(the module docstring explains why the guard refuses to guess at a withdrawal).
+
+**Second, independent defect in the same area:** `config/settings.json`'s entire `risk` block is
+**dead configuration**. `jarvis/config/settings.py` loads it into `cfg.risk` and nothing in the tree
+ever reads it — the only two references are the writes in that file. `RiskEngine()` is constructed
+with **no arguments** at `orchestrator.py:98`, so the constructor's hardcoded literals win, and they
+differ from the declared config in the *looser* direction (`max_open_positions` 2 declared → 3
+effective; `max_symbol_positions` 1 → 2; `max_daily_loss_pct` 5.0 declared → 4.0 effective).

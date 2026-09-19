@@ -34,6 +34,7 @@ from jarvis.risk.circuit_breaker import CircuitBreaker
 from jarvis.risk.drawdown import DrawdownGuard
 from jarvis.risk.account_tier import is_micro_account, get_max_lot_cap
 from jarvis.config.settings import verify_execution_mode, SETTINGS
+from jarvis.config.paths import mode_scoped_db_path
 from jarvis.market.sessions import SessionEngine
 
 logger = logging.getLogger("JARVIS_Orchestrator")
@@ -62,8 +63,17 @@ class JarvisOrchestrator:
 
         self.ml_predictor = OnlineMLPredictor()
         self.strategy_bandit = StrategyBandit()
-        self.circuit_breaker = CircuitBreaker()
-        self.drawdown_guard = DrawdownGuard()
+        # These are the orchestrator's OWN backstop gate (checked just before
+        # execution, alongside the one inside RiskEngine). They are separate
+        # objects from RiskEngine's, so they need the same mode scoping — leaving
+        # them on the bare filenames would let a paper run's baselines gate the
+        # live account through this path even after RiskEngine was fixed.
+        self.circuit_breaker = CircuitBreaker(
+            db_path=mode_scoped_db_path("jarvis_circuit_state.db", self.mode)
+        )
+        self.drawdown_guard = DrawdownGuard(
+            db_path=mode_scoped_db_path("jarvis_drawdown_state.db", self.mode)
+        )
         self._pending_features = {}
 
         # ── In-process execution guard ─────────────────────────────────────
@@ -95,7 +105,7 @@ class JarvisOrchestrator:
             bandit=self.strategy_bandit,
             self_learning=getattr(self.decision_engine, "self_learning", None)
         )
-        self.risk_engine = RiskEngine()
+        self.risk_engine = RiskEngine(mode=self.mode)
         self.order_manager = OrderManager(self.mt5_client)
         self.execution_engine = ExecutionEngine(self.mt5_client, self.state_manager)
         self.trade_memory = TradeMemory()
