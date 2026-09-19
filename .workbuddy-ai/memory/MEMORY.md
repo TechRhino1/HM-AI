@@ -22,7 +22,7 @@ Pointers and already-paid-for rules only; detail lives elsewhere.
   6m37s and never finished. The helper path **has a space in it**, so `-c credential.helper="!$GCM"`
   fails with `/c/Program: No such file or directory` (`!` goes through sh, which word-splits it). Use
   the tracked `tools/gcm_wrap.sh`: `git -c credential.helper= -c credential.helper='!tools/gcm_wrap.sh'
-  push origin main` (~23s). `git status` always says `[gone]` — verify with
+  push origin main`. `git status` always says `[gone]` — verify with
   `git ls-remote origin refs/heads/main` vs `git rev-parse HEAD`, never the push message or exit code.
   Backticks in `-m` are eaten by bash: use `git commit -F <file>`.
 
@@ -34,7 +34,7 @@ simulated fills**. **The account is a DEMO one** (`trade_mode == 0`) despite LIV
 `HM_dashboard.bat` is **UI + REST API only** (`mt5_client=None`, so `auto-selection` → **503** and
 `MT5` → `DISCONNECTED`: expected, not a fault). Check `psutil.Process(pid).cmdline()` before calling
 the data path broken. **Never finish a task with the dashboard alive only as a session background
-task** — point at `HM_dashboard.bat` and say plainly that closing the window stops it.
+task** — point at `HM_dashboard.bat` and say closing the window stops it.
 
 **Routes:** `/` = `dashboard.html` (primary). `/classic` = `index.html` (old terminal). `/stocks`,
 `/india`, `/options`, `/console`. **`verify_ui_layout.js` does not cover `/classic`** — measure it with
@@ -50,9 +50,9 @@ regression. Per-round history: `YYYY-MM-DD.md`.
 
 `tools/` — `verify_ui_live` · `verify_dashboard_render` · `verify_terminal_render` ·
 `verify_copilot_render` · `verify_dashboard_nav` · `verify_ui_layout` · `verify_phone_nav` ·
-`audit_endpoints` · `audit_wiring` · `audit_encoding`; all green. **Counts + each one's failure mode
-(most look like a regression): `TRAPS.md` § Tool harnesses, § Measuring layout.**
-`tools/gcm_wrap.sh` is the required push credential helper (see Non-negotiables).
+`audit_endpoints` · `audit_wiring` · `audit_encoding`; all green. Counts + each one's failure mode
+(most look like a regression): `TRAPS.md` § Tool harnesses, § Measuring layout.
+`tools/gcm_wrap.sh` = the required push credential helper.
 
 ## Rules worth repeating
 
