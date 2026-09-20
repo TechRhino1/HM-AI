@@ -1698,3 +1698,54 @@ calibration routine will silently learn from), but it rewrites live trade histor
 
 `tools/repair_forecast_column.py` reports by default and only writes with `--apply`. Same shape as the
 root `jarvis_history.db` question: offer the repair, do not perform it.
+
+### 40x — A mutation must reproduce the OLD BEHAVIOUR, not merely break
+
+Reverting `fetch_trade` by rewriting its WHERE clause to `WHERE ticket = -1` while still supplying the
+parameter raised `sqlite3.ProgrammingError` (statement uses 0 bindings, 1 supplied). The orchestrator's
+`except Exception` around the journal read swallowed it into `pending = None` — which is the failure
+mode of a *different* mutation. Two mutations collapsed into one and produced two bogus reds
+(`test_an_unknown_ticket_is_none` failed for a reason that had nothing to do with the fix).
+
+**Rule: a mutation is only evidence if it restores what the code used to do.** "Makes it throw" is not
+"makes it wrong" — an exception that a broad `except` swallows can masquerade as several different
+regressions at once. Keep the shape legal (`WHERE ticket = ? AND 1 = 0`) and re-run the suite before
+trusting the count.
+
+### 40x2 — `float(x or 1.0)`: None and an honest 0.0 both become 1.0
+
+Found in three places at once while fixing AI6:
+
+* `strategy_bandit.py` — `r_mult = max(0.1, min(5.0, float(r_multiple or 1.0)))`
+* `online_ml_predictor.py` — `return_weight = max(0.5, min(3.0, abs(float(r_multiple or 1.0))))`
+* `ensemble_bandit.py` — `max(0.5, r_multiple)` → `TypeError` on None (no `or` guard at all)
+
+So an explicit `None` ("not measured") and a real `0.0` ("measured, zero") were both banked as +1R.
+**Grep `or 1.0` / `or 0.0` on any numeric path before claiming a value is optional** — the `or` idiom
+silently deletes the distinction the codebase is trying to establish. A default belongs in the
+signature (`r_multiple: Optional[float] = None`), not in a coercion.
+
+### 40x3 — A missing stop is not a zero stop
+
+`risk_dist = abs(entry - sl)` with `sl = 0.0` yields `entry` — on EURUSD that reads as 11,000 pips of
+risk, and the resulting R is a tiny non-zero number that looks measured. `record_trade` defaults `sl`
+to `0.0`, so an unstored stop is indistinguishable from a real one unless you test for it.
+
+Same family as `_is_finite(0.0)` being True: **a sentinel that is a legal value cannot be detected by
+arithmetic.** Test the field, not the result.
+
+### 40x4 — Withhold a recorded quantity, default a hyperparameter
+
+An unknown R reaches two consumers and must be treated differently in each:
+
+* Bandit `rewards` is a **recorded quantity** denominated in R → an unknown R must leave it alone. But
+  the win/loss IS measured, so still record the trade (`pulls`, Beta).
+* `update_online`'s `return_weight` is a **hyperparameter of the update** — nothing later reads it as
+  "this trade made 1R", and the label being learned (`is_win`) is measured regardless → run the update
+  and **omit** the argument, letting the declared default apply.
+
+I first skipped the ML update entirely; the suite caught it
+(`test_d1_online_ml_and_trade_memory_learning_loop`, 197 != 198). **Discarding a real labelled sample
+to avoid guessing a step size is the wrong trade** — and note the failing fixture was unrealistic (it
+set only `features`, no geometry), so the temptation was to "fix" the test. Fix the fix instead; the
+production path always stores `entry`/`sl`/`risk_dist`.

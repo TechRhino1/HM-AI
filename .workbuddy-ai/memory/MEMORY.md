@@ -33,25 +33,25 @@ gap: **`TRAPS.md` § Running the platform**.
 
 ## Baselines
 
-**pytest 2866 passed / 0 failed / 20 deselected** (2026-09-20) — green, not tolerated. Parse
+**pytest 2894 passed / 0 failed / 20 deselected** (2026-09-20) — green, not tolerated. Parse
 `--junit-xml=...`: the harness truncates pytest's stdout tail, so `-rf` never prints. Weekend-only
-failures are a clock dependency, not a regression — `TRAPS.md` § 40n.
+failures are a clock dependency — **`TRAPS.md` § 40n**.
 
 **Run the suite with `env -u HTTP_PROXY -u HTTPS_PROXY -u http_proxy -u https_proxy NO_PROXY='*'` and
-`--basetemp=.scratch/ptmp-$TS`** (UNIQUE per run) — a proxy hangs localhost HTTP; cleaning >50 temp
-entries trips the bulk-delete guard: exit 1 with every test passing. A *fixed* one is worse: pytest
-removes it at session start.
+`--basetemp=.scratch/ptmp-$TS`** — a proxy hangs localhost HTTP; cleaning >50 temp entries trips the
+bulk-delete guard: exit 1 with every test passing. A *fixed* one is worse: pytest removes it at
+session start.
 
-`tools/` — 11 verify/audit harnesses, all green; list, counts and failure modes: **`TRAPS.md` § Tool
-harnesses**. `tools/gcm_wrap.sh` = the push helper.
+`tools/` — 11 harnesses, all green; counts and failure modes: **`TRAPS.md` § Tool harnesses**.
+`tools/gcm_wrap.sh` = the push helper.
 
 ## Rules worth repeating
 
 * **Execution mode must not gate market data.** Paper skips `mt5.initialize()`, so the data path must
   call `broker_symbols.ensure_mt5_terminal()` itself or every frame becomes synthetic. Health flags
-  must be **measured**, not inferred from the execution login. **Never call `mt5.initialize()` on a
-  request path** — with no terminal it holds the GIL forever and one request wedges the server (D18);
-  only not making the call is a fix, and the proof must come from outside the process.
+  must be **measured**, not inferred. **Never call `mt5.initialize()` on a request path** — with no
+  terminal it holds the GIL forever and one request wedges the server (D18); only not making the call
+  is a fix, and the proof must come from outside the process.
 * **The UI has no request timeout** — an empty result must still repaint; a watchdog must state a
   stall.
 * **MT5 times are BROKER-SERVER time, not UTC** — use `jarvis/data/broker_time.py`. Local probes:
@@ -60,7 +60,7 @@ harnesses**. `tools/gcm_wrap.sh` = the push helper.
   instances) — read the real payload before writing its reader.
 * **A refused order is answered with HTTP 200** — decide from the body's `status`
   (`FAILED`/`BLOCKED`), never `res.ok`. Broker sends `reason`; server validation sends `error` with
-  400. Contract pinned by `test_action_response_contract.py`.
+  400.
 * **`executed_trades.timestamp` is not the entry time** — `database.py:287` overwrites it with the
   EXIT time; **neither column is safe**. Run `tools/audit_trades.py`. **Shared defect? grep the other
   front end first.**
@@ -71,17 +71,19 @@ harnesses**. `tools/gcm_wrap.sh` = the push helper.
 * **A price must be finite AND `> 0`.** `_is_finite(0.0)` is True, and an empty frame gives
   `bid = 0.0` — from which an entry was minted and a **negative** stop passed the last gate. One shared
   predicate, `schemas.is_observed_price`. C2 closed.
-* **A label must describe the thing it names.** Both engines reported the **anchor price's**
-  provenance as the **series'** (D5, fixed via `CandleSeries.source`); `expected_value` was overwritten
-  with the outcome on close (112/112) and `ai_score` fabricated as `85.0` (AI5, 84 rows).
-* **Pruning per-ticket state on close destroys the only record of the path** — the monitor dropped the
-  extremes, so the close hardcoded `mfe=0.0` on 36/36 rows. D19: retain, NULL when unsampled (a
-  sampled lower bound, not bar high/low).
+* **A label must describe the thing it names.** Provenance reported for the anchor price, not the
+  series (D5); `expected_value` overwritten with the outcome (112/112); `ai_score` fabricated `85.0`.
+* **Pruning per-ticket state on close destroys the only record of the path** — the close hardcoded
+  `mfe=0.0` on 36/36. D19: retain, NULL when unsampled.
 * **Truncating values cannot shrink a payload spread across many small fields** — eliding every field
-  over 256 B left the 63 KB snapshot at 94%. Drop *fields*: the digest is 33% (`get_state_digest`).
+  over 256 B left the 63 KB snapshot at 94%. Drop *fields*: 33% (`get_state_digest`).
 * **A hung native call holds the MT5 lock forever** — `TimeoutGuard` bounds the *caller*, not the lock;
-  5/5 later workers wedged. `TrackedRLock` bounds the wait and names the holder. Keep the serialisation:
-  MT5's bindings are not thread-safe.
+  5/5 wedged. `TrackedRLock` bounds the wait and names the holder. Keep serialisation: MT5 bindings
+  are not thread-safe.
+* **Unknown R: withhold a recorded quantity, default a hyperparameter.** Bandit `rewards` is
+  denominated in R → leave it alone, but the win/loss IS measured, so still record the trade. In
+  `update_online` R only weights the gradient → omit the arg (None coerces to +1R). `float(x or 1.0)`
+  turns `0.0` into 1.0 too. AI6.
 
 ## Signal quality — **the entry signal has no measured edge.**
 
