@@ -45,10 +45,16 @@ loads *only* in `index.html` (`dashboard.html` uses `theme_terminal.css`).
 
 ## Baselines
 
-**pytest 2531 / 2528 passed / 3 failed / 20 deselected.** The 3 are weekend-only:
-`test_market_data_independence.py` asserts `freshness == STALE` while
-`SessionEngine.get_market_trading_status()` correctly answers `MARKET_CLOSED` on a Saturday — not a
-regression.
+**pytest 2646 passed / 0 failed / 20 deselected** (2026-09-20). The 3 long-standing
+`test_market_data_independence` failures are **fixed, not tolerated**: the cold-history warm-up only
+runs on a STALE verdict and `classify_bar_freshness` answers `MARKET_CLOSED` inside the weekly close,
+so a ~20h-old bar was STALE Mon-Fri and MARKET_CLOSED at weekends — a wall-clock dependency, now
+pinned by a `weekday_market` fixture. A 3-failure weekend run is no longer the baseline. Run the
+suite with `--junit-xml=...` and parse that: the harness truncates pytest's stdout tail, so `-rf`
+never prints.
+
+**Run the suite only with `env -u HTTP_PROXY -u HTTPS_PROXY -u http_proxy -u https_proxy NO_PROXY='*'`**
+(the sandbox exports a proxy that makes localhost HTTP hang).
 
 `tools/` — `verify_ui_live` · `verify_dashboard_render` · `verify_terminal_render` ·
 `verify_copilot_render` · `verify_dashboard_nav` · `verify_ui_layout` · `verify_phone_nav` ·

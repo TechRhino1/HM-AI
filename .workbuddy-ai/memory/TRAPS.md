@@ -1289,3 +1289,30 @@ terminal, and `/api/diagnostics` honestly reports `MT5: RECONNECTING`, `DATA_FEE
   check it *both* with the platform running and stopped before blaming the platform. Here the failure
   set was byte-identical in both cases, which ruled out the live server in one measurement.
 
+## Round 40n — traps added
+
+* **A latched "is it up" flag cannot answer "is it up now".** `terminal_ready()` latches True on the
+  first successful attach and never re-checks — correct for its documented job, but **all three of its
+  consumers were asking whether the broker link is up right now**. Once the latch is True and the
+  terminal dies, every synthetic frame is read as "the broker does not offer this symbol", so the
+  orchestrator refuses to decide for *every* symbol: the radar empties and nothing trades, silently,
+  with a log line that blames the symbol. Use `terminal_live()` (latch **and** process still running;
+  1.96 ms measured). **Grep every consumer before trusting a cached health flag** — health must be
+  measured, not inferred.
+
+* **A weekend is not a stalled feed — and it is not a stable test either.** `classify_bar_freshness`
+  answers `MARKET_CLOSED` inside the weekly close, so any test asserting `STALE` on an aged bar passes
+  Mon-Fri and fails at the weekend. The cold-history warm-up is gated on STALE, which is how 3 tests
+  in `test_market_data_independence` failed every weekend for no reason. Pin the calendar
+  (`weekday_market` fixture); keep the weekend rule in its own test.
+
+* **To prove a wall-clock dependency, extract the pre-fix file and force the clock** —
+  `git show HEAD:tests/x.py > .scratch/orig/x.py`, then run it with a one-line pytest plugin that
+  forces the branch. Arguing about it is slower and less convincing than watching the same 3
+  assertions fail on demand.
+
+* **`--junit-xml=` is the only reliable way to read a pytest result here.** The harness truncates the
+  stdout tail (a `[safe-delete]` note about pytest's temp dir replaces the summary), so `-rf` and the
+  final counts are simply never printed. Write XML and parse it.
+
+
