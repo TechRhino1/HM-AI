@@ -188,8 +188,42 @@ class AcquisitionEngine:
         resolved = self.mt5_client.resolve_symbol_name(symbol)
         tf_const = TIMEFRAME_MAP.get(timeframe.upper(), TIMEFRAME_MAP["H1"])
 
+        # `MT5Client.resolve_symbol_name` returns the input UNCHANGED whenever
+        # the client is paper, or simply not connected — which is every
+        # historical/backtest process, since those never place orders. Asking
+        # MT5 for "XAUUSD" then returns 0 bars (this broker calls it "GOLD.i#"),
+        # and an empty result is indistinguishable from "no history for this
+        # range", so the run fell through to the refusal path. The terminal is
+        # known to be up by the time we get here (see below), so resolve against
+        # it explicitly rather than trusting a client that cannot resolve.
+        if resolved == symbol:
+            try:
+                from jarvis.data.broker_symbols import resolve_broker_symbol
+
+                resolved = resolve_broker_symbol(symbol) or resolved
+            except Exception as exc:
+                logger.debug("broker symbol resolution unavailable for %s: %s", symbol, exc)
+
         if not MT5_AVAILABLE:
             logger.warning("MT5 library unavailable; generating calibrated rates.")
+            return self._generate_calibrated_rates(symbol, timeframe, start_dt, end_dt)
+
+        # The terminal has to be initialized in THIS process. `MT5_AVAILABLE`
+        # only means the package imported; every mt5.* call below returns None
+        # with "No IPC connection" until `initialize()` has run here — measured:
+        # `copy_rates_from_pos` before initialize -> None / (-10004, 'No IPC
+        # connection'), immediately after -> 5 bars. A backtest process never
+        # places orders, so nothing else ever initialised it, and the empty
+        # result looked exactly like "the broker has no history for this range":
+        # it fell through to the refusal path and every historical run failed.
+        # Same defect class as the market-data path; same gate.
+        from jarvis.data.broker_symbols import ensure_mt5_terminal
+
+        if not ensure_mt5_terminal():
+            logger.warning(
+                "MT5 terminal not available in this process; cannot download "
+                "%s %s history.", symbol, timeframe,
+            )
             return self._generate_calibrated_rates(symbol, timeframe, start_dt, end_dt)
 
         with DataFeedEngine._mt5_fetch_lock:

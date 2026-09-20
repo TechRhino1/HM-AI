@@ -1189,3 +1189,26 @@ Measured on a live `HM_start.py live` run, MT5 down.
 * `py-spy` is installed in the managed runtime:
   `C:/Users/Itrai/.workbuddy-ai/binaries/python/versions/3.13.12/Scripts/py-spy.exe dump --pid <pid>`.
   It works on Windows here and is the fastest way to prove where a live process is stuck.
+
+## Historical/backtest and history API: readiness is per-process, and an inert filter is stale code (round 40k)
+
+* **`MT5_AVAILABLE` is not readiness — it only means the package imported.** Every `mt5.*` call
+  returns `None` with `(-10004, 'No IPC connection')` until `initialize()` has run **in this
+  process**. A backtest/historical process never places an order, so nothing ever initialised it,
+  and `copy_rates_range` "found no history" — indistinguishable from an empty range, so the run fell
+  through to the refusal path. Measured: `copy_rates_from_pos("GOLD.i#")` **before** `initialize()`
+  -> `None` / `(-10004, 'No IPC connection')`; **immediately after** -> 5 bars.
+  `acquisition.download_range_from_mt5` now dials `broker_symbols.ensure_mt5_terminal()` first.
+* **`MT5Client.resolve_symbol_name` returns the input UNCHANGED whenever the client is in paper mode
+  or simply not connected** — i.e. in every historical process. Asking for `XAUUSD` returned 0 bars
+  (this broker lists it as `GOLD.i#`). Only fill in a resolution the client failed to make; never
+  override one it did make.
+* **A query-param filter that answers identically for every value is almost always stale code, not a
+  bug.** Measured: `/api/history?origin=broker|paper|synthetic|nonsense` all returned the same 50
+  rows. Diagnosis is one comparison — file mtime vs the listener's `create_time()`: server started
+  14:15:54, `server.py` edited 14:23:38. *The live server does not hot-reload.* After restart:
+  `broker` -> 200 rows all broker, `paper`/`synthetic` -> 0, `nonsense` -> 0 (it selects nothing
+  rather than widening), and every row carries `origin`.
+* **A route that merges broker rows must tag them.** The MT5 deal merge appended rows with no
+  `origin` key (16 of 50); a client filtering on `origin` then renders the empty state on success —
+  the "frontend reads a field the server never sends" failure again.

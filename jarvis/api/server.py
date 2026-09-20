@@ -598,10 +598,27 @@ class JarvisRequestHandler(BaseHTTPRequestHandler):
                     # fetch below. It used to reach only MT5, so the Window
                     # filter left every journal row unfiltered — a "1 day"
                     # window answered with a month of trades.
-                    trades = TRADE_DB.fetch_recent_trades(limit=limit, days=days) or []
+                    # D1: `origin` is how a caller asks for real money only.
+                    # Absent, it changes nothing; present but unrecognised, it
+                    # selects nothing rather than quietly widening to
+                    # everything — a filter that matches everything is
+                    # indistinguishable from no filter, and far more dangerous
+                    # because the caller believes it filtered.
+                    raw_origin = str((query.get("origin") or [""])[0]).strip()
+                    origin_filter = [p.strip() for p in raw_origin.split(",") if p.strip()] or None
+
+                    trades = TRADE_DB.fetch_recent_trades(
+                        limit=limit, days=days, origin=origin_filter) or []
 
                     # Also fetch live closed deals from MT5 broker account
-                    if hasattr(self, "mt5_client") and self.mt5_client and getattr(self.mt5_client, "is_connected", False):
+                    # Deals merged in from MT5 are broker rows, so they only
+                    # belong in an answer that is allowed to contain broker
+                    # rows. Appending them under `origin=paper` would hand back
+                    # real money inside a result the caller asked to be
+                    # simulated — the exact mix D1 exists to prevent.
+                    if (hasattr(self, "mt5_client") and self.mt5_client
+                            and getattr(self.mt5_client, "is_connected", False)
+                            and (origin_filter is None or "broker" in origin_filter)):
                         import MetaTrader5 as _mt5
                         mt5_deals = _mt5.history_deals_get(datetime.now() - timedelta(days=days), datetime.now())
                         if mt5_deals:
@@ -638,6 +655,16 @@ class JarvisRequestHandler(BaseHTTPRequestHandler):
                                             "timestamp": datetime.fromtimestamp(d.time, tz=timezone.utc).isoformat(),
                                             "closed_at": datetime.fromtimestamp(d.time, tz=timezone.utc).isoformat(),
                                             "executor": exec_tag,
+                                            # D1: these rows are broker deals
+                                            # merged in from MT5, so their
+                                            # origin is `broker` by definition.
+                                            # Without the key a client filtering
+                                            # on `origin` matches nothing and
+                                            # renders the empty state on
+                                            # success — the exact failure of a
+                                            # frontend reading a field the
+                                            # server never sends.
+                                            "origin": "broker",
                                             "realized_pnl": round(float(d.profit), 2),
                                             "profit": round(float(d.profit), 2)
                                         })
