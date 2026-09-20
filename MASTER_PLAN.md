@@ -135,7 +135,7 @@ attribution and reentrancy, which neither mutation disturbs.
 | AI2 / AI3 | `triple_barrier_label` and MFE/MAE are 0 on every row | H | S | ✅ **FIXED** 2026-09-20 — D10 derives the label at close from the stored geometry; D19 measures MFE/MAE from the retained path, NULL when unsampled |
 | AI9 | Walk-forward validator is dead; optimizer output never reaches trading | H | M |
 | AI10 | Calibration fitted to its own output on ≤20 rows | H | M | ✅ **FIXED** 2026-09-20 — the refit now reads the persisted pre-calibration forecast (`raw_win_prob`, migration 2), needs 10 observations per bin, shrinks against the existing curve, and is forced monotonic. Measured: the old fit collapsed the whole curve (0.59→0.236, 0.86→0.464) and inverted it (0.75→0.496 but 0.95→0.464). See M3 below |
-| AI4 | Gate/sizing probability excludes the only fitted model | H | M |
+| AI4 | Gate/sizing probability excludes the only fitted model | H | M | ✅ **RESOLVED — the stated fix is REJECTED on measurement.** `MetaLabeler` is the only batch-fitted model, and it was measured 2026-09-15: **test AUC 0.481** (train 0.746) window-only, **0.479** (train 0.783) with the primary model's outputs, and top-decile selection **LOWERED** the win rate (0.341 vs a 0.359 base). Folding a coin flip into the probability that sizes positions would be a regression, not a fix. The real sub-defect — an unevaluated check being indistinguishable from a confirmed one — **is** fixed: see M3 below |
 | A10 / A9 | `/api/history` re-syncs 30 days on every read; SSE pushes 144KB/s | M | M | ✅ **SSE FIXED** 2026-09-20 — measured 63,276 B/snapshot → 21,019 (33%) via `get_state_digest()`; `/api/history` half was already done |
 | ~~P5~~ | ~~MT5 connection at import time~~ | H | S | **Fixed 2026-09-20** (partial — see below). `server.py:34` built `MT5Client(mode="live")` in the **class body** and `historical_engine.py:265` built one at **module scope**. With no terminal running `mt5.initialize()` blocks in a native call **holding the GIL**, so `Thread.start()` can never complete: `import jarvis.api.server` never returned and **pytest could not even collect** (13min+, no output — and `faulthandler` itself could not fire, which is how you know it is the GIL). Both now pass `auto_init=False`; `MT5Client._reconnect_if_needed()` already connects on first use, so nothing that talks to the broker changes behaviour. **Remaining:** any *runtime* path that really calls `mt5.initialize()` without a terminal still wedges the interpreter — `initialize()` takes no `timeout` argument in MetaTrader5 5.0.6180, so it cannot be bounded from Python. Running the suite needs a terminal (or `JARVIS_BACKTEST_MODE=1`). |
 | P6 | sklearn on the critical import path (2.35s of 2.91s) | M | S |
@@ -551,7 +551,8 @@ AI2, AI3, AI5, AI6, AI7, AI8, AI9.
 **Exit:** a backtest run twice produces byte-identical results; the learning loop survives a
 restart; walk-forward geometry either reaches live levels or is labelled advisory in the UI.
 
-**Done so far:** AI2/AI3 (labels, via D10 + D19), **AI5**, **AI6**, **AI8** and **AI10** (all below).
+**Done so far:** AI2/AI3 (labels, via D10 + D19), **AI5**, **AI6**, **AI8**, **AI10** and **AI4**
+(all below — AI4 resolved as "won't fix as stated", with the reporting defect fixed).
 
 **AI5 — the forecast is no longer overwritten.** Measured on the live journal: **112/112 closed rows**
 had `expected_value == realized_pnl`, and **84 rows** carried `ai_score = 85.0`. Two write sites did it:
@@ -715,6 +716,36 @@ direct-binning edge case, the reported bin count, and persistence of a recorded 
 at all** — 22 existing closed rows produce zero updates. That is intended: a curve that cannot be
 fitted honestly should not move. It also means the current shipped curve stays in force until roughly
 10 trades accumulate *per bin*, which is the point.
+
+**AI4 — the stated fix is rejected; the reporting defect is fixed.** The finding says the gate/sizing
+probability "excludes the only fitted model". `MetaLabeler` *is* the only batch-fitted model, and it
+was already measured on 2026-09-15 (`tools/train_meta_labeler.py`, `tools/audit_meta_gate.py`; 183
+days of real bars, 20 symbols, purged and embargoed forward splits):
+
+| variant | train AUC | **test AUC** |
+|---|---|---|
+| window features only | 0.746 | **0.481** |
+| + primary-model outputs | 0.783 | **0.479** |
+
+and selecting the top decile by predicted P(win) **lowered** the win rate: **0.341 vs a 0.359 base**.
+A test AUC of 0.48 is a coin flip and the train/test gap is outright overfitting, so wiring this
+model into the probability that gates and sizes trades would add noise to position sizing. **The fix
+as filed is therefore not being applied**, and `tests/test_meta_label_gate_is_explicit.py` asserts the
+blend still excludes it — so if someone wires it in later, the measurement is revisited rather than
+forgotten.
+
+What *was* a genuine defect is the reporting. When the model is absent, or there is too little
+history, `predict_proba` returns `None` and the check was simply **left out of `quality_gate.checks`**
+— and because a missing check does not block, "we never evaluated this" was indistinguishable from
+"we evaluated it and it confirmed". `TradeQualityGateResult` now carries `not_evaluated`, both
+non-evaluated paths record the check there, and both serialisation sites (`DecisionObject.to_dict`
+and the decision payload in `server.py`) emit it, so it is not write-only.
+
+**Coverage honesty:** the branch is inline in `DecisionEngine.evaluate()`, a ~1000-line method no test
+can drive without a full market context, analyst reports and regime output. Those two paths are pinned
+by **source assertion**, and **3 of 10 tests go red** under `.scratch/mutate_ai4.py` — all
+source-level. The behavioural tests (an untrained `predict_proba`, a trained one, the schema default)
+do not depend on the mutation and are not counted as evidence for it.
 
 ### M4 — Raise the architecture ceiling *(~3 weeks)*
 A2/A4 engine process split, A1 one radar contract, A13 shared frontend modules, P10 packaging,

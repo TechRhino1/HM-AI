@@ -227,6 +227,10 @@ class TradeQualityGateResult:
     passed: bool
     checks: Dict[str, bool]
     failing_reasons: List[str] = field(default_factory=list)
+    # AI4: checks that were NOT evaluated on this decision — no model, or too little
+    # history. A check that is missing from `checks` is otherwise indistinguishable
+    # from one that passed, so "did not block" silently reads as "confirmed".
+    not_evaluated: List[str] = field(default_factory=list)
 
 @dataclass
 class DecisionObject:
@@ -311,7 +315,11 @@ class DecisionObject:
             "quality_gate": {
                 "passed": self.quality_gate.passed,
                 "checks": self.quality_gate.checks,
-                "failing_reasons": self.quality_gate.failing_reasons
+                "failing_reasons": self.quality_gate.failing_reasons,
+                # AI4: without this, "this check was never evaluated" is invisible —
+                # the check is absent from `checks` and does not block, which reads
+                # exactly like "evaluated and confirmed".
+                "not_evaluated": list(self.quality_gate.not_evaluated)
             },
             "waiting_reasons": self.waiting_reasons,
             "rejection_reasons": self.rejection_reasons,

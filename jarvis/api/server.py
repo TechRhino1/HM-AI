@@ -317,6 +317,7 @@ class JarvisRequestHandler(BaseHTTPRequestHandler):
                                     "gate_passed": d.quality_gate.passed if d.quality_gate else False,
                                     "failing_reasons": d.quality_gate.failing_reasons if d.quality_gate else [],
                                     "checks": d.quality_gate.checks if d.quality_gate else {},
+                                    "not_evaluated": list(d.quality_gate.not_evaluated) if d.quality_gate else [],
                                     "waiting_reasons": getattr(d, "waiting_reasons", []),
                                     "rejection_reasons": getattr(d, "rejection_reasons", []),
                                     "risk_factors": d.risk_factors or [],

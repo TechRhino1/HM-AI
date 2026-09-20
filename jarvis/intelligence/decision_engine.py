@@ -1096,16 +1096,30 @@ class DecisionEngine:
         meta_label_prob = None
         gate_policy_decision = "PASS"
         softened_gates: List[str] = []
-        if recent_candles and len(recent_candles) >= self.meta_labeler.MIN_WINDOW:
+        META_CHECK = "ML Meta-Label Confirmation"
+        if not (recent_candles and len(recent_candles) >= self.meta_labeler.MIN_WINDOW):
+            # AI4: too little history to evaluate. The check is simply absent from
+            # `checks` today, and "absent" is unreadable downstream — it does not block,
+            # so it is indistinguishable from "evaluated and confirmed".
+            quality_gate.not_evaluated.append(META_CHECK)
+        else:
             _bias = 1.0 if tentative_bias == "BUY" else (-1.0 if tentative_bias == "SELL" else 0.0)
             meta_label_prob = self.meta_labeler.predict_proba(recent_candles, bias=_bias)
-            if meta_label_prob is not None:
-                quality_gate.checks["ML Meta-Label Confirmation"] = meta_label_prob >= self.meta_labeler.MIN_PROB
+            if meta_label_prob is None:
+                # AI4: no fitted model (or the prediction failed). Staying neutral here
+                # is deliberate and evidence-based, not an oversight — see
+                # MetaLabeler._load: measured test AUC 0.481 with top-decile selection
+                # LOWERING the win rate (0.341 vs a 0.359 base). Wiring this model into
+                # the gate or the sizing probability would add a coin flip to the number
+                # that sizes positions. But "neutral" must not read as "confirmed".
+                quality_gate.not_evaluated.append(META_CHECK)
+            else:
+                quality_gate.checks[META_CHECK] = meta_label_prob >= self.meta_labeler.MIN_PROB
                 quality_gate.failing_reasons = [
-                    r for r in quality_gate.failing_reasons if r != "ML Meta-Label Confirmation"
+                    r for r in quality_gate.failing_reasons if r != META_CHECK
                 ]
                 if meta_label_prob < self.meta_labeler.MIN_PROB:
-                    quality_gate.failing_reasons.append("ML Meta-Label Confirmation")
+                    quality_gate.failing_reasons.append(META_CHECK)
                 quality_gate.passed = len(quality_gate.failing_reasons) == 0
                 failing_reasons = quality_gate.failing_reasons
                 gate_passed = quality_gate.passed
