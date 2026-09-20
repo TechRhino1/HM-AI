@@ -1357,3 +1357,84 @@ terminal, and `/api/diagnostics` honestly reports `MT5: RECONNECTING`, `DATA_FEE
   new tests red. If a test stays green under the mutation, it is pinning something else — e.g.
   `test_a_zero_take_profit_is_rejected` is satisfied by the geometry check, not the new positivity
   branch, so it is a behaviour pin and not proof of the fix.
+
+## Round 40p — traps added
+
+* **A label must describe the thing it names.** Both engines set `_last_data_source = "live"` when the
+  **anchor price** came from a live quote, while every bar was generated from
+  `np.random.RandomState(stable_seed(f"{symbol}_{tf}_{hour}"))`. A fully generated random walk was
+  therefore published to the UI as `data_source: "live"` — and `dashboard.js` renders that as a live
+  feed. **Ask which object a label is attached to, not just whether it is computed correctly.**
+  Reproducing the series from its own seed (max deviation `0.000020` = the 2dp rounding) is how you
+  *prove* a series was generated rather than observed.
+
+* **Provenance must travel WITH the data, not live on a singleton.** `_last_data_source` is
+  per-**instance** state on a module-level singleton (`STOCK_ENGINE`, `INDIA_ENGINE`) driven by a
+  `ThreadPoolExecutor(max_workers=16)` (`stock_service.py:57`), so another symbol can overwrite it
+  between the call and the read. A per-instance attribute is only safe if the instance is per-request.
+
+* **A `list` subclass is the low-blast-radius way to attach metadata to a sequence.** `CandleSeries(list)`
+  adds `source` / `anchor_source` / `is_synthetic` while keeping `pd.DataFrame()`, `len()`, iteration,
+  slicing, `+` and `json.dumps` working unchanged — each pinned by its own test, because "it is still a
+  list" is exactly the assumption a future refactor breaks.
+
+* **`mt5.initialize()` on a request thread holds the GIL forever with no terminal — and no Python-side
+  timeout can rescue it.** `TimeoutGuard` works by starting a thread, and no thread can start while the
+  GIL is held; `faulthandler` cannot even dump. So the **only bounded proof is from outside the
+  process**: run the call in a child, watch it stay alive past a deadline, kill it. Pre-fix: `child
+  STILL RUNNING after 25s -- killed`; post-fix: `child exited after 4.1s with rc=0`. **Only not making
+  the call is a fix** — `initialize()` takes no `timeout` in MetaTrader5 5.0.6180.
+
+* **Pin the mechanism, not the wall clock.** `test_mt5_read_path_is_bounded` asserts *"`initialize()` was
+  never called"*, not "returns within N seconds". A timing assertion **hangs the suite** when the guard
+  regresses, and fails for the wrong reason; a mechanism assertion fails immediately and exactly. A
+  probe that needs a real terminal to be *absent* should `pytest.skip` when one is running, or it is
+  simply wrong on a live box.
+
+* **When a mutation does not kill a test, decide which is wrong: the test or the mutation.** My first
+  D5 mutation killed 8 of 10 expected tests. The two `TestProviderProvenance` tests survived because the
+  mutation patched `se`/`ie`'s constants while the provider imports its **own** copy — a **gap in the
+  mutation, not a weak test**. Adding a provider-level neuter turned them red (8 → 10). Never accept
+  "it stayed green" as proof a test is worthless without checking that the mutation actually reached the
+  code path.
+
+* **A green test under mutation is not automatically a behaviour pin — classify it.** The 20 survivors
+  are: the `CandleSeries` type contract (9), "real bars are still `live`" + series shape (2), the
+  delegate consistency check (1), the MT5 short-circuit/unavailable/raising paths (6), a skipped probe
+  (1), a parametrisation (1). One of them — `test_the_delegate_reports_the_same_provenance` — is a
+  *consistency* pin and **not** a fix proof: under mutation both sides become `"live"` together and it
+  still passes. Say so explicitly rather than counting it as coverage.
+
+* **A repro that says "hypothesis disproved" may just be a flawed test.** My first D5 repro compared
+  `log(close / last_close)` shapes across a 40% price move and printed `identical : False`. The
+  hypothesis was right; the *metric* was wrong — 2dp rounding is relatively larger at the earlier bars.
+  Rebuilt on the generator's own return path, which is the measurement that actually holds.
+
+## Running the platform (round 40p — the detail moved out of MEMORY.md)
+
+* **Routes:** `/` and `/dashboard` → `dashboard.html` (primary). `/classic` → `index.html` (the old
+  terminal). `/stocks`, `/india`, `/options`, `/console`. `terminal.css` loads **only** in
+  `index.html`; `dashboard.html` uses `theme_terminal.css`. **`tools/verify_ui_layout.js` does not
+  cover `/classic`**, so a layout regression there is invisible to the harness that exists to catch
+  layout regressions.
+* **`HM_dashboard.bat` is UI + REST API only** — `start_server(mt5_client=None, orchestrator=None)`
+  has no broker client at all. So `auto-selection` → **503** and `MT5` → **DISCONNECTED** are the
+  *expected* answers from that launcher, not a fault. Before calling the data path broken, read
+  `psutil.Process(pid).cmdline()` and confirm which launcher is actually serving.
+* **Never leave the platform alive only as a session background task.** A background task dies with
+  the session and leaves a half-served platform behind; point the user at `HM_dashboard.bat` (or
+  `HM_start.py`) so the process has an owner.
+* **Some paths are readable but NOT writable** — `HM_dashboard.bat`, `HM_start.py`,
+  `jarvis/intelligence/decision_engine.py`. Write through a hardlink alias in `.scratch/_restore/`;
+  `open(alias, 'w')` **truncates the shared object** (see § Data integrity). `HM_dashboard.bat` was
+  emptied exactly this way while probing.
+
+## Tool harness: one edit per file per message (round 40p)
+
+* **Two `Edit` calls against the SAME file in one message: the FIRST one is silently lost.** Both
+  report `Successfully edited`, and the second one's `old_string` still matches because it was read
+  from the same pre-edit snapshot — so the first change is overwritten without any error. Observed
+  three times in one session while trimming `MEMORY.md` (a `.git/` reflow and a proxy-wording trim
+  both vanished; the paired second edit landed each time). **Symptom: you re-measure the file and the
+  byte count has not moved.** Always re-read or re-measure after a multi-edit message, and when the
+  edits are on one file, issue them one per message.

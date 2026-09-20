@@ -2865,6 +2865,7 @@
 
   var SOURCE_META = {
     live: { label: 'live', cls: 'buy', note: 'Read from a live provider.' },
+    synthetic_anchored: { label: 'modelled', cls: 'low', note: 'Every bar is generated; only the anchor price came from a live quote.' },
     calibrated_feed: { label: 'modelled', cls: 'low', note: 'Candles generated and anchored to a reference price, not read from a feed.' },
     synthetic: { label: 'modelled', cls: 'low', note: 'Modelled series; no live read was available.' },
     synthetic_fallback: { label: 'modelled', cls: 'low', note: 'Modelled series; no live read was available.' },
@@ -2877,8 +2878,14 @@
   /* Ordered strongest to weakest claim. Used to report the *weakest* source in
      a panel: if one row is a static reference price, the panel as a whole is not
      a live read, and labelling it "live" because most rows were would be exactly
-     the mistake the provenance markers exist to prevent. */
-  var SOURCE_STRENGTH = ['live', 'calibrated_feed', 'synthetic',
+     the mistake the provenance markers exist to prevent.
+
+     `synthetic_anchored` sits below `live` and above `calibrated_feed`: its anchor
+     is a current quote, but every bar is still generated. It exists because the
+     engines used to report the ANCHOR's provenance as the SERIES' — so a fully
+     generated series was published as `live` and rendered with the "Read from a
+     live provider" chip. */
+  var SOURCE_STRENGTH = ['live', 'synthetic_anchored', 'calibrated_feed', 'synthetic',
                          'synthetic_fallback', 'profile_reference', 'sample',
                          'mixed', 'unknown'];
 

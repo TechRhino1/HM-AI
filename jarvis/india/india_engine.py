@@ -12,7 +12,11 @@ from datetime import datetime, timezone, timedelta
 from jarvis.india.universe import get_india_profile, INDIA_UNIVERSE
 from jarvis.india.nse_rules import NSE_RULES
 from jarvis.data.determinism import stable_seed
-from jarvis.data.market_data_provider import fetch_real_candles
+from jarvis.data.market_data_provider import (
+    CandleSeries,
+    SOURCE_SYNTHETIC_ANCHORED,
+    SOURCE_CALIBRATED_FEED,
+)
 
 
 import concurrent.futures
@@ -36,14 +40,28 @@ class IndiaTechnicalEngine:
         """
         Returns OHLC candle series for the instrument.
         Generates geometrically accurate candles anchored to the live hydrated profile price.
+
+        Every bar here is GENERATED — this engine never reads a broker feed — so the series
+        is never labelled ``live``. The anchor's provenance is recorded separately, and the
+        series carries its own ``source`` (read it off the RETURN VALUE, not off
+        ``self._last_data_source``: this engine is a singleton and callers may run
+        concurrently).
         """
         profile = get_india_profile(symbol)
         live_price = float(profile.get("price") or profile.get("base_price", 1000.0))
         if live_price <= 0:
             live_price = float(profile.get("base_price", 1000.0))
 
-        source = profile.get("source", "calibrated")
-        self._last_data_source = "live" if source in ("tradingview", "mt5", "live") else "calibrated_feed"
+        # See stock_engine.generate_candles: reporting the ANCHOR's provenance as the
+        # SERIES' provenance is what published a synthetic random walk as `data_source:
+        # "live"`. This engine has no live-bar branch at all, so `live` was never right.
+        anchor_source = profile.get("source", "calibrated")
+        series_source = (
+            SOURCE_SYNTHETIC_ANCHORED
+            if anchor_source in ("tradingview", "mt5", "live")
+            else SOURCE_CALIBRATED_FEED
+        )
+        self._last_data_source = series_source
 
         volatility = float(profile.get("implied_volatility", 18.0)) / 100.0
         
@@ -112,7 +130,7 @@ class IndiaTechnicalEngine:
             })
 
         candles[-1]["close"] = round(live_price, 2)
-        return candles
+        return CandleSeries(candles, source=series_source, anchor_source=anchor_source)
 
     def _generate_synthetic_candles(
         self,
@@ -467,7 +485,9 @@ class IndiaTechnicalEngine:
             "multi_timeframe": multi_tf,
 
             "candles": candles,
-            "data_source": getattr(self, "_last_data_source", "synthetic_fallback"),
+            # Read the provenance off the SERIES, not off `self` — this engine is a
+            # singleton and the instance attribute can be overwritten by another symbol.
+            "data_source": getattr(candles, "source", "synthetic_fallback"),
             "bars_available": len(candles),
             "history_complete": len(candles) >= 120,
             "analyzed_at": datetime.now(timezone.utc).isoformat()

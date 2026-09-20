@@ -83,7 +83,7 @@ recommendations were rejected on verification (see §6) — one of them would ha
 | AI8 | `BacktestEngine` is not hermetic | H | M | Measured: live weights, live trade memory, live bandit state leak into backtests |
 | AI6 | Learning loop dies on restart; fallback R is fabricated | H | S | `_pending_features` is process-local; `r_multiple = 2.0/-1.0` invented |
 | C8 | Gross vs net P&L; no fee columns anywhere | H | M | `database.py:226` vs `state_synchronizer.py:73`; unmeasurable by construction |
-| D5 | Bar fallback is a synthetic random walk | H | M | `tradingview_provider.py:718-757`; callers cannot tell it from real data |
+| D5 | Bar fallback is a synthetic random walk | H | M | ✅ **FIXED** 2026-09-20 — provenance now travels *with* the series (`CandleSeries.source`); see M2 below |
 | D3 | No migration mechanism; two copies already drifted | H | M | `user_version=0` on all 9 DBs; root copy lacks `closed_at` |
 | A1 | Two radar producers, two contracts, three sort keys | H | M | UI can rank a different "best" than the engine that trades |
 | A2 | Parallel scan is a no-op — two process-wide MT5 locks | H | M | 39-task fan-out serializes; measured 2.16s cold sweep |
@@ -108,6 +108,7 @@ recommendations were rejected on verification (see §6) — one of them would ha
 | A11 | Layering inversion `data → india/stocks` (real 2-cycles) | M | L |
 | A13 | 45 duplicated frontend function names across pages | M | L |
 | D7–D17 | Registry 99% empty, `bar_idx` window-relative, no retention, write-only learning columns | M | S–M |
+| **D18** | **`/api/stocks/candles` calls `mt5.initialize()` unguarded — one request wedges the server** | **H** | **S** | ✅ **FIXED** 2026-09-20 — *found while building D5, not in any agent report.* `_ensure_mt5_connected` ended in a bare `initialize()`; it now asks `broker_symbols.ensure_mt5_terminal()`, which does not launch a terminal. See M2 below. |
 
 ### P3 — polish (ongoing)
 `A14–A17`, `D17`, `P8`, `P16`, and the long tail of hygiene findings.
@@ -211,6 +212,9 @@ D3 migrations, D1 `origin` column, D5 bar provenance, D10/D11 real labels, A10 r
 **Exit:** `user_version` set on every store; every row tagged `broker|paper|synthetic`; no read
 path performs a write; `triple_barrier_label` non-zero on closed rows.
 
+**Done so far:** D1 (`origin`, shipped), D5 (bar provenance, shipped), D18 (read path, shipped).
+**Still to do:** the D3 remainder, D10/D11 real labels, A10's SSE half.
+
 **Status (2026-09-20): D3 half done — the version stamp.** All 11 databases reported
 `user_version = 0`, so no file could declare what shape it was in, and two copies of
 `jarvis_history.db` (root and `data/`) have already drifted — the root copy has no `closed_at`.
@@ -275,6 +279,55 @@ held, so `faulthandler` cannot even dump. It stalled the whole suite at
 `test_paper_book_is_not_reported_by_a_disconnected_live_session`, which constructed a live client
 purely to assert it does *not* connect; that test now uses `auto_init=False`. This is the residual
 of P5: import-time construction is fixed, runtime `initialize()` cannot be bounded from Python.
+
+---
+
+**D5 — bar provenance: shipped.** The label described the wrong object. Both engines set
+`_last_data_source = "live"` when the **anchor price** came from a live quote
+(`stock_engine.py:59`, `india_engine.py:46`), while every bar was generated from
+`np.random.RandomState(stable_seed(f"{symbol}_{tf}_{hour}"))`. Measured
+(`.scratch/repro_d5_bar_provenance.py`): the returned series **reproduces from that seed** to within
+the 2dp rounding (max deviation `0.000020`), a 40% market move changes only its *scale*, and the last
+12% of bars is a **guaranteed monotonic surge** (`stock_engine.py:98`) — `rising=True`. So a fully
+generated random walk was published to the UI as `data_source: "live"`, and `dashboard.js` renders
+that as a live feed.
+
+Provenance now travels **with the data**, not on the engine: `CandleSeries(list)` carries `source`,
+`anchor_source` and `is_synthetic`. Being a `list` subclass keeps `pd.DataFrame()`, `len()`,
+iteration, slicing, `+` and `json.dumps` working unchanged. The vocabulary is
+`live` / `synthetic_anchored` (generated, anchored to a live quote) / `calibrated_feed` (generated
+from a static reference) — `calibrated_feed` was kept as its existing wire value deliberately,
+because `dashboard.js`'s `SOURCE_META` already renders it as "modelled". India's engine has **no
+live-bar branch at all**, so `live` was never correct there.
+
+That also removes a **race**: the engines are module-level singletons and the stocks screener drives
+them from a `ThreadPoolExecutor(max_workers=16)` (`stock_service.py:57`), so a per-instance
+`_last_data_source` could be overwritten by another symbol between the call and the read. The
+response now reads `getattr(candles, "source", ...)` off its own series.
+`tests/test_candle_provenance.py` (22 tests).
+
+**D18 — the read path called `initialize()`: shipped.** Found while building D5, because the D5
+repro **hung for two minutes**. `py-spy dump --pid 15468` showed the frame:
+`/api/stocks/candles` → `generate_candles` → `_try_mt5` → `_resolve_mt5_symbol` →
+`_ensure_mt5_connected` → **unguarded `mt5.initialize()`**. One HTTP request wedged the entire
+server — the same GIL hazard as P5, but now reachable at *runtime* from a route. Bounded proof from
+**outside** the process (`.scratch/prove_mt5_block.py`): pre-fix `child STILL RUNNING after 25s —
+killed`; post-fix `child exited after 4.1s with rc=0` returning `RETURNED 120`.
+`_ensure_mt5_connected` now checks `terminal_info().connected` and otherwise delegates to
+`broker_symbols.ensure_mt5_terminal()`, which never launches a terminal.
+`tests/test_mt5_read_path_is_bounded.py` pins the **mechanism** — "`initialize()` was never called" —
+rather than a wall-clock bound, so a regression fails for the right reason instead of hanging the
+suite.
+
+**Mutation-proved (both):** `.scratch/revert_d5_fixes.py` restores the pre-fix behaviour in four
+places (the read path's bare `initialize()`; both engines' `"live"` labels; `analyze_stock`'s read
+site; the providers returning a plain `list`) and turns **10** of the new tests red. The 20 that stay
+green are contract and invariant pins the mutation does not touch by design — the `CandleSeries`
+type contract (9), the "real bars are still `live`" and series-shape invariants (2), the delegate
+consistency check (1), and the MT5 short-circuit / unavailable / raising paths (6), plus the
+skipped-when-a-terminal-is-running probe (1) and one parametrisation. `test_the_delegate_reports_
+the_same_provenance` is honestly a *consistency* pin, not a fix proof: under mutation both sides
+become `"live"` together and it still passes.
 
 ### M3 — Make learning real *(~2 weeks)*
 AI2, AI3, AI5, AI6, AI7, AI8, AI9.

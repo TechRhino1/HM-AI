@@ -28,6 +28,54 @@ import datetime as _dt
 
 logger = logging.getLogger("jarvis.market_data")
 
+# ── Candle provenance ────────────────────────────────────────────────────────
+# A candle series must say where it came from. The engines used to report the
+# provenance of the ANCHOR PRICE as the provenance of the SERIES, so a fully
+# generated random walk anchored to a live quote was reported as "live"
+# (`stock_engine.py:59`, `india_engine.py:46`). Measured: a series rebuilt from
+# `stable_seed(f"{symbol}_{tf}_{hour}")` matched the returned bars to within the
+# 2dp rounding, i.e. no bar was ever observed — while `data_source` said "live",
+# and the last 12% of bars was a *guaranteed* monotonic surge (`stock_engine.py:98`).
+SOURCE_LIVE = "live"                              # bars read from a real feed
+SOURCE_SYNTHETIC_ANCHORED = "synthetic_anchored"  # bars generated, anchored to a live quote
+SOURCE_CALIBRATED_FEED = "calibrated_feed"        # bars generated from a static reference price
+
+# `calibrated_feed` keeps its existing wire value deliberately: `dashboard.js`
+# SOURCE_META already renders it as "modelled", and `test_integrity_fixes` asserts on
+# it. Only `synthetic_anchored` is new — the case that used to be mislabelled "live".
+SYNTHETIC_SOURCES = frozenset({SOURCE_SYNTHETIC_ANCHORED, SOURCE_CALIBRATED_FEED})
+
+
+class CandleSeries(list):
+    """A list of OHLCV dicts that knows where it came from.
+
+    A plain list cannot carry provenance, so the engines kept it in an instance
+    attribute (`_last_data_source`) on a module-level SINGLETON that the stocks
+    screener drives from a 16-thread pool (`stock_service.py:57`). Symbol A's label
+    could therefore be read while symbol B's response was being built. Attaching the
+    provenance to the series removes the shared state as well as the ambiguity.
+
+    A `list` subclass keeps every existing consumer working unchanged:
+    `pd.DataFrame(series)`, `len()`, iteration, slicing and `json.dumps` all behave
+    as they did for a plain list.
+    """
+
+    __slots__ = ("source", "anchor_source")
+
+    def __init__(self, candles, source=SOURCE_LIVE, anchor_source=None):
+        super().__init__(candles)
+        self.source = source
+        self.anchor_source = anchor_source
+
+    @property
+    def is_synthetic(self) -> bool:
+        """True when the bars were generated rather than observed."""
+        return self.source in SYNTHETIC_SOURCES
+
+    def __repr__(self):
+        return f"CandleSeries({list.__len__(self)} bars, source={self.source!r})"
+
+
 try:
     import MetaTrader5 as mt5
     MT5_AVAILABLE = True
@@ -130,14 +178,33 @@ _MT5_INDEX_BUILT: bool = False
 
 
 def _ensure_mt5_connected() -> bool:
-    """Check if MT5 is connected or initialize connection if available."""
+    """Check whether MT5 is connected, WITHOUT ever launching the terminal.
+
+    This used to end in a bare ``mt5.initialize()``. With no terminal running that
+    call blocks inside native code **holding the GIL** and never returns — measured:
+    a child process calling ``generate_candles("NVDA")`` was still alive after 25s
+    and had to be killed (``.scratch/prove_mt5_block.py``). Because the GIL is held,
+    no other thread runs either, so a single ``/api/stocks/candles`` request
+    (``stock_service.py:677``) wedged the entire server — the process stayed alive
+    and kept logging while answering nothing.
+
+    ``ensure_mt5_terminal`` is the read-path gate: it refuses to call
+    ``initialize()`` unless a terminal process is already running, throttles repeat
+    calls, and logs once per outage. Launching a terminal stays a BOOT-TIME decision
+    (``HM_start.py`` passes ``allow_launch=True``); a request thread must never make
+    it. When the process check cannot answer (no psutil) the gate falls through to
+    the old behaviour rather than inventing a dead terminal.
+    """
     if not MT5_AVAILABLE or mt5 is None:
         return False
     try:
         t_info = mt5.terminal_info()
         if t_info is not None and getattr(t_info, "connected", False):
             return True
-        return bool(mt5.initialize())
+        # `terminal_info()` is a cheap cached read, so reaching here means "not
+        # attached". Attach only if a terminal is already up.
+        from jarvis.data.broker_symbols import ensure_mt5_terminal
+        return ensure_mt5_terminal()
     except Exception as exc:
         logger.debug("MT5 connection check failed: %s", exc)
         return False
@@ -423,7 +490,11 @@ def get_calibrated_baseline_candles(
             "close": round(float(c), 4),
             "volume": v,
         })
-    return candles
+    return CandleSeries(
+        candles,
+        source=SOURCE_CALIBRATED_FEED,
+        anchor_source="calibrated_baseline",
+    )
 
 
 def fetch_real_candles(

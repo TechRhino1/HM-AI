@@ -1,7 +1,7 @@
 # HM-AI / HM Algo 2.0 — index
 
 Injected every session and **hard-truncated at ~6,520 bytes** — keep under that or the tail vanishes.
-Pointers and already-paid-for rules only; detail lives elsewhere.
+Pointers and paid-for rules only; detail lives elsewhere.
 
 * Root: **`MASTER_PLAN.md`** — ranked backlog + milestones M0–M5. **`AGENT_SYSTEM.md`** — the
   multi-agent coding system (roster, workflow, Definition of Done).
@@ -15,89 +15,81 @@ Pointers and already-paid-for rules only; detail lives elsewhere.
 
 * **`.git/` is not safe here.** Files vanish in the small hours (4 incidents; the last two followed
   `git rm` / `git stash push`). Commit and push early, **never `git stash`**, keep
-  `.git/backup/repo-<ts>.bundle --all` fresh. Some paths are readable but **not writable**
-  (`HM_dashboard.bat`, `HM_start.py`, `jarvis/intelligence/decision_engine.py`) — write via a
-  hardlink alias in `.scratch/_restore/`; `open(alias,'w')` **truncates the shared object**.
+  `.git/backup/repo-<ts>.bundle --all` fresh. Some paths are readable but **not writable** — write via
+  a hardlink alias in `.scratch/_restore/`; `open(alias,'w')` **truncates the shared object**. Which
+  paths: **`TRAPS.md` § Non-negotiables**.
 * **The live server does not hot-reload.** Python edits need a restart; static CSS/JS/templates are
   re-read per request. *A hang that does not reproduce in a fresh interpreter is a stale process.*
   `py-spy dump --pid <pid>` attaches without restarting; `netstat -ano | grep 8501` for the pid.
-* **Push: credential-selector bypass, immediately.** A plain `git push` produced a 0-byte log for
-  6m37s and never finished. The helper path **has a space in it**, so `-c credential.helper="!$GCM"`
-  fails with `/c/Program: No such file or directory` (`!` goes through sh, which word-splits it). Use
-  the tracked `tools/gcm_wrap.sh`: `git -c credential.helper= -c credential.helper='!tools/gcm_wrap.sh'
-  push origin main`. `git status` always says `[gone]` — verify with
-  `git ls-remote origin refs/heads/main` vs `git rev-parse HEAD`, never the push message or exit code.
-  Backticks in `-m` are eaten by bash: use `git commit -F <file>`.
+* **Push: bypass the credential selector immediately.** A plain `git push` produced a 0-byte log for
+  6m37s. The helper path **has a space in it**, so `-c credential.helper="!$GCM"` fails with
+  `/c/Program: No such file or directory`. Use `git -c credential.helper= -c
+  credential.helper='!tools/gcm_wrap.sh' push origin main`. `git status` always says `[gone]` — verify
+  with `git ls-remote origin refs/heads/main` vs `git rev-parse HEAD`, never the push message or exit
+  code. Backticks in `-m` are eaten by bash: use `git commit -F <file>`.
 
 ## Running the platform
 
 `HM_start.py [paper|live]` boots engine + MT5 client + web server — **real MT5 data; `paper` =
-simulated fills**. **The account is a DEMO one** (`trade_mode == 0`) despite LIVE execution mode, and
-`XMGlobal-MT5 5` *looks* like XM's real-account naming — **read `trade_mode`, never the server name**.
-`HM_dashboard.bat` is **UI + REST API only** (`mt5_client=None`, so `auto-selection` → **503** and
-`MT5` → `DISCONNECTED`: expected, not a fault). Check `psutil.Process(pid).cmdline()` before calling
-the data path broken. **Never leave the platform alive only as a session background task** — point
-at `HM_dashboard.bat`.
-
-**Routes:** `/` = `dashboard.html` (primary). `/classic` = `index.html` (old terminal). `/stocks`,
-`/india`, `/options`, `/console`. **`verify_ui_layout.js` does not cover `/classic`**; `terminal.css`
-loads *only* in `index.html` (`dashboard.html` uses `theme_terminal.css`).
+simulated fills**. **The account is DEMO** (`trade_mode == 0`) despite LIVE execution mode — **read
+`trade_mode`, never the server name**. **Never leave the platform alive only as a session background
+task** — point at `HM_dashboard.bat`. Routes, the `HM_dashboard.bat` caveat and the `/classic` gap:
+**`TRAPS.md` § Running the platform**.
 
 ## Baselines
 
-**pytest 2704 passed / 0 failed / 20 deselected** (2026-09-20) — a green baseline, not a tolerated
+**pytest 2734 passed / 0 failed / 20 deselected** (2026-09-20) — a green baseline, not a tolerated
 one. Run with `--junit-xml=...` and parse that: the harness truncates pytest's stdout tail, so `-rf`
-never prints. Weekend-only failures are a wall-clock dependency, not a regression — see
-**`TRAPS.md` § Round 40n**.
+never prints. Weekend-only failures are a wall-clock dependency, not a regression — `TRAPS.md` § 40n.
 
 **Run the suite only with `env -u HTTP_PROXY -u HTTPS_PROXY -u http_proxy -u https_proxy NO_PROXY='*'`**
-(the sandbox exports a proxy that makes localhost HTTP hang).
+(a sandbox proxy makes localhost HTTP hang).
 
-`tools/` — `verify_ui_live` · `verify_dashboard_render` · `verify_terminal_render` ·
-`verify_copilot_render` · `verify_dashboard_nav` · `verify_ui_layout` · `verify_phone_nav` ·
-`audit_endpoints` · `audit_wiring` · `audit_encoding` · `audit_trades` (read-only; needs
-`AUDIT_EQUITY=`); all green. Counts + each one's failure mode
-(most look like a regression): `TRAPS.md` § Tool harnesses.
-`tools/gcm_wrap.sh` = the required push credential helper.
+`tools/` — 11 verify/audit harnesses, all green; the full list, counts and each one's failure mode
+(most look like a regression): **`TRAPS.md` § Tool harnesses**. `tools/gcm_wrap.sh` = the required
+push credential helper.
 
 ## Rules worth repeating
 
 * **Execution mode must not gate market data.** Paper skips `mt5.initialize()`, so the data path must
   call `broker_symbols.ensure_mt5_terminal()` itself or every frame becomes synthetic. Health flags
-  must be **measured**, not inferred from the execution login.
-* **The UI has no request timeout anywhere** — an empty result must still repaint, and a first-paint
+  must be **measured**, not inferred from the execution login. **Never call `mt5.initialize()` on a
+  request path** — with no terminal it holds the GIL forever and one request wedges the whole server
+  (D18); only not making the call is a fix, and the proof must come from outside the process.
+* **The UI has no request timeout anywhere** — an empty result must still repaint; a first-paint
   watchdog must state a stall.
-* **MT5 times are BROKER-SERVER time, not UTC.** Never hardcode the offset; use
-  `jarvis/data/broker_time.py`. Local probes: **`curl --noproxy '*'`** (a proxy otherwise answers
-  "upstream connect failed").
+* **MT5 times are BROKER-SERVER time, not UTC** — use `jarvis/data/broker_time.py`, never a hardcoded
+  offset. Local probes: **`curl --noproxy '*'`** (a proxy otherwise answers "upstream connect failed").
 * **A frontend that reads a key the server never sends renders the empty state on success** (3
-  instances). Read the real payload before writing its reader.
+  instances) — read the real payload before writing its reader.
 * **A refused order is answered with HTTP 200** — decide from the body's `status`
-  (`FAILED`/`BLOCKED`), never `res.ok`. The broker sends `reason`; the server's own validation sends
-  `error` with 400. `tests/test_action_response_contract.py` keeps both sets in step.
+  (`FAILED`/`BLOCKED`), never `res.ok`. Broker sends `reason`; server validation sends `error` with
+  400. `tests/test_action_response_contract.py` keeps both in step.
 * **`executed_trades.timestamp` is not the entry time** — `database.py:287` overwrites it with the
-  EXIT time, so `closed_at == timestamp` on 109/109 rows; **neither column is safe**. Run
-  `tools/audit_trades.py`. **When a defect is shared, grep the other front end first.**
-* **`curl -s -o /dev/null -w '%{http_code}'` exits 23**, so an `&&` chain built on it silently skips
+  EXIT time, so `closed_at == timestamp`; **neither column is safe**. Run `tools/audit_trades.py`.
+  **When a defect is shared, grep the other front end first.**
+* **`curl -s -o /dev/null -w '%{http_code}'` exits 23** — an `&&` chain built on it silently skips
   every later step. Use `;` between probes.
 * **Risk limits come from `config/settings.json`** (fixed in `38830eb`); risk state is scoped by
-  execution mode. Re-anchor a baseline only via `tools/reset_risk_baseline.py`. Mechanism:
-  **`TRAPS.md` § Risk control.**
+  execution mode. Re-anchor only via `tools/reset_risk_baseline.py`. **`TRAPS.md` § Risk control.**
 * **A price must be finite AND `> 0`.** `_is_finite(0.0)` is True, and an empty primary frame gives
   `current_price = bid = 0.0` (`market_context:78-80`) — from which an entry was minted and a
-  **negative** stop passed the last gate (BTCUSD: 100 lots / 6.5M USD exposure for a 50 USD risk
-  budget). One predicate, `schemas.is_observed_price`, shared by producers and gate. C2 closed.
+  **negative** stop passed the last gate (BTCUSD: 100 lots for a 50 USD budget). One predicate,
+  `schemas.is_observed_price`, shared by producers and gate. C2 closed.
+* **A label must describe the thing it names.** Both engines reported the **anchor price's**
+  provenance as the **series'** — a fully generated random walk published as `data_source: "live"`.
+  Provenance now travels *with* the data (`CandleSeries.source`); D5 closed.
 
 ## Signal quality — **the entry signal has no measured edge (several ways).**
 
-Loses money on real MT5 data (94,937 trades: mean R −0.0509, t −3.04, p 0.0067); 3/20 symbols beat
-always-long vs 5 by chance; refitted calibration 0/20 skillful; **DSR > 0.95 met by 0/20** once
-overlapping trades are counted honestly (94,937 rows = **327 independent bets**). Evidence:
-**`AUDIT-2026-09.md`**. **Consume `spread_pips`; never multiply raw `spread` by `pip_size`.**
+Loses money on real MT5 data; 3/20 symbols beat always-long vs 5 by chance; refitted calibration 0/20
+skillful; **DSR > 0.95 met by 0/20** once overlaps are counted honestly (94,937 rows = **327
+independent bets**). **`AUDIT-2026-09.md`**. **Consume `spread_pips`; never multiply raw `spread` by
+`pip_size`.**
 
 ## Environment
 
 Writes outside the project dir are refused. Bash, not PowerShell; `taskkill` needs
 `MSYS_NO_PATHCONV=1`. Python 3.13.12 managed at `…\binaries\python\versions\3.13.12\python.exe`.
-`rm -rf X && cmd` swallows stdout — run the `rm` separately. A script run *by path* puts
-its own dir on `sys.path`. The server binds **127.0.0.1 only**.
+`rm -rf X && cmd` swallows stdout — run the `rm` separately. Server binds **127.0.0.1 only**.
+More (incl. `sys.path` by path): `TRAPS.md` § Environment.

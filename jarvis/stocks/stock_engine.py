@@ -13,7 +13,12 @@ import pandas as pd
 import numpy as np
 
 from jarvis.stocks.universe import STOCK_UNIVERSE, get_stock_profile
-from jarvis.data.market_data_provider import fetch_real_candles
+from jarvis.data.market_data_provider import (
+    CandleSeries,
+    SOURCE_LIVE,
+    SOURCE_SYNTHETIC_ANCHORED,
+    SOURCE_CALIBRATED_FEED,
+)
 from jarvis.data.determinism import stable_seed
 
 
@@ -35,7 +40,13 @@ class StockIntelligenceEngine:
         Attempts to fetch REAL MT5 market data first when available;
         otherwise generates geometrically bounded candles anchored to the
         live hydrated profile price from get_stock_profile(symbol).
-        ``self._last_data_source`` records which was used.
+
+        The returned series carries its own provenance (``CandleSeries.source``):
+        ``live`` when the bars came from MT5, otherwise ``synthetic_anchored`` or
+        ``synthetic_calibrated``. Read it off the RETURN VALUE, not off
+        ``self._last_data_source`` — this engine is a singleton driven from a
+        16-thread pool (`stock_service.py:57`), so the instance attribute can be
+        overwritten by another symbol between the call and the read.
         """
         # 1. Attempt fast MT5 local broker data if available
         real = None
@@ -46,8 +57,8 @@ class StockIntelligenceEngine:
             real = None
 
         if real and len(real) > 0:
-            self._last_data_source = "live"
-            return real
+            self._last_data_source = SOURCE_LIVE
+            return CandleSeries(real, source=SOURCE_LIVE)
 
         # 2. Retrieve hydrated profile anchored to live market quote
         profile = get_stock_profile(symbol)
@@ -55,8 +66,17 @@ class StockIntelligenceEngine:
         if target_price <= 0:
             target_price = float(profile.get("base_price", 150.0))
 
-        source = profile.get("source", "calibrated")
-        self._last_data_source = "live" if source in ("tradingview", "mt5", "live") else "calibrated_feed"
+        # The bars built below are GENERATED. The anchor's provenance is recorded
+        # separately instead of being reported as the series' own: an earlier version set
+        # `_last_data_source = "live"` whenever the anchor came from a live source, so a
+        # synthetic random walk was published to the API as `data_source: "live"`.
+        anchor_source = profile.get("source", "calibrated")
+        series_source = (
+            SOURCE_SYNTHETIC_ANCHORED
+            if anchor_source in ("tradingview", "mt5", "live")
+            else SOURCE_CALIBRATED_FEED
+        )
+        self._last_data_source = series_source
 
         beta = float(profile.get("beta", 1.2))
 
@@ -133,7 +153,7 @@ class StockIntelligenceEngine:
             })
 
         candles[-1]["close"] = round(target_price, 2)
-        return candles
+        return CandleSeries(candles, source=series_source, anchor_source=anchor_source)
 
     def run_monte_carlo_simulation(
         self,
@@ -622,7 +642,10 @@ class StockIntelligenceEngine:
             "multi_timeframe": multi_tf,
 
             "candles": candles,
-            "data_source": getattr(self, "_last_data_source", "synthetic_fallback"),
+            # Read the provenance off the SERIES, not off `self`: this engine is a
+            # singleton and the screener analyses symbols from a 16-thread pool, so the
+            # instance attribute can be overwritten by another symbol in between.
+            "data_source": getattr(candles, "source", "synthetic_fallback"),
             "bars_available": len(candles),
             "history_complete": len(candles) >= 120,
             "analyzed_at": datetime.now(timezone.utc).isoformat()

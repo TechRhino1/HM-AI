@@ -17,6 +17,10 @@ import numpy as np
 
 from jarvis.data.determinism import stable_seed
 from jarvis.data.schemas import is_observed_price
+from jarvis.data.market_data_provider import (
+    CandleSeries,
+    SOURCE_SYNTHETIC_ANCHORED,
+)
 
 logger = logging.getLogger("jarvis.data.tradingview")
 
@@ -716,14 +720,14 @@ class TradingViewDataProvider:
         change_pct = float(quote.get("change_pct", 0.0)) / 100.0
 
         if num_bars <= 1:
-            return [{
+            return CandleSeries([{
                 "time": now_ts,
                 "open": round(open_p, 4),
                 "high": round(high_p, 4),
                 "low": round(low_p, 4),
                 "close": round(close_p, 4),
                 "volume": vol_p,
-            }]
+            }], source=SOURCE_SYNTHETIC_ANCHORED, anchor_source=quote.get("source"))
 
         # Construct historical candle trajectory anchored to live real-time bar
         #
@@ -777,7 +781,15 @@ class TradingViewDataProvider:
             "volume": int(vol_p),
         })
 
-        return candles
+        # Only the LAST bar is observed; the other `num_bars - 1` are a backward random
+        # walk from the live close. The series therefore declares itself
+        # `synthetic_anchored` rather than passing as observed history — see the
+        # `CandleSeries` contract in `market_data_provider`.
+        return CandleSeries(
+            candles,
+            source=SOURCE_SYNTHETIC_ANCHORED,
+            anchor_source=quote.get("source"),
+        )
 
 
 # Singleton instance for system-wide consumption
