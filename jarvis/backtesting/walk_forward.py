@@ -40,12 +40,35 @@ class WalkForwardEngine:
             # Fallback single backtest
             engine = BacktestEngine(initial_balance=self.initial_balance, risk_per_trade_pct=self.risk_per_trade_pct)
             res = engine.run_backtest(df_h1, symbol=symbol, spread_pips=spread_pips)
+            # No fold was run, so no efficiency exists to report. The previous
+            # version answered 1.0 here -- a *perfect* walk-forward score for a
+            # run that measured nothing -- and paired it with passed_wfe=True,
+            # so the one case that could not validate was the one case that
+            # certified itself. A validation that did not run did not pass.
             return {
-                "walk_forward_efficiency": 1.0,
+                "walk_forward_efficiency": None,
+                "avg_is_sharpe": None,
+                "avg_oos_sharpe": None,
                 "aggregate_oos_metrics": res["metrics"],
-                "fold_results": [{"fold": 1, "is_metrics": res["metrics"], "oos_metrics": res["metrics"], "wfe": 1.0}],
-                "total_oos_trades": len(res["trades"]),
-                "passed_wfe": True
+                "fold_results": [{
+                    "fold": 1,
+                    "bars_is": total_bars,
+                    "bars_oos": 0,
+                    "is_trades_count": len(res.get("trades", [])),
+                    "oos_trades_count": 0,
+                    "is_metrics": res["metrics"],
+                    "oos_metrics": {},
+                    "wfe_fold": None,
+                }],
+                # The single fallback backtest is in-sample by construction, so
+                # it contributes no out-of-sample trade to the aggregate.
+                "total_oos_trades": 0,
+                "passed_wfe": False,
+                "validated": False,
+                "note": (
+                    f"not validated: {total_bars} bars is below the 200 needed for "
+                    f"{self.num_folds} folds - no walk-forward efficiency is reported"
+                ),
             }
 
         fold_size = total_bars // self.num_folds
@@ -124,7 +147,10 @@ class WalkForwardEngine:
 
         # Aggregate Out-Of-Sample Performance Metrics
         agg_oos_metrics = PerformanceMetricsCalculator.calculate_metrics(all_oos_trades, self.initial_balance)
-        agg_oos_pf = agg_oos_metrics.get("profit_factor", 0.0)
+        # ``or 0.0`` because a metric calculator that has no trades may report
+        # the profit factor as None rather than 0.0, and ``None >= 1.25`` is a
+        # TypeError that would abort the whole validation.
+        agg_oos_pf = float(agg_oos_metrics.get("profit_factor", 0.0) or 0.0)
         avg_is_pf = float(np.mean([f["is_metrics"].get("profit_factor", 0.0) for f in fold_results])) if fold_results else 1.0
 
         if avg_is_pf > 0.1 and agg_oos_pf > 0.0:
@@ -132,16 +158,49 @@ class WalkForwardEngine:
         else:
             overall_wfe = float(np.mean([f["wfe_fold"] for f in fold_results])) if fold_results else 0.0
 
-        passed_wfe = overall_wfe >= 0.50 or agg_oos_metrics.get("profit_factor", 0) >= 1.25
+        # Two independent criteria can carry a pass, and which one did matters.
+        # A caller reading ``passed_wfe: True`` next to an efficiency of 0.00
+        # would otherwise conclude the edge was retained, when in fact it was
+        # only ever profitable in absolute terms on the held-out window.
+        passed_by_wfe = overall_wfe >= 0.50
+        passed_by_pf = agg_oos_pf >= 1.25
+        passed_wfe = bool(passed_by_wfe or passed_by_pf)
+
+        if not fold_results:
+            note = (
+                f"not validated: no fold reached the 120-bar minimum, so no "
+                f"out-of-sample window was ever measured ({self.num_folds} folds "
+                f"requested over {total_bars} bars)"
+            )
+        elif passed_by_wfe and passed_by_pf:
+            note = (
+                f"walk-forward efficiency {overall_wfe:.2f} >= 0.50 and out-of-sample "
+                f"profit factor {agg_oos_pf:.2f} >= 1.25"
+            )
+        elif passed_by_wfe:
+            note = f"walk-forward efficiency {overall_wfe:.2f} >= 0.50"
+        elif passed_by_pf:
+            note = (
+                f"out-of-sample profit factor {agg_oos_pf:.2f} >= 1.25, but efficiency "
+                f"{overall_wfe:.2f} is below the 0.50 threshold - passed on absolute "
+                f"out-of-sample profitability, not on retention"
+            )
+        else:
+            note = (
+                f"efficiency {overall_wfe:.2f} below 0.50 and out-of-sample profit "
+                f"factor {agg_oos_pf:.2f} below 1.25"
+            )
 
         return {
-            "walk_forward_efficiency": round(overall_wfe, 2),
+            "walk_forward_efficiency": (None if not fold_results else round(overall_wfe, 2)),
             "avg_is_sharpe": round(avg_is_sharpe, 2),
             "avg_oos_sharpe": round(avg_oos_sharpe, 2),
             "aggregate_oos_metrics": agg_oos_metrics,
             "fold_results": fold_results,
             "total_oos_trades": len(all_oos_trades),
-            "passed_wfe": bool(passed_wfe)
+            "passed_wfe": passed_wfe,
+            "validated": bool(fold_results),
+            "note": note,
         }
 
 # Alias for package compatibility

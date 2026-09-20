@@ -49,6 +49,17 @@ class TradingSettings:
     macro_timeframe: str = "D1"
     symbols: List[str] = field(default_factory=lambda: ["XAUUSD", "EURUSD", "GBPUSD", "USDJPY", "BTCUSD"])
     same_symbol_cooldown_sec: int = 600
+    # Entry selection authority. False (the default) keeps the legacy 29-check
+    # gate stack, which is what the platform has always traded on. True hands
+    # selection to jarvis.execution.entry_policy, using the out-of-sample
+    # calibrated profile in config/winrate_profiles.json.
+    #
+    # This is deliberately opt-in. The profiles on disk currently show a
+    # NEGATIVE out-of-sample expectancy for 11 of the 16 calibrated symbols, so
+    # enabling this does not "improve" the trade set -- it switches most of the
+    # universe off. That is a trading decision, not a bug fix, and it must be
+    # taken knowingly rather than shipped as a default.
+    use_calibrated_entry_policy: bool = False
 
 @dataclass
 class ServerSettings:
@@ -128,6 +139,14 @@ class JarvisConfig:
                     cfg.trading.same_symbol_cooldown_sec = int(t_data["same_symbol_cooldown_sec"])
                 if "primary_timeframe" in t_data:
                     cfg.trading.primary_timeframe = str(t_data["primary_timeframe"])
+                if "use_calibrated_entry_policy" in t_data:
+                    raw = t_data["use_calibrated_entry_policy"]
+                    if isinstance(raw, bool):
+                        cfg.trading.use_calibrated_entry_policy = raw
+                    else:
+                        cfg.trading.use_calibrated_entry_policy = str(raw).strip().lower() in {
+                            "1", "true", "yes", "on",
+                        }
                 m_data = data.get("ml", {})
                 ml_keys = (
                     ("sgd_learning_rate", "sgd_learning_rate", float),
@@ -157,6 +176,11 @@ class JarvisConfig:
         env_symbols = os.environ.get("JARVIS_SYMBOLS")
         if env_symbols:
             cfg.trading.symbols = [s.strip().upper() for s in env_symbols.split(",") if s.strip()]
+        env_calibrated = os.environ.get("JARVIS_CALIBRATED_ENTRY")
+        if env_calibrated:
+            cfg.trading.use_calibrated_entry_policy = env_calibrated.strip().lower() in {
+                "1", "true", "yes", "on",
+            }
         env_risk = os.environ.get("JARVIS_MAX_RISK_PCT")
         if env_risk:
             try:

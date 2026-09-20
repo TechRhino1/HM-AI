@@ -1877,3 +1877,42 @@ Corollary: **a field nobody serialises is write-only.** `DecisionObject.to_dict`
 I wrote a source assertion against `DecisionEngine.decide` and got `AttributeError`. Guessed from the
 domain. Verify a symbol exists before asserting on its source — and note that source assertions
 couple tests to method names, so they break on a rename (accepted cost, documented each time).
+
+### 41b1 — "No production caller" makes a fallback branch the most dangerous code in the file
+
+`WalkForwardEngine` was unreachable from production, so nobody noticed its short-data branch returned
+`walk_forward_efficiency=1.0` + `passed_wfe=True` — a **perfect** score for a run that measured no
+out-of-sample window, printed downstream as `PASSED`. Dead code is not safe code: it is where the
+unexercised branch lives, and it becomes load-bearing the moment someone wires it up (which is exactly
+what the finding asked for).
+
+### 41b2 — A pass with two criteria must name the one that carried it
+
+`passed_wfe = WFE >= 0.50 or OOS_PF >= 1.25` let an edge that decayed to 13% of its fitted value
+report `True` on absolute profitability, indistinguishable from a genuine retention pass. **Whenever a
+boolean is an OR of criteria, return the reason too**, or the flag silently changes meaning.
+
+### 41b3 — When you add a new entry authority, re-key every guard that read the old verdict
+
+The in-process lock, the 2-position limit, the 10-minute cooldown and the Asian blackout all read
+`decision.decision == "EXECUTE"`. A candidate the *calibrated* policy accepts still carries `"WAIT"` —
+that is what the legacy stack said — so all four guards would have been skipped for precisely the new
+candidates. Any guard keyed on "would we trade" must be re-keyed when the authority changes.
+
+Corollary: **a blunt floor can veto a validated replacement.** `MIN_CONFIDENCE` (0.45–0.55) and the
+profile's calibrated `min_score` are the same quantity; leaving both in place puts an unvalidated
+number in front of the validated one. Take the calibrated branch first.
+
+### 41b4 — A mutation that proves nothing looks exactly like a mutation that passed
+
+Mutation 10 (`load_profiles` re-raises instead of returning `{}`) produced **no red**, because
+`WRProfileStore.load` already swallows bad JSON before the outer guard sees it. The fix was to change
+the *test*: a well-formed file whose profile *contents* don't parse escapes to the loader's guard.
+**If a mutation kills nothing, suspect the mutation is unreachable — don't count it as evidence.**
+
+### 41b5 — "Dead" and "unwired" are different findings; measure the consequence before wiring
+
+`evaluate_entry` had one caller outside tests (the backtest). Wiring it to live trading is a one-line
+change with a 16-symbol consequence: 11 profiles carry a negative OOS expectancy, so the policy refuses
+most of the universe. Ship the wire **opt-in** with the measured table (11 refused / 5 tradeable), and
+let the operator decide. Completing a wiring task is not licence to change the live book.

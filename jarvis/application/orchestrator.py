@@ -37,6 +37,8 @@ from jarvis.risk.account_tier import is_micro_account, get_max_lot_cap
 from jarvis.config.settings import verify_execution_mode, SETTINGS
 from jarvis.config.paths import mode_scoped_db_path
 from jarvis.market.sessions import SessionEngine
+from jarvis.execution.entry_policy import evaluate_entry
+from jarvis.intelligence.winrate_targeting import load_profiles
 
 logger = logging.getLogger("JARVIS_Orchestrator")
 
@@ -109,6 +111,12 @@ class JarvisOrchestrator:
         # Symbols the broker does not offer are refused every cycle; log the
         # reason once per symbol/style rather than on every scan.
         self._unusable_warned: set = set()
+
+        # Out-of-sample calibrated profiles, loaded on first use and then held.
+        # ``None`` means "not loaded yet"; ``{}`` means "loaded, and there are
+        # none". The distinction matters: a missing file must be reported once,
+        # not re-checked and re-logged on every scan of every symbol.
+        self._wr_profiles: Optional[Dict[str, Any]] = None
 
         # Per-symbol regime tracking to eliminate cross-symbol contamination and race conditions
         self._regime_state: Dict[str, Dict[str, Any]] = {}
@@ -460,6 +468,60 @@ class JarvisOrchestrator:
 
         return first_unusable_frame(mtf_data)
 
+    # ── Calibrated entry authority ──────────────────────────────────────────
+    #
+    # ``jarvis.execution.entry_policy`` implements the out-of-sample calibrated
+    # replacement for the legacy 29-check gate stack, and
+    # ``config/winrate_profiles.json`` holds 16 calibrated symbol profiles that
+    # ``tools/calibrate_winrate.py`` wrote. Both ends existed; nothing joined
+    # them. Live entry selection therefore still ran on the legacy stack, which
+    # is the exact stack ``entry_policy`` documents as unvalidated and
+    # value-destroying -- and the calibration that could have replaced it was
+    # only ever read by offline analysis scripts.
+    #
+    # The wire below is gated on ``trading.use_calibrated_entry_policy`` and
+    # defaults to OFF. Enabling it is a trading decision, not a bug fix: 11 of
+    # the 16 profiles on disk carry a NEGATIVE out-of-sample expectancy, so the
+    # policy refuses most of the universe.
+
+    def _calibrated_profile(self, symbol: str):
+        """This symbol's calibrated profile, or None when none applies."""
+        if not bool(getattr(SETTINGS.trading, "use_calibrated_entry_policy", False)):
+            return None
+        if self._wr_profiles is None:
+            self._wr_profiles = load_profiles()
+            logger.info(
+                "calibrated entry policy ACTIVE: %d symbol profiles loaded",
+                len(self._wr_profiles),
+            )
+        if not self._wr_profiles:
+            return None
+        canonical = str(_resolve_sym(symbol).canonical).upper()
+        return self._wr_profiles.get(canonical) or self._wr_profiles.get(str(symbol).upper())
+
+    def _calibrated_entry_decision(self, symbol: str, decision: Any, regime: Any):
+        """The calibrated policy's verdict, or None when it is not the authority.
+
+        None is not "allowed" -- it is "this policy did not decide", which leaves
+        the legacy gate verdict in force. Conflating the two is how a missing
+        calibration would silently become a permission to trade.
+        """
+        profile = self._calibrated_profile(symbol)
+        if profile is None:
+            return None
+
+        regime_name = (
+            regime.primary_regime.value
+            if hasattr(regime.primary_regime, "value")
+            else str(regime.primary_regime)
+        )
+        return evaluate_entry(
+            quality_gate=getattr(decision, "quality_gate", None),
+            score=float(getattr(decision, "model_confidence", 0.0) or 0.0),
+            regime=regime_name,
+            profile=profile,
+        )
+
     def run_cycle_for_symbol(self, symbol: str, trade_style: Optional[str] = None,
                              dry_run: bool = False) -> Dict[str, Any]:
         """Executes a single end-to-end analytical and decision cycle for a target symbol and trade style.
@@ -627,8 +689,25 @@ class JarvisOrchestrator:
         is_forex = (_spec.asset_class == "FOREX")
         MIN_CONFIDENCE = 0.45 if is_forex else (0.50 if is_favorable_scalp else 0.55)
         
+        # The calibrated policy, when it is the authority, replaces the legacy
+        # stack outright -- including the blunt MIN_CONFIDENCE floor, whose job
+        # the profile's out-of-sample-calibrated min_score now does with
+        # evidence behind it. Leaving the floor in place would mean the
+        # "validated replacement" was still standing behind an unvalidated one,
+        # and would silently veto exactly the setups the policy exists to take.
+        entry_dec = self._calibrated_entry_decision(symbol, decision, regime)
+        entry_override: Optional[bool] = None if entry_dec is None else bool(entry_dec.allowed)
+
         if not is_exec_style_match:
             auth_res = {"authorized": False, "reason": f"STYLE_FILTER: Opportunity style {active_trade_style} does not match active trading style {orch_style}"}
+        elif entry_dec is not None:
+            auth_res = {
+                "authorized": bool(entry_dec.allowed),
+                "reason": None if entry_dec.allowed else f"CALIBRATED_ENTRY: {entry_dec.reason}",
+            }
+            if not entry_dec.allowed:
+                decision.decision = "WAIT"
+                decision.execution_authorized = False
         elif decision.decision == "EXECUTE" and decision.model_confidence < MIN_CONFIDENCE:
             decision.decision = "WAIT"
             decision.execution_authorized = False
@@ -671,22 +750,31 @@ class JarvisOrchestrator:
                 except Exception as e:
                     logger.error(f"Error trailing position #{pos.ticket}: {e}", exc_info=True)
 
+        # These guards are keyed on "this cycle wants to enter", NOT on the
+        # legacy verdict. A candidate the calibrated policy accepted can still
+        # carry decision.decision == "WAIT", because that is what the legacy
+        # stack said about it -- and the calibrated policy exists precisely to
+        # take some of those. Keying the in-process lock, the symbol limit, the
+        # cooldown and the Asian blackout on the legacy verdict would skip all
+        # four for exactly the candidates the policy adds.
+        wants_entry = bool(auth_res.get("authorized"))
+
         if not is_exec_style_match:
             pass
-        elif already_executing and decision.decision == "EXECUTE":
+        elif already_executing and wants_entry:
             decision.decision = "WAIT"
             decision.execution_authorized = False
             auth_res = {"authorized": False, "reason": "IN_PROCESS_LOCK: Execution already in progress for this symbol."}
-        elif len(active_sym_positions) >= 2 and decision.decision == "EXECUTE":
+        elif len(active_sym_positions) >= 2 and wants_entry:
             decision.decision = "WAIT"
             decision.execution_authorized = False
             auth_res = {"authorized": False, "reason": f"HARD_SYMBOL_LIMIT: Symbol {symbol} already has 2 active positions (Max 2)."}
-        elif cooldown_active and len(active_sym_positions) == 0 and decision.decision == "EXECUTE":
+        elif cooldown_active and len(active_sym_positions) == 0 and wants_entry:
             remaining = int(self._SAME_SYMBOL_COOLDOWN_SEC - (time.time() - last_exec_time))
             decision.decision = "WAIT"
             decision.execution_authorized = False
             auth_res = {"authorized": False, "reason": f"COOLDOWN_GUARD: {remaining}s remaining before next {canonical_sym} trade."}
-        elif is_asian_blackout and decision.decision == "EXECUTE":
+        elif is_asian_blackout and wants_entry:
             decision.decision = "WAIT"
             decision.execution_authorized = False
             auth_res = {"authorized": False, "reason": "ASIAN_SESSION_BLACKOUT: Low liquidity chop protection active."}
@@ -697,7 +785,12 @@ class JarvisOrchestrator:
                 current_spread_pips=context.volatility.current_spread_pips,
                 max_allowed_spread_pips=_spec.max_spread_pips,
                 context=context,
-                is_second_trade=(len(active_sym_positions) == 1)
+                is_second_trade=(len(active_sym_positions) == 1),
+                # Only set when the calibrated policy is the authority. None
+                # leaves the risk engine reading the legacy verdict, which is
+                # what it has always done; True stops the guard re-imposing the
+                # legacy veto on a candidate the calibrated policy accepted.
+                entry_authorized_override=entry_override,
             )
 
         # Circuit Breaker check (backstop — also checked inside risk_engine)

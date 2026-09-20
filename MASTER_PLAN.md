@@ -133,7 +133,7 @@ attribution and reentrancy, which neither mutation disturbs.
 | # | Finding | I | E |
 |---|---|---|---|
 | AI2 / AI3 | `triple_barrier_label` and MFE/MAE are 0 on every row | H | S | ✅ **FIXED** 2026-09-20 — D10 derives the label at close from the stored geometry; D19 measures MFE/MAE from the retained path, NULL when unsampled |
-| AI9 | Walk-forward validator is dead; optimizer output never reaches trading | H | M |
+| AI9 | Walk-forward validator is dead; optimizer output never reaches trading | H | M | ✅ **FIXED** 2026-09-20 — both halves. (1) `WalkForwardEngine` certified a run it never made: under 200 bars it returned `walk_forward_efficiency=1.0` and `passed_wfe=True`, and `compare_performance.py` printed that as `PASSED`; it now reports `None`/`False` plus `validated: False` and a note, uses the same `wfe_fold` key as every validated fold, and names *which* criterion carried a pass (retention vs absolute OOS profit factor). (2) The calibrated entry policy is now wired to a trade: `config/winrate_profiles.json` (16 profiles), `evaluate_entry`, and the `entry_authorized_override` slot in the risk engine all existed with nothing joining them, and `evaluate_entry`'s only caller outside tests was the backtest engine. The wire is **opt-in** (`trading.use_calibrated_entry_policy`, default **OFF**) because 11 of the 16 profiles on disk carry a **negative** out-of-sample expectancy — enabling it refuses most of the universe, which is a trading decision, not a bug fix. See M3 below |
 | AI10 | Calibration fitted to its own output on ≤20 rows | H | M | ✅ **FIXED** 2026-09-20 — the refit now reads the persisted pre-calibration forecast (`raw_win_prob`, migration 2), needs 10 observations per bin, shrinks against the existing curve, and is forced monotonic. Measured: the old fit collapsed the whole curve (0.59→0.236, 0.86→0.464) and inverted it (0.75→0.496 but 0.95→0.464). See M3 below |
 | AI4 | Gate/sizing probability excludes the only fitted model | H | M | ✅ **RESOLVED — the stated fix is REJECTED on measurement.** `MetaLabeler` is the only batch-fitted model, and it was measured 2026-09-15: **test AUC 0.481** (train 0.746) window-only, **0.479** (train 0.783) with the primary model's outputs, and top-decile selection **LOWERED** the win rate (0.341 vs a 0.359 base). Folding a coin flip into the probability that sizes positions would be a regression, not a fix. The real sub-defect — an unevaluated check being indistinguishable from a confirmed one — **is** fixed: see M3 below |
 | A10 / A9 | `/api/history` re-syncs 30 days on every read; SSE pushes 144KB/s | M | M | ✅ **SSE FIXED** 2026-09-20 — measured 63,276 B/snapshot → 21,019 (33%) via `get_state_digest()`; `/api/history` half was already done |
@@ -551,8 +551,11 @@ AI2, AI3, AI5, AI6, AI7, AI8, AI9.
 **Exit:** a backtest run twice produces byte-identical results; the learning loop survives a
 restart; walk-forward geometry either reaches live levels or is labelled advisory in the UI.
 
-**Done so far:** AI2/AI3 (labels, via D10 + D19), **AI5**, **AI6**, **AI8**, **AI10** and **AI4**
-(all below — AI4 resolved as "won't fix as stated", with the reporting defect fixed).
+**Done so far:** AI2/AI3 (labels, via D10 + D19), **AI5**, **AI6**, **AI8**, **AI10**, **AI4** and
+**AI9** (all below — AI4 resolved as "won't fix as stated", with the reporting defect fixed).
+
+**One decision for you:** AI9's second half is wired but **switched off**. Enabling
+`trading.use_calibrated_entry_policy` refuses 11 of 16 symbols, including gold. See M3 below.
 
 **AI5 — the forecast is no longer overwritten.** Measured on the live journal: **112/112 closed rows**
 had `expected_value == realized_pnl`, and **84 rows** carried `ai_score = 85.0`. Two write sites did it:
@@ -746,6 +749,68 @@ can drive without a full market context, analyst reports and regime output. Thos
 by **source assertion**, and **3 of 10 tests go red** under `.scratch/mutate_ai4.py` — all
 source-level. The behavioural tests (an untrained `predict_proba`, a trained one, the schema default)
 do not depend on the mutation and are not counted as evidence for it.
+
+**AI9 — the walk-forward validator stops certifying runs it never made, and the calibration can
+reach a trade.** Two halves, and the second is the one that matters.
+
+*Half 1.* `jarvis/backtesting/walk_forward.py::WalkForwardEngine` has **no production caller** —
+only `compare_performance.py` and a dead import in `tests/test_backtesting_lab.py` (imported, never
+instantiated). That makes its fallback branch the dangerous part: below 200 bars it ran one in-sample
+backtest and returned `walk_forward_efficiency=1.0`, `passed_wfe=True`, and
+`total_oos_trades=len(trades)` from a run with **no out-of-sample window at all**.
+`compare_performance.py` printed it as `PASSED`. The one case that could not validate was the only
+case that certified itself — and it did so with a *perfect* score. It also named its fold key `wfe`
+where every validated fold uses `wfe_fold`, so a consumer reading the real key raised `KeyError` on
+exactly the runs it most needed to treat carefully.
+
+Now: `None` efficiency, `passed_wfe=False`, `validated=False`, zero OOS trades, a note naming the
+shortfall, one fold key. A pass is also *explained*: `passed_wfe` was
+`WFE >= 0.50 or OOS profit factor >= 1.25`, so an edge that decayed to nothing (WFE 0.13) could still
+report `True` on absolute profitability alone. The note now says which criterion carried it.
+
+*Half 2.* Three things existed and nothing joined them:
+
+* `config/winrate_profiles.json` — **16 calibrated symbol profiles**, written by
+  `tools/calibrate_winrate.py`, read only by offline analysis scripts;
+* `jarvis/execution/entry_policy.evaluate_entry` — the out-of-sample-calibrated replacement for the
+  legacy 29-check alpha gate stack, whose **only** caller outside tests was the backtest engine;
+* `entry_authorized_override` — a slot already cut through `RiskEngine.authorize_execution` and
+  `TradeGuard.validate_pre_execution` precisely so the calibrated verdict would not be re-vetoed.
+
+Live entry selection therefore still ran on the legacy stack that `entry_policy` documents as
+unvalidated and value-destroying, and the calibration that could replace it was only ever read by
+scripts. The orchestrator now resolves the symbol's profile and takes its verdict, and forwards it as
+`entry_authorized_override`.
+
+**Enabling it is deliberately opt-in** (`trading.use_calibrated_entry_policy`, default **OFF**, also
+`JARVIS_CALIBRATED_ENTRY=1`). This is not caution for its own sake — it is measured:
+
+| out-of-sample expectancy | symbols | what the policy does |
+|---|---|---|
+| `<= 0` over >= 10 trades | **11** (AUDUSD −0.075, BTCUSD −0.016, ETHUSD −0.077, EURUSD **−0.250**, GBPUSD −0.034, NAS100 −0.154, NZDUSD −0.119, US30 −0.092, USDCHF −0.184, XAGUSD −0.079, **XAUUSD −0.056**) | refused outright |
+| `> 0` over >= 10 trades | **5** (GER40 +0.217, SOLUSD +0.022, UK100 +0.293, USDCAD +0.128, USDJPY +0.039) | traded |
+
+Turning this on narrows the live book from 16 symbols to 5, and switches off gold — the one
+instrument `entry_policy`'s own header says was trading freely (668 executions) while everything else
+was throttled. That is a trading decision and belongs to you, not to a bug-fix commit.
+
+Two traps found while wiring it, both fixed:
+
+* **The hard guards were keyed on the legacy verdict.** The in-process lock, the 2-position symbol
+  limit, the 10-minute cooldown and the Asian blackout all read `decision.decision == "EXECUTE"`. A
+  candidate the calibrated policy *accepts* can still carry `"WAIT"` — that is what the legacy stack
+  said, and the policy exists to take some of those — so all four guards would have been skipped for
+  exactly the candidates being added. They now key on `wants_entry`.
+* **The unvalidated confidence floor would have vetoed the validated replacement.** `MIN_CONFIDENCE`
+  (0.45–0.55) is the same quantity as the profile's calibrated `min_score`, so leaving both in place
+  would have stood an unvalidated floor in front of the validated one. The calibrated branch is
+  taken first.
+
+**Coverage honesty:** the fallback is driven with a patched `BacktestEngine` (the real one needs MT5),
+and the wire through the orchestrator's own helper with a patched profile source. `run_cycle_for_symbol`
+itself cannot be driven without a broker, so the verdict-forwarding, the guard keying and the branch
+order are pinned by **source assertion**. **13 of 27 tests go red** under `.scratch/mutate_ai9.py`, and
+all ten mutations kill at least one test.
 
 ### M4 — Raise the architecture ceiling *(~3 weeks)*
 A2/A4 engine process split, A1 one radar contract, A13 shared frontend modules, P10 packaging,

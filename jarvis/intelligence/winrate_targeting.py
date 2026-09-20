@@ -1247,9 +1247,35 @@ class WRProfileStore:
         return profile
 
 
+#: Where ``tools/calibrate_winrate.py`` writes the calibrated profiles. Until
+#: this module grew a loader, that file had exactly one kind of reader -- the
+#: analysis scripts under ``tools/`` -- and the live engine never opened it, so
+#: the calibration informed reports but never informed a trade.
+DEFAULT_PROFILE_PATH = (
+    Path(__file__).resolve().parents[2] / "config" / "winrate_profiles.json"
+)
+
+
+def load_profiles(path: Path | str | None = None) -> Dict[str, "WRTargetProfile"]:
+    """Load the calibrated profiles, or an empty mapping if there are none.
+
+    Missing file, unreadable file and corrupt file all resolve to ``{}``: the
+    caller's contract is "no profile" means "the legacy gate stack decides",
+    which is the behaviour the platform has always had. A calibration must
+    never be able to take the engine down by being unreadable.
+    """
+    try:
+        return WRProfileStore(path or DEFAULT_PROFILE_PATH).load()
+    except Exception as exc:  # noqa: BLE001 - a store failure must not stop trading
+        logger.warning("could not load calibrated profiles from %s: %s", path or DEFAULT_PROFILE_PATH, exc)
+        return {}
+
+
 __all__ = [
     "WRTargetProfile",
     "WRProfileStore",
+    "DEFAULT_PROFILE_PATH",
+    "load_profiles",
     "ScoreCalibration",
     "RegimeEdge",
     "FrontierPoint",

@@ -41,7 +41,14 @@ def run_comparison(symbol: str = "XAUUSD", num_bars: int = 600):
     print(f"{'Sharpe Ratio':<25} | {m_upgraded.get('sharpe_ratio', 0.0):<20.2f} | {m_oos.get('sharpe_ratio', 0.0):<20.2f}")
     print(f"{'Sortino Ratio':<25} | {m_upgraded.get('sortino_ratio', 0.0):<20.2f} | {m_oos.get('sortino_ratio', 0.0):<20.2f}")
     print(f"{'Max Drawdown %':<25} | {m_upgraded.get('max_drawdown_pct', 0.0):<20.2f}% | {m_oos.get('max_drawdown_pct', 0.0):<20.2f}%")
-    print(f"{'Walk-Forward Efficiency':<25} | {res_wf.get('walk_forward_efficiency', 0.0):<20.2f} | {'PASSED' if res_wf.get('passed_wfe') else 'MARGINAL':<20}")
+    # A run with too little data reports no efficiency at all (None), so the
+    # number has to be rendered as text rather than formatted as a float.
+    wfe = res_wf.get("walk_forward_efficiency")
+    wfe_text = "n/a (not validated)" if wfe is None else f"{wfe:<20.2f}"
+    verdict = "PASSED" if res_wf.get("passed_wfe") else ("MARGINAL" if res_wf.get("validated") else "NOT VALIDATED")
+    print(f"{'Walk-Forward Efficiency':<25} | {wfe_text:<20} | {verdict:<20}")
+    if res_wf.get("note"):
+        print(f"{'  note':<25} | {res_wf['note']}")
     print("=" * 80)
 
 if __name__ == "__main__":
