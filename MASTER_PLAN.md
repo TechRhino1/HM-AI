@@ -193,7 +193,26 @@ and all five stores stamp themselves: `executed_trades`, `trade_records`, `metad
 The rule that matters is the other direction: a file written by **newer** code is *not* stamped
 down to what this version knows — it is left alone and logged, because stamping it down is how
 columns get silently dropped. Guarded by `tests/test_schema_version.py` (8 tests).
-Still to do: the migration runner itself, and reconciling the two `jarvis_history.db` copies.
+Then the **migration runner** (`migrate()` / `add_columns()`, `MIGRATIONS = {1: _migration_1}`):
+numbered steps, version written after each one, a failing step raises instead of half-applying, and
+a file from newer code is refused rather than migrated down. 13 tests, one of which builds the
+original 12-column table and proves migration 1 reconstructs all 13 added columns.
+
+**Also fixed: the suite was writing into the live trade journal.** Measured —
+`data/jarvis_history.db` gained exactly one EURUSD BUY row per run (rows 264–269, timestamps
+matching six consecutive runs). `ExecutionEngine.execute_decision` imports the `TRADE_DB` singleton
+at *call* time, so any test driving a real execution path journalled a fake trade into the same
+table every realised-P&L statistic is read from. An autouse conftest fixture now swaps
+`database.TRADE_DB` for a per-test temp file; verified 269 → 269 across a full run. `JARVIS_DATA_DIR`
+could not be redirected for this — conftest already records that 12 parquet-reading tests break.
+
+**Open, needs your call:** the root `jarvis_history.db` is an abandoned **3-row** artifact
+(`user_version=0`, no `closed_at`, no `position_id`, all from 2026-09-11), left over from before
+path anchoring. The app resolves to `data/jarvis_history.db` (268+ rows, complete). I have not
+touched it — say the word and I'll archive it rather than delete it.
+
+Still to do for D3: reconciling those two copies, and moving the other four stores onto `migrate()`
+so they can take migrations too (they currently only stamp a version).
 
 ### M3 — Make learning real *(~2 weeks)*
 AI2, AI3, AI5, AI6, AI7, AI8, AI9.

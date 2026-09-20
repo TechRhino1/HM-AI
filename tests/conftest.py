@@ -49,3 +49,47 @@ def _hermetic_drawdown_guard(monkeypatch, request):
         return original(self, *args, **kwargs)
 
     monkeypatch.setattr(DrawdownGuard, "__init__", in_memory_init)
+
+
+@pytest.fixture(autouse=True)
+def _hermetic_trade_journal(monkeypatch):
+    """Keep tests out of the real trade journal.
+
+    `jarvis.data.database.TRADE_DB` is a module-level singleton pointed at
+    `data/jarvis_history.db`, and `ExecutionEngine.execute_decision` imports it
+    at CALL time, so any test that drives a real execution path writes into the
+    live journal. Measured: `data/jarvis_history.db` gained exactly one EURUSD
+    BUY row per suite run (rows 264-268, timestamps matching five consecutive
+    runs) — fake trades in the same table every realised-P&L statistic is read
+    from, indistinguishable from real ones.
+
+    Redirecting `JARVIS_DATA_DIR` is not an option (see the note above: 12
+    parquet-reading tests break), so the singleton itself is swapped for one
+    backed by a per-test temp file. Tests that need to inspect the journal get
+    the replacement and can write freely.
+    """
+    import os
+    import tempfile
+
+    import jarvis.data.database as database
+
+    # Deliberately NOT `tmp_path`: tests such as
+    # `test_drawdown_guard.py::TestPersistence::test_an_empty_db_path_writes_nothing`
+    # assert that their own tmp_path stays empty, and dropping a journal file in
+    # there turns "nothing was written" into three extra entries.
+    fd, path = tempfile.mkstemp(suffix=".db", prefix="jarvis_test_journal_")
+    os.close(fd)
+    temp_db = database.SQLiteTradeDB(db_path=path)
+    monkeypatch.setattr(database, "TRADE_DB", temp_db)
+    try:
+        yield temp_db
+    finally:
+        try:
+            temp_db.close()
+        except Exception:
+            pass
+        for suffix in ("", "-wal", "-shm"):
+            try:
+                os.remove(path + suffix)
+            except OSError:
+                pass

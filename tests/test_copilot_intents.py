@@ -23,7 +23,11 @@ import unittest
 from unittest.mock import patch
 
 from jarvis.api.copilot import JarvisCopilot
-from jarvis.data.database import TRADE_DB
+# The module, not the singleton: conftest swaps `database.TRADE_DB` for a
+# per-test temp journal so nothing writes into the live one, so the object
+# must be looked up at patch time rather than bound at import.
+from jarvis.data import database as _trade_db_module
+
 
 
 class _NS:
@@ -148,7 +152,7 @@ class CopilotRoutingTest(unittest.TestCase):
     def setUp(self):
         # _history_answer and _performance_answer read the journal. Patch it so
         # the suite never depends on the machine's live trade database.
-        self._journal = patch.object(TRADE_DB, "fetch_recent_trades",
+        self._journal = patch.object(_trade_db_module.TRADE_DB, "fetch_recent_trades",
                                      return_value=list(JOURNAL))
         self._journal.start()
 
@@ -266,7 +270,7 @@ class CopilotHistoryTest(unittest.TestCase):
     """The closed-trade answer, and what counts as closed."""
 
     def setUp(self):
-        self._journal = patch.object(TRADE_DB, "fetch_recent_trades",
+        self._journal = patch.object(_trade_db_module.TRADE_DB, "fetch_recent_trades",
                                      return_value=list(JOURNAL))
         self._journal.start()
 
@@ -292,11 +296,11 @@ class CopilotHistoryTest(unittest.TestCase):
         self.assertIn("Net over these trades: -20.00", _copilot().ask("show my last closed trades"))
 
     def test_no_closed_trades_is_stated_rather_than_left_blank(self):
-        with patch.object(TRADE_DB, "fetch_recent_trades", return_value=[]):
+        with patch.object(_trade_db_module.TRADE_DB, "fetch_recent_trades", return_value=[]):
             self.assertIn("No closed trades", _copilot().ask("show my last closed trades"))
 
     def test_an_unreachable_journal_is_reported_as_unreachable(self):
-        with patch.object(TRADE_DB, "fetch_recent_trades",
+        with patch.object(_trade_db_module.TRADE_DB, "fetch_recent_trades",
                           side_effect=RuntimeError("db locked")):
             answer = _copilot().ask("show my last closed trades")
         self.assertIn("not reachable", answer)
@@ -306,7 +310,7 @@ class CopilotHonestModeTest(unittest.TestCase):
     """A missing figure must be reported as missing, never estimated."""
 
     def setUp(self):
-        self._journal = patch.object(TRADE_DB, "fetch_recent_trades",
+        self._journal = patch.object(_trade_db_module.TRADE_DB, "fetch_recent_trades",
                                      return_value=list(JOURNAL))
         self._journal.start()
 
