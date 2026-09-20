@@ -11,8 +11,13 @@ from typing import Dict, List, Any, Optional
 from datetime import datetime, timezone
 
 from jarvis.config.paths import resolve_db_path
+from jarvis.data.schema_version import ensure_version
 
 logger = logging.getLogger("JARVIS_TradeMemory")
+
+# D3: 1 = `ml_features` + `triple_barrier_label`. Files written before this
+# existed are 0 and are treated as current.
+SCHEMA_VERSION = 1
 
 class TradeMemory:
     def __init__(self, db_path: str = "jarvis_trade_memory.db"):
@@ -99,8 +104,11 @@ class TradeMemory:
                 cur.execute("ALTER TABLE trade_records ADD COLUMN ml_features TEXT")
             if 'triple_barrier_label' not in columns:
                 cur.execute("ALTER TABLE trade_records ADD COLUMN triple_barrier_label INTEGER DEFAULT 0")
-            
+
             self._conn.commit()
+            # D3: record the shape of this file. 1 = `ml_features` +
+            # `triple_barrier_label` (both added by the sweep above).
+            ensure_version(self._conn, SCHEMA_VERSION, "trade_records")
 
 
     def record_trade(self, trade_data: Dict[str, Any]):

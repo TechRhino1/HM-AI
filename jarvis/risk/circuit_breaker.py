@@ -7,6 +7,11 @@ import sqlite3
 from typing import Dict, Any
 
 from jarvis.config.paths import resolve_db_path
+from jarvis.data.schema_version import ensure_version
+
+# D3: 1 = `circuit_state` as it exists today.
+SCHEMA_VERSION = 1
+
 
 class CircuitBreaker:
     def __init__(self, db_path: str = "jarvis_circuit_state.db", clock=None):
@@ -62,6 +67,8 @@ class CircuitBreaker:
                         trip_reason TEXT
                     )
                 ''')
+                # D3: record the shape of this file.
+                ensure_version(conn, SCHEMA_VERSION, "circuit_state")
         finally:
             conn.close()
 

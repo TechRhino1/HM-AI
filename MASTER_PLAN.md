@@ -184,6 +184,17 @@ D3 migrations, D1 `origin` column, D5 bar provenance, D10/D11 real labels, A10 r
 **Exit:** `user_version` set on every store; every row tagged `broker|paper|synthetic`; no read
 path performs a write; `triple_barrier_label` non-zero on closed rows.
 
+**Status (2026-09-20): D3 half done — the version stamp.** All 11 databases reported
+`user_version = 0`, so no file could declare what shape it was in, and two copies of
+`jarvis_history.db` (root and `data/`) have already drifted — the root copy has no `closed_at`.
+`jarvis/data/schema_version.py` now provides `read_version` / `write_version` / `ensure_version`,
+and all five stores stamp themselves: `executed_trades`, `trade_records`, `metadata`,
+`circuit_state`, `drawdown_state`. Version 0 is treated as "predates versioning", not as an error.
+The rule that matters is the other direction: a file written by **newer** code is *not* stamped
+down to what this version knows — it is left alone and logged, because stamping it down is how
+columns get silently dropped. Guarded by `tests/test_schema_version.py` (8 tests).
+Still to do: the migration runner itself, and reconciling the two `jarvis_history.db` copies.
+
 ### M3 — Make learning real *(~2 weeks)*
 AI2, AI3, AI5, AI6, AI7, AI8, AI9.
 **Exit:** a backtest run twice produces byte-identical results; the learning loop survives a

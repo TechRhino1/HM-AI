@@ -9,6 +9,11 @@ from typing import Optional
 
 from jarvis.config.paths import resolve_db_path, ensure_data_dir
 from jarvis.data.broker_time import broker_utc_offset
+from jarvis.data.schema_version import ensure_version
+
+# Bumped when the shape of `executed_trades` changes. 1 = `position_id` added
+# (D2). Every file written before this existed is 0 and is treated as current.
+SCHEMA_VERSION = 1
 
 # Executor tags, matched as TOKENS. The old `"ai" in comment_lower` substring test
 # also matched "trailing", "pair", "main", "wait" and "chair", so a manual trade
@@ -140,6 +145,11 @@ class SQLiteTradeDB:
             # looking like a successful init.
             conn.execute("CREATE INDEX IF NOT EXISTS idx_executed_trades_position_id ON executed_trades(position_id);")
             conn.commit()
+
+            # D3: stamp the shape of this file so a future migration can tell
+            # what it is looking at. 1 = `position_id` (and everything before it,
+            # which pre-dates versioning and is therefore 0 == "as old as it gets").
+            ensure_version(conn, SCHEMA_VERSION, "executed_trades")
 
             logger.info("SQLite database initialized successfully.")
         except Exception as e:

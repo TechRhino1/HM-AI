@@ -11,7 +11,12 @@ from typing import Dict, List, Any, Optional, Tuple
 from datetime import datetime, timezone
 import threading
 
+from jarvis.data.schema_version import ensure_version
+
 logger = logging.getLogger("JARVIS_HistoricalMetadata")
+
+# D3: 1 = the five tables as they exist today.
+SCHEMA_VERSION = 1
 
 
 class MetadataDB:
@@ -126,6 +131,8 @@ class MetadataDB:
                     CREATE INDEX IF NOT EXISTS idx_quality_lookup 
                     ON quality_audit_log (symbol, timeframe, created_at DESC);
                 """)
+                # D3: record the shape of this file.
+                ensure_version(conn, SCHEMA_VERSION, "metadata")
 
     def register_dataset(
         self,

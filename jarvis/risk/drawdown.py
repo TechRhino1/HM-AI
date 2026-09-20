@@ -25,6 +25,10 @@ from typing import Dict, Any, Optional, Callable
 from datetime import datetime, timezone
 
 from jarvis.config.paths import resolve_db_path
+from jarvis.data.schema_version import ensure_version
+
+# D3: 1 = `drawdown_state` as it exists today.
+SCHEMA_VERSION = 1
 
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
@@ -86,6 +90,8 @@ class DrawdownGuard:
                         last_saved_date TEXT
                     )
                 ''')
+                # D3: record the shape of this file.
+                ensure_version(conn, SCHEMA_VERSION, "drawdown_state")
         finally:
             conn.close()
 
