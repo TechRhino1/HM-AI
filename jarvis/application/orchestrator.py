@@ -277,13 +277,19 @@ class JarvisOrchestrator:
 
         # 1. Update SQLite trade records (§17)
         if ticket:
+            # D19 — mfe/mae were hardcoded 0.0 here, so every row claimed to have
+            # been measured and to have had no excursion at all. The monitor
+            # accumulates the real ones while the position is open; ask it, and
+            # pass None (written as NULL) when it never sampled this ticket.
+            excursions = self.position_monitor.pop_excursions(ticket)
+            mfe, mae = excursions if excursions else (None, None)
             self.trade_memory.update_closed_trade(
                 ticket=ticket,
                 exit_price=exit_price,
                 pnl=pnl,
                 is_win=is_win,
-                mfe=0.0,
-                mae=0.0
+                mfe=mfe,
+                mae=mae
             )
 
         # 2. Update ML SGD predictor with return weighting (§17)

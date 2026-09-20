@@ -1578,3 +1578,40 @@ Corollary for the test suite: keep one test that pins the *contrast* by measurem
 `test_ensure_version_would_have_stamped_it` asserts the old helper really does stamp the unbumpable
 version. If that assertion ever fails, the new machinery has stopped buying anything and the change
 should be reverted rather than kept on inertia.
+
+---
+
+### 40t — Look for the deletion before fixing the literal
+
+`mfe=0.0, mae=0.0` at the close call site was the *symptom* of D19. The cause was three functions away:
+`PositionMonitorEngine` tracked the favourable extreme per ticket and then, in the pruning step of
+`_run_monitor_tick`, dropped it as soon as the ticket left `active_tickets`. By close time the data was
+gone and the handler had nothing to write, so it invented a zero.
+
+Fixing only the literal would have produced a *worse* store: the path would still have been destroyed
+and every row would now say NULL, which is honest but useless — the measurement was available and was
+thrown away.
+
+**Rule: when a value is hardcoded at a write site, find out whether something upstream discarded the
+real one.** Grep for the per-entity state that would have produced it and check whether it is cleaned up
+before the writer runs. Pruning code is the usual culprit; it is written for memory hygiene and nobody
+revisits it when a new consumer appears.
+
+### 40t — An insertion between `@staticmethod` and its `def` steals the decorator
+
+Adding a method immediately *above* an existing
+
+```python
+    @staticmethod
+    def _coerce_positive_float(value, default=None): ...
+```
+
+by matching on the `def` line lands the new code between the decorator and the function, so
+`@staticmethod` re-parents onto the **new** first method. Its own `self` then becomes a required
+positional parameter, and a call that visibly passes every argument fails with:
+
+    TypeError: _remember_closed_excursions() missing 1 required positional argument: 'ticket'
+
+The message points at the wrong thing — it looks like too few arguments were passed to a function that
+obviously takes one. **Check the decorator pairing above and below any insertion point.** If editing near
+a decorated function, match the decorator line too, or insert after the whole pair.

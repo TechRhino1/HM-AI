@@ -228,8 +228,12 @@ class TradeMemory:
                 trade_data.get("model_confidence", 0.5),
                 trade_data.get("adversarial_penalty", 0.0),
                 trade_data.get("expected_value", 0.0),
-                trade_data.get("mfe", 0.0),
-                trade_data.get("mae", 0.0),
+                # D19: no fabricated 0.0. An excursion of 0.0 at open says nothing
+                # about the path the trade is about to take, and it is what the
+                # column reads as if the close is never recorded. NULL means "not
+                # measured"; only a caller that actually measured passes a value.
+                trade_data.get("mfe"),
+                trade_data.get("mae"),
                 json.dumps(trade_data.get("reasoning", {})),
                 json.dumps(trade_data.get("quality_gate", {})),
                 json.dumps(trade_data.get("ml_features", [])),
@@ -268,10 +272,15 @@ class TradeMemory:
         exit_price: float,
         pnl: float,
         is_win: int,
-        mfe: float = 0.0,
-        mae: float = 0.0
+        mfe: Optional[float] = None,
+        mae: Optional[float] = None
     ):
         """Updates trade outcome fields in SQLite when position closes (§17).
+
+        `mfe` / `mae` are maximum favourable / adverse excursion in PRICE UNITS.
+        `None` means NOT MEASURED and is written as NULL — it must never be
+        coerced to 0.0, which claims the excursion was measured and was zero.
+        A caller that genuinely measured no movement passes 0.0 explicitly.
 
         Also derives `triple_barrier_label` from the row's OWN stored geometry: the close
         is the first moment the question can be answered at all, and this is the only place
@@ -299,8 +308,8 @@ class TradeMemory:
                 float(exit_price),
                 float(pnl),
                 int(is_win),
-                float(mfe),
-                float(mae),
+                None if mfe is None else float(mfe),
+                None if mae is None else float(mae),
                 label,
                 int(ticket)
             ))

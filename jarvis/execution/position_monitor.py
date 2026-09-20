@@ -96,6 +96,23 @@ class PositionMonitorEngine:
         self._initial_risk_dist: Dict[int, float] = {}
         self._highest_favorable_price: Dict[int, float] = {}
 
+        # D19 — the trade's own path, kept as excursions in PRICE UNITS.
+        #
+        # Stored as distances rather than as prices because a price cannot be
+        # interpreted without `open_price`, and by the time a close is handled the
+        # position (and therefore its open price) is gone.
+        self._peak_mfe: Dict[int, float] = {}
+        self._peak_mae: Dict[int, float] = {}
+        # Opposite extreme to `_highest_favorable_price`: for a BUY the running
+        # low, for a SELL the running high. Adverse, so the sense is reversed.
+        self._lowest_adverse_price: Dict[int, float] = {}
+        # Excursions of tickets that closed recently, so the close handler can
+        # still read them. Bounded: the monitor runs for the life of the process,
+        # so an unbounded map grows with every trade the account ever takes.
+        self._closed_excursions: Dict[int, tuple] = {}
+        self._closed_excursions_order: list = []
+        self._closed_excursions_cap = 512
+
         # ── Canonical exit-policy state (shared arithmetic with the backtest) ──
         # 1R must be frozen at position open, otherwise every stop-ratchet would
         # rescale R against the *current* stop and thresholds would silently drift.
@@ -121,6 +138,34 @@ class PositionMonitorEngine:
         logger.info("PositionMonitorEngine stopped.")
 
     # ─── Helpers ───────────────────────────────────────────────────────────────
+
+    def _remember_closed_excursions(self, ticket: int) -> None:
+        """Retire a closed ticket's MFE/MAE into the bounded history map."""
+        mfe = self._peak_mfe.get(ticket)
+        mae = self._peak_mae.get(ticket)
+        if mfe is None and mae is None:
+            return
+        self._closed_excursions[ticket] = (mfe, mae)
+        self._closed_excursions_order.append(ticket)
+        while len(self._closed_excursions_order) > self._closed_excursions_cap:
+            oldest = self._closed_excursions_order.pop(0)
+            self._closed_excursions.pop(oldest, None)
+
+    def pop_excursions(self, ticket: int) -> Optional[tuple]:
+        """The measured (mfe, mae) for a ticket that has just closed, in price units.
+
+        Returns `None` when the monitor never sampled this ticket's path — the
+        position was opened before this process started, or closed before the
+        first scan. `None` must be written as NULL, never as 0.0: "not measured"
+        and "measured, no excursion" are different facts, and a learner that
+        cannot tell them apart is being fed a fabricated zero.
+
+        The value is removed once read, so a ticket cannot be credited twice.
+        """
+        try:
+            return self._closed_excursions.pop(int(ticket))
+        except (KeyError, TypeError, ValueError):
+            return None
 
     @staticmethod
     def _coerce_positive_float(value: Any, default: Optional[float] = None) -> Optional[float]:
@@ -188,6 +233,17 @@ class PositionMonitorEngine:
         self._initial_sl = {t: v for t, v in self._initial_sl.items() if t in active_tickets}
         self._exit_policy = {t: v for t, v in self._exit_policy.items() if t in active_tickets}
         self._be_locked = {t for t in self._be_locked if t in active_tickets}
+        self._lowest_adverse_price = {t: v for t, v in self._lowest_adverse_price.items() if t in active_tickets}
+
+        # D19 — a closed ticket's excursions are the ONLY record of its path, so
+        # they are retired into a bounded map instead of dropped here. Dropping
+        # them is why `update_closed_trade` had nothing to write and hardcoded 0.0.
+        for t in list(self._peak_mfe):
+            if t in active_tickets:
+                continue
+            self._remember_closed_excursions(t)
+            self._peak_mfe.pop(t, None)
+            self._peak_mae.pop(t, None)
 
         # ── Per-position management ─────────────────────────────────────────
         for pos in positions:
@@ -355,12 +411,32 @@ class PositionMonitorEngine:
                 self._highest_favorable_price[pos.ticket] = high_price
                 self._peak_favorable_price[pos.ticket] = high_price
                 favorable_dist = max(0.0, high_price - pos.open_price)
+
+                prev_low = self._lowest_adverse_price.get(pos.ticket, pos.open_price)
+                low_price = min(prev_low, c_price)
+                self._lowest_adverse_price[pos.ticket] = low_price
+                adverse_dist = max(0.0, pos.open_price - low_price)
             else:
                 prev_low = self._highest_favorable_price.get(pos.ticket, pos.open_price)
                 low_price = min(prev_low, c_price)
                 self._highest_favorable_price[pos.ticket] = low_price
                 self._peak_favorable_price[pos.ticket] = low_price
                 favorable_dist = max(0.0, pos.open_price - low_price)
+
+                prev_high = self._lowest_adverse_price.get(pos.ticket, pos.open_price)
+                high_price = max(prev_high, c_price)
+                self._lowest_adverse_price[pos.ticket] = high_price
+                adverse_dist = max(0.0, high_price - pos.open_price)
+
+            # D19 — accumulate both excursions for the life of the position.
+            #
+            # These are SAMPLED at monitor cadence, not read from bar high/low, so
+            # a spike between two scans is missed: the result is a LOWER BOUND on
+            # the true intrabar extreme. That is still a measurement. The 0.0 the
+            # close handler used to write was a fabricated one, and it read to any
+            # downstream learner as "measured, no excursion".
+            self._peak_mfe[pos.ticket] = max(self._peak_mfe.get(pos.ticket, 0.0), favorable_dist)
+            self._peak_mae[pos.ticket] = max(self._peak_mae.get(pos.ticket, 0.0), adverse_dist)
 
             # Structural reference for the ratchet (higher-low support for a BUY,
             # lower-high resistance for a SELL). Falls back to None when the

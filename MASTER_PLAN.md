@@ -94,7 +94,7 @@ recommendations were rejected on verification (see §6) — one of them would ha
 
 | # | Finding | I | E |
 |---|---|---|---|
-| AI2 / AI3 | `triple_barrier_label` and MFE/MAE are 0 on every row | H | S | ✅ **label FIXED** 2026-09-20 (D10) — derived at close from the stored geometry; **MFE/MAE still 0** (D19) |
+| AI2 / AI3 | `triple_barrier_label` and MFE/MAE are 0 on every row | H | S | ✅ **FIXED** 2026-09-20 — D10 derives the label at close from the stored geometry; D19 measures MFE/MAE from the retained path, NULL when unsampled |
 | AI9 | Walk-forward validator is dead; optimizer output never reaches trading | H | M |
 | AI10 | Calibration fitted to its own output on ≤20 rows | H | M |
 | AI4 | Gate/sizing probability excludes the only fitted model | H | M |
@@ -109,7 +109,7 @@ recommendations were rejected on verification (see §6) — one of them would ha
 | A13 | 45 duplicated frontend function names across pages | M | L |
 | D7–D17 | Registry 99% empty, `bar_idx` window-relative, no retention, write-only learning columns | M | S–M |
 | **D18** | **`/api/stocks/candles` calls `mt5.initialize()` unguarded — one request wedges the server** | **H** | **S** | ✅ **FIXED** 2026-09-20 — *found while building D5, not in any agent report.* `_ensure_mt5_connected` ended in a bare `initialize()`; it now asks `broker_symbols.ensure_mt5_terminal()`, which does not launch a terminal. See M2 below. |
-| **D19** | **`mfe` / `mae` are hardcoded `0.0` at the call site — "not measured" reads as "measured zero"** | **M** | **M** | Open. `orchestrator.py:285-286` passes `mfe=0.0, mae=0.0` literally; the live path never computes an excursion. Unlike D10 these cannot be derived from the exit alone — they need the intra-trade bar path. See M2 below. |
+| **D19** | **`mfe` / `mae` are hardcoded `0.0` at the call site — "not measured" reads as "measured zero"** | **M** | **M** | ✅ **FIXED** 2026-09-20 — the monitor now retains the sampled path and the close writes NULL when it never sampled; measured 36/36 rows at 0.0. See M2 below. |
 
 ### P3 — polish (ongoing)
 `A14–A17`, `D17`, `P8`, `P16`, and the long tail of hygiene findings.
@@ -216,7 +216,7 @@ path performs a write; `triple_barrier_label` non-zero on closed rows.
 **Done so far:** D1 (`origin`, shipped), D5 (bar provenance, shipped), D10 (the triple-barrier
 label, shipped), D18 (the read path, shipped), **D3 closed** — all four versioned stores
 (`executed_trades`, `trade_records`, `circuit_state`, `drawdown_state`, `metadata`) on `migrate()`.
-**Still to do:** reconciling the two `jarvis_history.db` copies, D19 (MFE/MAE), A10's SSE half.
+**Still to do:** reconciling the two `jarvis_history.db` copies, A10's SSE half.
 
 **Status (2026-09-20): D3 half done — the version stamp.** All 11 databases reported
 `user_version = 0`, so no file could declare what shape it was in, and two copies of
@@ -433,12 +433,37 @@ plausible value that actually means "unknown"). `tests/test_triple_barrier_label
 "expects 0", "caller-supplied label respected" and "other columns unchanged" invariants the mutation
 cannot disturb by construction.
 
-**D19 — `mfe` / `mae`: open, and *not* the same fix.** `orchestrator.py:285-286` passes
-`mfe=0.0, mae=0.0` **literally**. These are maximum favourable / adverse excursion — they need the
-trade's *path*, which the live close handler does not retain, so unlike D10 they cannot be derived
-from the exit. Two honest options: reconstruct the path from `mt5.copy_rates_range` between entry and
-exit at close time, or record `NULL` so "not measured" stops reading as "measured zero". Left open
-deliberately rather than papered over with a plausible number.
+**D19 — `mfe` / `mae`: shipped.** `orchestrator.py:285-286` passed `mfe=0.0, mae=0.0` **literally**.
+Measured on the live journal: **36/36 rows at `mfe = 0.0`, 0 NULLs** — every trade in the table claims
+its path was measured and was perfectly flat.
+
+These are maximum favourable / adverse excursion, so unlike D10 they cannot be derived from the exit
+alone; they need the path. The path was in fact being tracked and then thrown away:
+`PositionMonitorEngine` kept a running favourable extreme per ticket and **pruned it the moment the
+ticket left `active_tickets`** — so by the time the close handler ran, the only record was gone. That
+deletion is the root cause, not the hardcoded `0.0`.
+
+Fixed in three places:
+* the monitor now accumulates **both** extremes (`_peak_mfe` / `_peak_mae`, in price units so the
+  value survives the loss of `open_price`) and **retires** them into a bounded 512-entry map on close
+  instead of dropping them;
+* the close handler asks `pop_excursions(ticket)` and passes the real values;
+* when the monitor never sampled a ticket — opened before this process, closed before the first scan —
+  `pop_excursions` returns `None` and that is written as **NULL**, never coerced to `0.0`.
+  `record_trade` no longer defaults the columns to `0.0` at open either.
+
+**Stated limitation, not hidden:** the monitor samples at its own cadence against the last price, not
+against bar high/low, so an extreme reached between two scans is missed. The value is a **lower bound**
+on the true intrabar excursion, and will read systematically low versus the backtest, which uses
+`fav = (h - fill) * direction` on real bars. It is a measurement; `0.0` was not. Reconstructing from
+`mt5.copy_rates_range` at close would be closer to the backtest's definition but still cannot recover
+intra-bar ordering, so it was not done here.
+
+`tests/test_excursion_recording.py` (19 tests), including one that drives the real
+`JarvisOrchestrator._on_trade_closed` with stubbed collaborators and asserts both the measured
+round-trip and the NULL case. **Mutation-proved: 5 go red** under `.scratch/revert_d19_fixes.py` —
+the close-write, the open-default, the unsampled close, the retention and the bound. The 14 survivors
+are the measured-value, arithmetic and accessor-contract cases the mutation cannot disturb.
 
 ### M3 — Make learning real *(~2 weeks)*
 AI2, AI3, AI5, AI6, AI7, AI8, AI9.
