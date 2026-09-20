@@ -31,7 +31,12 @@ logger = logging.getLogger("JARVIS_WebServer")
 
 class JarvisRequestHandler(BaseHTTPRequestHandler):
     state_manager: StateManager = GLOBAL_STATE
-    mt5_client: MT5Client = MT5Client(mode="live")
+    # P5: `auto_init=False`. This line runs at IMPORT time, and an eager
+    # `mt5.initialize()` here blocks in a native call holding the GIL when no
+    # terminal is running — so `import jarvis.api.server` never returns and even
+    # `pytest --collect-only` hangs forever. Connection now happens on first use
+    # via `MT5Client._reconnect_if_needed()`.
+    mt5_client: MT5Client = MT5Client(mode="live", auto_init=False)
     data_feed: DataFeedEngine = DataFeedEngine(mt5_client=mt5_client)
     # The copilot answers questions about working orders, which only the broker
     # knows, so it is handed the same client rather than opening its own.

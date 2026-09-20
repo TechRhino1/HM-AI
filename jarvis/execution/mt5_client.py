@@ -28,8 +28,25 @@ class MT5Client:
     _shared_paper_pending_orders: Dict[int, Dict[str, Any]] = {}
     _shared_lock = threading.RLock()
 
-    def __init__(self, magic_number: int = 888999, mode: str = "live", timeout_sec: float = 4.0):
+    def __init__(self, magic_number: int = 888999, mode: str = "live", timeout_sec: float = 4.0,
+                 auto_init: bool = True):
+        """`auto_init=False` defers `mt5.initialize()` to first use.
 
+        Connecting in a constructor is only safe if the constructor itself is
+        safe to run at an arbitrary moment. It is not: `server.py` builds one in
+        the CLASS BODY, so importing the module initialised MT5. With no terminal
+        running `mt5.initialize()` blocks inside a native call while HOLDING THE
+        GIL, which means `Thread.start()` can never complete — so the import
+        never returns and the process is dead (measured: pytest could not even
+        collect, 13min+ with no output). `TimeoutGuard` cannot rescue this: a
+        timeout cannot interrupt a thread, and no new thread can be created
+        while the GIL is held.
+
+        Nothing needs the eager call: every operation already goes through
+        `_reconnect_if_needed()`, which connects on first use. Deferring it is
+        therefore behaviour-preserving for anything that actually talks to the
+        broker, and simply stops module import from being able to hang.
+        """
         self.magic_number = magic_number
         self.mode = mode.lower()  # "live", "paper", "demo"
         self.timeout_sec = timeout_sec
@@ -38,7 +55,8 @@ class MT5Client:
         self._paper_positions = MT5Client._shared_paper_positions
         self._paper_pending_orders = MT5Client._shared_paper_pending_orders
         self._lock = MT5Client._shared_lock
-        self.init_connection()
+        if auto_init:
+            self.init_connection()
 
 
     def init_connection(self) -> bool:

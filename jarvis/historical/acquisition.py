@@ -55,7 +55,12 @@ class AcquisitionEngine:
         self.storage = storage
         self.metadata_db = metadata_db
         self.quality_engine = quality_engine
-        self.mt5_client = mt5_client or MT5Client(mode="live")
+        # P5: `auto_init=False`. This class is instantiated at MODULE SCOPE
+        # (`historical_engine.py` builds the global engine at import), so an
+        # eager `mt5.initialize()` here runs during import — and with no terminal
+        # it blocks in a native call holding the GIL, which wedges thread
+        # creation and hangs the import forever. Connect on first use instead.
+        self.mt5_client = mt5_client or MT5Client(mode="live", auto_init=False)
         self.broker_server = self._detect_broker_server()
 
     def _detect_broker_server(self) -> str:
