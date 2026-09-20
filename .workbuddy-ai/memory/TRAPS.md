@@ -1802,3 +1802,47 @@ which no unit test can show.
 **Rule: when a mutation cannot turn a test red, say so** rather than inflating the count. Pin what
 is provable (the flag was engaged), document what is not (temporal reproducibility), and do not
 claim the fix is proven by a test that would pass without it.
+
+### 40z — A test that hardcodes a version number goes vacuous when the number moves
+
+`tests/test_trade_memory_migration.py` used a literal `version=2` to mean "written by newer code".
+Bumping `SCHEMA_VERSION` from 1 to 2 (AI10) turned those files into *current* files — so two
+refusal tests passed while testing nothing at all. They were green throughout.
+
+**Rule: derive relative positions, never write them.** `NEWER_VERSION = SCHEMA_VERSION + 1`. This
+applies to any sequence — schema versions, migration indices, "the next id", "one more than the
+limit". A literal that encodes a *relationship* silently becomes wrong the moment either side moves,
+and it fails silently because the code still runs.
+
+### 40z2 — A calibration fit must consume the forecast, never the pipeline's own output
+
+`update_calibration_from_history` binned on `model_confidence`, which `decision_engine` sets to
+`calibrated_win_p` — and that value is not even `calibrate_probability()`'s immediate output, but the
+downstream composite after the ML blend and a dozen boosts/penalties. The curve decided the stored
+value; the stored value picked the bin; the bin refit the curve.
+
+Persisting the pre-calibration forecast (`raw_win_prob`) is what breaks the loop. **Rows with no
+forecast must be SKIPPED, not defaulted** — a default manufactures a forecast the curve then learns
+from (same shape as AI5's `ai_score = 85.0`).
+
+### 40z3 — Three numbers that make a small-sample fit meaningless
+
+* **n=2 per bin.** The observed rate can only be 0.0, 0.5 or 1.0, and the old rule moved the bin 60%
+  of the way there. Measured: bins of 3–5 (SE 0.18–0.27) collapsed the whole curve — 0.59 → 0.236,
+  0.86 → 0.464 — so a raw 0.60 mapped to 0.325 and the 55% gate became unreachable.
+* **No shrinkage.** Replace a fixed `alpha` toward the observed rate with a Beta-style prior:
+  `(n·observed + k·prior) / (n + k)`. At n == k a bin that just clears the bar moves halfway.
+* **No monotonicity constraint.** Without one the refit inverted the curve: 0.75 → 0.496 but
+  0.95 → 0.464, so a MORE confident forecast scored LOWER — the gate then rewards the worse trade.
+  Enforce non-decreasing after every update; a reliability curve that is not monotonic is not a
+  reliability curve.
+
+### 40z4 — Reading live data can write to it
+
+Opening the live journal to *measure* the calibration defect ran migration 2 on it. Additive and
+correct (36 rows intact, one nullable column), but it was a write to a live file I had not intended
+to make.
+
+**Rule: a schema migration fires on first open.** If a repro must touch the real store, copy it
+first (`cp` to `.scratch/`), and remember that `TradeMemory` resolves *relative* paths against
+`DATA_DIR`, so pass an absolute one.
