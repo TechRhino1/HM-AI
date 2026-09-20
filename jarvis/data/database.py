@@ -11,9 +11,21 @@ from jarvis.config.paths import resolve_db_path, ensure_data_dir
 from jarvis.data.broker_time import broker_utc_offset
 from jarvis.data.schema_version import add_columns, migrate
 
+# Where a journalled price came from. The whole point of `origin` (D1): a
+# realised-P&L statistic computed over the journal is meaningless if simulated
+# fills and fallback quotes are indistinguishable from real ones — measured on
+# data/jarvis_history.db, 158 of 269 rows are engine-logged and 0 of them have
+# ever closed, so mixing them in silently understates every result.
+# "unknown" is in the tuple because it is a value we STORE — the caller's
+# choices are the other three. Anything not in the tuple lands as "unknown"
+# rather than being guessed at.
+ORIGINS = ("broker", "paper", "synthetic", "unknown")
+
 # Bumped when the shape of `executed_trades` changes. Every file written before
 # this existed is 0, which means "none of these have run".
-SCHEMA_VERSION = 1
+#   1 — every column the old sweep used to add, plus `position_id` (D2)
+#   2 — `origin`, so a row says where its price came from (D1)
+SCHEMA_VERSION = 2
 
 
 def _migration_1(conn) -> None:
@@ -51,7 +63,36 @@ def _migration_1(conn) -> None:
     })
 
 
-MIGRATIONS = {1: _migration_1}
+def _migration_2(conn) -> None:
+    """D1: tag every row with where its price came from.
+
+    `broker` — the row is backed by a real broker deal. `paper` — simulated
+    fills. `synthetic` — a fallback price standing in for a missing quote.
+
+    The backfill can only go as far as the evidence allows, and the evidence is
+    timestamp precision: `sync_mt5_history` formats an int epoch (whole
+    seconds), `log_trade` uses `datetime.now()` (microseconds). So a whole-second
+    timestamp means the row came from — or was later reconciled with — a real
+    deal, and can be called `broker`.
+
+    A microsecond timestamp only tells us the ENGINE wrote it, not whether that
+    engine was trading real money or paper: nothing in the row records the
+    execution mode. Those are `unknown`, not guessed. Measured on
+    data/jarvis_history.db: 111 whole-second rows (110 closed) vs 158
+    microsecond rows, of which **zero** have ever closed — which is what the
+    un-matchable join (D2) looks like from the other end.
+
+    New rows always carry a real value; `unknown` exists only for history.
+    """
+    add_columns(conn, "executed_trades", {"origin": "TEXT"})
+    conn.execute(
+        "UPDATE executed_trades SET origin = 'broker' "
+        "WHERE origin IS NULL AND timestamp IS NOT NULL AND timestamp NOT LIKE '%.%'"
+    )
+    conn.execute("UPDATE executed_trades SET origin = 'unknown' WHERE origin IS NULL")
+
+
+MIGRATIONS = {1: _migration_1, 2: _migration_2}
 
 # Executor tags, matched as TOKENS. The old `"ai" in comment_lower` substring test
 # also matched "trailing", "pair", "main", "wait" and "chair", so a manual trade
@@ -178,26 +219,37 @@ class SQLiteTradeDB:
         mtf_alignment: str = "",
         threats_json: str = "[]",
         features_json: str = "{}",
-        position_id: Optional[int] = None
+        position_id: Optional[int] = None,
+        origin: Optional[str] = None
     ):
         """Journal an entry.
 
         `ticket` is the order ticket the broker call returned; `position_id` is
         the MT5 position id the exit deal will later be keyed on. They are
         different numbers — pass both, or the row can never be closed (D2).
+
+        `origin` is where the price came from: `broker`, `paper` or `synthetic`.
+        Anything else — including None — is recorded as `unknown` rather than
+        guessed, so a statistic that filters on it can never silently include
+        rows of unknown provenance.
         """
+        # ORIGINS is a tuple, not a mapping. A `.get()` here raised
+        # AttributeError on EVERY call — and `log_trade` swallows its
+        # exceptions into a log line, so the symptom was not a crash but a
+        # journal that silently stopped recording trades at all.
+        origin = origin if origin in ORIGINS else "unknown"
         conn = self._get_conn()
         try:
             conn.execute('''
                 INSERT INTO executed_trades (
-                    ticket, position_id, symbol, action, entry_price, sl, tp, volume, timestamp,
+                    ticket, position_id, origin, symbol, action, entry_price, sl, tp, volume, timestamp,
                     ai_score, regime, expected_value, executor, session_name,
                     is_prime_session, adx, plus_di, minus_di, spread_pips,
                     mtf_alignment, threats_json, features_json
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
-                ticket, position_id, symbol, action, entry, sl, tp, volume,
+                ticket, position_id, origin, symbol, action, entry, sl, tp, volume,
                 datetime.now(timezone.utc).isoformat(),
                 score, regime, ev, executor, session_name, int(is_prime_session),
                 adx, plus_di, minus_di, spread_pips, mtf_alignment, threats_json, features_json
@@ -321,10 +373,12 @@ class SQLiteTradeDB:
                 row = cur.fetchone()
                 if not row:
                     regime_str = "TREND_BULL" if side == "BUY" else "TREND_BEAR"
+                    # These rows ARE broker deals — they are reconstructed from
+                    # `history_deals_get`, so `origin` is not in doubt here.
                     conn.execute('''
-                        INSERT INTO executed_trades (ticket, position_id, symbol, action, entry_price, sl, tp, volume, timestamp, ai_score, regime, expected_value, realized_pnl, executor, closed_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ''', (pid, pid, clean_sym, side, entry_p, sl_val, tp_val, vol, dt_str, 85.0, regime_str, pnl, pnl, exec_label,
+                        INSERT INTO executed_trades (ticket, position_id, origin, symbol, action, entry_price, sl, tp, volume, timestamp, ai_score, regime, expected_value, realized_pnl, executor, closed_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (pid, pid, "broker", clean_sym, side, entry_p, sl_val, tp_val, vol, dt_str, 85.0, regime_str, pnl, pnl, exec_label,
                           dt_str if exit_deal else None))
                 else:
                     # Update realized PnL, executor, and close timestamp for completed positions.
@@ -336,6 +390,10 @@ class SQLiteTradeDB:
                     conn.execute('''
                         UPDATE executed_trades
                         SET realized_pnl = ?, expected_value = ?, executor = ?, timestamp = ?,
+                            -- A row the broker's own history has now matched is
+                            -- proven real, whatever it was labelled at entry.
+                            origin = CASE WHEN origin IS NULL OR origin IN ('unknown', 'synthetic')
+                                          THEN 'broker' ELSE origin END,
                             position_id = CASE WHEN ? IS NOT NULL THEN ? ELSE position_id END,
                             closed_at = CASE WHEN ? IS NOT NULL THEN ? ELSE closed_at END,
                             sl = CASE WHEN ? > 0 THEN ? ELSE sl END,

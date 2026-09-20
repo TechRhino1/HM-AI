@@ -91,13 +91,25 @@ _INIT_RETRY_SEC = 30.0
 _init_lock = threading.Lock()
 
 
-def ensure_mt5_terminal() -> bool:
+def ensure_mt5_terminal(mt5_module=None) -> bool:
     """Initialise the MT5 terminal once per process so bars are readable.
 
     Independent of execution mode on purpose. Cached on success; a failure is
     retried at most once every :data:`_INIT_RETRY_SEC` so a 1 Hz poll loop
     cannot hammer ``initialize()`` (which attaches to the terminal and is not
     cheap). Returns True only when the terminal is genuinely up.
+
+    `mt5_module` is honoured INSTEAD of the global package. A caller that
+    supplies its own terminal owns its lifecycle, and reaching past it to the
+    real ``MetaTrader5`` is both wrong and — with no terminal running — fatal:
+    ``initialize()`` blocks inside the native call while HOLDING THE GIL, so no
+    Python-side timeout can interrupt it and not even faulthandler can dump.
+    Measured: `broker_time._derive_offset` ignored its injected module this way
+    and hung the whole suite for 13 minutes.
+
+    An injected module is never latched into :data:`_TERMINAL_READY`: that flag
+    is a statement about THIS process's real terminal, and letting a stand-in
+    set it would make every later caller believe the terminal is up.
     """
     global _TERMINAL_READY, _LAST_INIT_ATTEMPT
 
@@ -106,6 +118,21 @@ def ensure_mt5_terminal() -> bool:
     if os.environ.get("JARVIS_BACKTEST_MODE") == "1":
         # Backtests replay stored bars; never drag a terminal into that path.
         return False
+
+    if mt5_module is not None:
+        # Ask before attaching: `initialize()` is the expensive, blocking call,
+        # and a module that is already up must not pay for it on every poll.
+        try:
+            if mt5_module.terminal_info() is not None:
+                return True
+        except Exception as exc:
+            logger.debug("injected MT5 module has no readable terminal_info: %s", exc)
+            return False
+        try:
+            return bool(mt5_module.initialize())
+        except Exception as exc:
+            logger.debug("injected MT5 module could not be initialized: %s", exc)
+            return False
 
     with _init_lock:
         if _TERMINAL_READY:
@@ -162,10 +189,15 @@ def reset_cache() -> None:
     _LAST_INIT_ATTEMPT = 0.0
 
 
-def probe_symbol(name: str) -> bool:
-    """True if ``name`` exists at the broker and returns at least one H1 bar."""
+def probe_symbol(name: str, mt5_module=None) -> bool:
+    """True if ``name`` exists at the broker and returns at least one H1 bar.
+
+    `mt5_module` is used instead of the global package when supplied, so a
+    caller driving this offline cannot end up attaching to the real terminal
+    behind its own back.
+    """
     try:
-        mt5 = _mt5()
+        mt5 = mt5_module or _mt5()
         if mt5.symbol_info(name) is None:
             return False
         mt5.symbol_select(name, True)
@@ -175,11 +207,18 @@ def probe_symbol(name: str) -> bool:
         return False
 
 
-def resolve_broker_symbol(symbol: str, verbose: bool = False) -> Optional[str]:
+def resolve_broker_symbol(symbol: str, verbose: bool = False, mt5_module=None) -> Optional[str]:
     """Return the broker's name for a canonical symbol, or None if unresolvable.
 
     None means "this instrument is not available from this broker" - callers
     should skip the symbol, not crash and not silently trade the wrong series.
+
+    `mt5_module` is threaded through to the terminal ensure and to every probe
+    rather than stopping at this function. It has to be: `broker_time` derives
+    the broker clock offset from a caller-supplied module, and resolving
+    "XAUUSD" -> "GOLD.i#" then reaching for the global package anyway meant an
+    offline caller still called `MetaTrader5.initialize()` — which, with no
+    terminal installed, blocks forever holding the GIL.
     """
     sym = str(symbol or "").upper()
     if not sym:
@@ -194,12 +233,12 @@ def resolve_broker_symbol(symbol: str, verbose: bool = False) -> Optional[str]:
     # terminal FIRST, and when it is not up report UNKNOWN *without* writing the
     # failure cache -- otherwise one call before the terminal is ready pins every
     # symbol to None for the life of the process, long after the terminal came up.
-    if not ensure_mt5_terminal():
+    if not ensure_mt5_terminal(mt5_module=mt5_module):
         return None
 
     candidates = [sym] + list(BROKER_ALIASES.get(sym, []))
     for cand in candidates:
-        if probe_symbol(cand):
+        if probe_symbol(cand, mt5_module=mt5_module):
             _CACHE[sym] = cand
             if verbose and cand != sym:
                 print(f"  [broker-symbol] {sym} -> {cand}")
@@ -214,10 +253,10 @@ def resolve_broker_symbol(symbol: str, verbose: bool = False) -> Optional[str]:
     # with a clean bill of health. A wrong instrument that looks healthy is far
     # worse than an unresolved symbol, which callers already handle.
     try:
-        mt5 = _mt5()
+        mt5 = mt5_module or _mt5()
         for info in (mt5.symbols_get() or []):
             n = str(info.name)
-            if len(sym) >= 3 and n.upper().startswith(sym) and probe_symbol(n):
+            if len(sym) >= 3 and n.upper().startswith(sym) and probe_symbol(n, mt5_module=mt5_module):
                 _CACHE[sym] = n
                 logger.warning(
                     "Fuzzy broker-symbol match %s -> %s (not in BROKER_ALIASES). "

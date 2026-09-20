@@ -67,7 +67,14 @@ def _seed_paper_position(symbol="GOLD.i#", volume=0.01, open_price=2400.0):
 
 def test_paper_book_is_not_reported_by_a_disconnected_live_session(monkeypatch):
     _seed_paper_position()
-    live = MT5Client(mode="live")
+    # `auto_init=False` because this test never wants a connection - it stubs
+    # `_reconnect_if_needed` and pins `is_connected = False` itself. Connecting
+    # in the constructor is not merely wasted work, it is a hang: with no
+    # terminal running `mt5.initialize()` blocks inside the native call while
+    # HOLDING THE GIL (measured: still running when killed at 25s), so no
+    # timeout can rescue it and not even faulthandler can dump. The whole suite
+    # stalled here.
+    live = MT5Client(mode="live", auto_init=False)
     # Two things would otherwise mask the leak on a machine without MT5:
     #   * the constructor downgrades mode to "paper" when the MetaTrader5
     #     package is missing ("Falling back to PAPER mode");

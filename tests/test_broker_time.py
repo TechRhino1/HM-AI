@@ -143,6 +143,71 @@ class TestBrokerOffsetDerivation(unittest.TestCase):
             broker_utc_offset(mt5_module=shifted, symbols=["EURUSD"], now=now + 60), first)
 
 
+class TestAnInjectedModuleIsHonoured(unittest.TestCase):
+    """A caller-supplied MT5 module must be the ONLY terminal we talk to.
+
+    `broker_utc_offset` takes `mt5_module` so it can be driven offline. It did
+    not honour it: `_derive_offset` called `ensure_mt5_terminal()` — the global,
+    argument-less one — and `resolve_broker_symbol()` did the same, so a test
+    passing a fake still attached to the real `MetaTrader5`. With no terminal
+    running that call never returns: `initialize()` blocks inside the native
+    call while holding the GIL, so no timeout can interrupt it and faulthandler
+    cannot even dump. Measured: this file hung the whole suite for 13 minutes.
+
+    The assertion is `"EURUSD"` still resolves to the fake's tick. If the real
+    terminal were consulted the raise below would be swallowed by the
+    surrounding `except Exception` and the offset would degrade to 0.
+    """
+
+    def setUp(self):
+        broker_time.reset_cache()
+
+    def test_the_global_terminal_is_never_initialized(self):
+        import jarvis.data.broker_symbols as bs
+
+        # A symbol no other test has touched: `resolve_broker_symbol` caches,
+        # and a cache hit skips the ensure entirely, which would let the
+        # pre-fix code pass this test without ever reaching the terminal.
+        sym = "HMTESTSYM"
+        consulted = []
+
+        def _recorder():
+            consulted.append(sym)
+            return _FakeMT5({})  # harmless: no ticks, no initialize()
+
+        # Both latches have to be open or `ensure_mt5_terminal` short-circuits
+        # before it ever asks for a module, again masking the defect.
+        saved = (bs._mt5, bs._TERMINAL_READY, bs._LAST_INIT_ATTEMPT)
+        bs._mt5 = _recorder
+        bs._TERMINAL_READY = False
+        bs._LAST_INIT_ATTEMPT = 0.0
+        try:
+            now = time.time()
+            fake = _FakeMT5({sym: int(now) + XM_OFFSET})
+            offset = broker_utc_offset(mt5_module=fake, symbols=[sym], now=now)
+        finally:
+            bs._mt5, bs._TERMINAL_READY, bs._LAST_INIT_ATTEMPT = saved
+
+        self.assertEqual(offset, XM_OFFSET)
+        self.assertEqual(
+            consulted, [],
+            "the injected module was bypassed and the global MetaTrader5 package "
+            "was consulted — with no terminal installed that call never returns",
+        )
+
+    def test_an_injected_module_without_a_terminal_is_not_latched_as_ready(self):
+        """A stand-in must not convince later callers the real terminal is up."""
+        import jarvis.data.broker_symbols as bs
+
+        was_ready = bs._TERMINAL_READY
+        try:
+            bs._TERMINAL_READY = False
+            self.assertFalse(bs.ensure_mt5_terminal(mt5_module=_FakeMT5({})))
+            self.assertFalse(bs._TERMINAL_READY, "a fake must not latch the global flag")
+        finally:
+            bs._TERMINAL_READY = was_ready
+
+
 class TestPositionOpenTimeIsTrueUtc(unittest.TestCase):
     """The defect: open_time was broker time wearing a UTC label."""
 

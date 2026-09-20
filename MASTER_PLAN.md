@@ -214,6 +214,41 @@ touched it — say the word and I'll archive it rather than delete it.
 Still to do for D3: reconciling those two copies, and moving the other four stores onto `migrate()`
 so they can take migrations too (they currently only stamp a version).
 
+**D1 — the `origin` column: shipped.** `executed_trades` is at version 2 and every row now carries
+`broker|paper|synthetic|unknown`. Migration 2 adds the column and backfills from the only evidence
+that survives: `sync_mt5_history` formats an **int epoch** (whole seconds) while `log_trade` uses
+`datetime.now()` (microseconds), so `timestamp NOT LIKE '%.%'` identifies a broker-synced row.
+That classification is corroborated by the outcome — of 269 rows, the 158 microsecond ones have
+**0 closes between them** and 110 of the 111 whole-second ones are closed.
+
+The other half of D1 was the labeller, and it was broken in a way that mattered:
+`_price_origin` branched on `res.get("is_fallback")`, and **no fill ever set that key** — the only
+`is_fallback` in `mt5_client.py` was inside the quote *refusal* path, which returns `None` and never
+produces a fill. So `synthetic` was unreachable and a live client that silently simulated an order
+was journalled as `broker`. Fills now report it. The subtlety is that `init_connection()` rewrites
+`self.mode` to `"paper"` when the terminal is missing, and `send_market_order` called
+`_reconnect_if_needed()` **before** checking the mode — so the client had already forgotten it was
+ever live. The requested mode is captured first; `tests/test_fill_origin.py` proves the pre-fix
+value was `False` in exactly the case the flag exists to catch.
+
+Two live bugs fell out of writing it, both silent because `log_trade` swallows its exceptions into
+a log line:
+
+* `ORIGINS` is a **tuple**, but the code called `ORIGINS.get(...)` — `AttributeError` on every call,
+  which meant the journal would have stopped recording trades with no crash anywhere.
+* The 24-column INSERT had **24 placeholders for 23 columns** (`24 values for 23 columns`).
+
+Both are now covered by tests. `MT5_AVAILABLE` was hiding a third: a live/demo client silently
+takes the paper branch and, before this change, reported it as a normal fill.
+
+**Environment hazard, measured:** with no terminal running, `mt5.initialize()` **blocks forever**
+inside the native call while holding the GIL (killed at 25s, still running). No Python-side timeout
+can rescue it — `TimeoutGuard` works by starting a thread and no thread can start while the GIL is
+held, so `faulthandler` cannot even dump. It stalled the whole suite at
+`test_paper_book_is_not_reported_by_a_disconnected_live_session`, which constructed a live client
+purely to assert it does *not* connect; that test now uses `auto_init=False`. This is the residual
+of P5: import-time construction is fixed, runtime `initialize()` cannot be bounded from Python.
+
 ### M3 — Make learning real *(~2 weeks)*
 AI2, AI3, AI5, AI6, AI7, AI8, AI9.
 **Exit:** a backtest run twice produces byte-identical results; the learning loop survives a

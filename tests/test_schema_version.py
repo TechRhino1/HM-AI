@@ -177,29 +177,74 @@ class StoresStampTheirSchemaTest(unittest.TestCase):
             if os.path.exists(path):
                 os.remove(path)
 
-    def test_executed_trades_is_versioned(self):
-        from jarvis.data.database import SQLiteTradeDB
+    def _assert_versioned(self, factory, module, name):
+        """A fresh file must carry the version this code declares.
 
-        self.assertEqual(self._temp_db(lambda p: SQLiteTradeDB(db_path=p)), 1)
+        Compared against the module's own constant rather than a literal, so
+        adding a migration updates the expectation in one place. The constant
+        being wrong is a different defect from the store not stamping itself,
+        and `test_executed_trades_reaches_the_origin_migration` pins the number
+        where it actually matters.
+        """
+        declared = getattr(module, "SCHEMA_VERSION")
+        stamped = self._temp_db(factory)
+        self.assertGreaterEqual(declared, 1, f"{name} declares no migrations")
+        self.assertEqual(stamped, declared,
+                         f"{name} stamped {stamped}, not the {declared} it declares")
+
+    def test_executed_trades_is_versioned(self):
+        from jarvis.data import database
+
+        self._assert_versioned(lambda p: database.SQLiteTradeDB(db_path=p), database, "executed_trades")
 
     def test_trade_records_is_versioned(self):
-        from jarvis.learning.trade_memory import TradeMemory
+        from jarvis.learning import trade_memory
 
-        self.assertEqual(self._temp_db(lambda p: TradeMemory(db_path=p)), 1)
+        self._assert_versioned(lambda p: trade_memory.TradeMemory(db_path=p), trade_memory, "trade_records")
 
     def test_circuit_state_is_versioned(self):
-        from jarvis.risk.circuit_breaker import CircuitBreaker
+        from jarvis.risk import circuit_breaker
 
-        self.assertEqual(self._temp_db(lambda p: CircuitBreaker(db_path=p)), 1)
+        self._assert_versioned(lambda p: circuit_breaker.CircuitBreaker(db_path=p), circuit_breaker, "circuit_state")
 
     @pytest.mark.drawdown_persistence
     def test_drawdown_state_is_versioned(self):
-        from jarvis.risk.drawdown import DrawdownGuard
+        from jarvis.risk import drawdown
 
         # conftest forces `db_path=""` (in-memory) on every test so drawdown
         # state cannot leak between them; this one is about persistence, so it
         # opts out with the marker the fixture looks for.
-        self.assertEqual(self._temp_db(lambda p: DrawdownGuard(db_path=p)), 1)
+        self._assert_versioned(lambda p: drawdown.DrawdownGuard(db_path=p), drawdown, "drawdown_state")
+
+    def test_executed_trades_reaches_the_origin_migration(self):
+        """Pin the number the `origin` column arrived at (D1).
+
+        Version 2 is what backfills `origin` and rewrites the close-join. A
+        store that stamps 1 has silently not run it, and the journal would have
+        no `origin` column at all.
+        """
+        from jarvis.data.database import SQLiteTradeDB
+
+        fd, path = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        try:
+            db = SQLiteTradeDB(db_path=path)
+            try:
+                cols = {r[1] for r in db._get_conn().execute("PRAGMA table_info(executed_trades)")}
+            finally:
+                close = getattr(db, "close", None)
+                if callable(close):
+                    close()
+            conn = sqlite3.connect(path)
+            try:
+                self.assertGreaterEqual(read_version(conn), 2, "migration 2 did not run")
+            finally:
+                conn.close()
+            self.assertIn("origin", cols, "the origin column is missing")
+            self.assertIn("position_id", cols, "the position_id column is missing")
+        finally:
+            if os.path.exists(path):
+                os.remove(path)
 
 
 if __name__ == "__main__":

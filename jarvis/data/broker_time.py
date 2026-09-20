@@ -77,6 +77,11 @@ def _derive_offset(mt5_module, symbols: Iterable[str], clock: float) -> Optional
        client only initializes the terminal for modes that place orders, so a
        paper/backtest process that merely *reads* data never had it. Same defect
        as the market-data path — see `broker_symbols.ensure_mt5_terminal`.
+
+       That ensure is handed THIS module, not the global package. It used to be
+       the global one, which ignored the caller's injection outright: a test
+       that passed a fake still attached to the real terminal, and with none
+       installed `mt5.initialize()` never returns.
     2. **The symbol must be the BROKER's, not the canonical one.** MT5 knows gold
        as ``GOLD.i#``; ``symbol_info_tick("XAUUSD")`` is ``None``. Passing
        canonical names therefore dropped every symbol and returned 0 even with a
@@ -87,7 +92,7 @@ def _derive_offset(mt5_module, symbols: Iterable[str], clock: float) -> Optional
     try:
         from jarvis.data.broker_symbols import ensure_mt5_terminal  # local: avoid import cycle
 
-        ensure_mt5_terminal()
+        ensure_mt5_terminal(mt5_module=mt5_module)
     except Exception:
         pass
 
@@ -102,7 +107,7 @@ def _derive_offset(mt5_module, symbols: Iterable[str], clock: float) -> Optional
     newest = 0
     for sym in symbols:
         try:
-            broker_sym = resolve(sym) or sym
+            broker_sym = resolve(sym, mt5_module=mt5_module) or sym
         except Exception:
             broker_sym = sym
         try:

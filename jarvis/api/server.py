@@ -1048,7 +1048,12 @@ class JarvisRequestHandler(BaseHTTPRequestHandler):
                             ev=0.0,
                             executor="MANUAL_AI_ASSISTED",
                             # D2: so the exit deal can find this row again.
-                            position_id=res.get("position_id")
+                            position_id=res.get("position_id"),
+                            # D1: the manual desk trades real money through the
+                            # same client; a fallback price must still be marked.
+                            origin=("synthetic" if res.get("is_fallback")
+                                    else ("paper" if self.mt5_client.mode == "paper"
+                                          else "broker")),
                         )
                     except Exception as ex:
                         logger.error(f"Error logging manual trade to DB: {ex}")

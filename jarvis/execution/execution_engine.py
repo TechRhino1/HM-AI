@@ -15,6 +15,27 @@ class ExecutionEngine:
         self.mt5_client = mt5_client
         self.state_manager = state_manager
 
+    def _price_origin(self, res: Dict[str, Any]) -> str:
+        """Where the fill price came from — `broker`, `paper` or `synthetic` (D1).
+
+        Paper and live fills land in the same table and were indistinguishable,
+        so every realised-P&L number read from it mixed simulated money with
+        real. A fallback price is worse than paper: it means the quote was
+        missing and a stand-in was used, and the row must not be counted as a
+        market result at all.
+        """
+        if res.get("is_fallback"):
+            return "synthetic"
+        mode = str(getattr(self.mt5_client, "mode", "") or "").lower()
+        if mode == "paper":
+            return "paper"
+        if mode in ("live", "demo"):
+            # A live client that could not reach the terminal falls back too;
+            # `not MT5_AVAILABLE` in send_market_order takes the same branch as
+            # paper, so ask whether the client actually connected.
+            return "broker" if getattr(self.mt5_client, "is_connected", True) else "synthetic"
+        return "unknown"
+
     def execute_decision(self, decision: DecisionObject, lots: float) -> Dict[str, Any]:
         """Dispatches authorized decision to MT5 or Paper Simulator."""
         if not decision.execution_authorized or lots <= 0:
@@ -169,7 +190,10 @@ class ExecutionEngine:
                     features_json=features_json,
                     # D2: the position id, not the order ticket, is what the exit
                     # deal will be keyed on. Without it the row can never close.
-                    position_id=res.get("position_id")
+                    position_id=res.get("position_id"),
+                    # D1: say where the fill price came from, so a statistic over
+                    # this table can separate real money from simulated.
+                    origin=self._price_origin(res),
                 )
             except Exception as e:
                 logger.error(f"Failed to log trade to DB: {e}")

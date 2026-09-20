@@ -272,7 +272,9 @@ def test_fuzzy_match_requires_a_prefix(monkeypatch):
     """
     from jarvis.data import broker_symbols as bs
 
-    monkeypatch.setattr(bs, "ensure_mt5_terminal", lambda: True)
+    # `resolve_broker_symbol` calls this with the injected `mt5_module`, so the
+    # stand-in has to accept it (see the note in the probe stub above).
+    monkeypatch.setattr(bs, "ensure_mt5_terminal", lambda **kw: True)
     bs._CACHE.clear()
     bs._FAILED.clear()
 
@@ -289,7 +291,11 @@ def test_fuzzy_match_requires_a_prefix(monkeypatch):
 
     monkeypatch.setattr(bs, "_mt5", lambda: ScanMT5())
     # Only the prefixed candidate is a real, tradeable symbol.
-    monkeypatch.setattr(bs, "probe_symbol", lambda n: n == "GOLD.i#")
+    # `**kw` is not decoration: `resolve_broker_symbol` passes the injected
+    # `mt5_module` down to every probe, so a stand-in that ignores it raises
+    # TypeError and the test fails for a reason that has nothing to do with
+    # what it is asserting. A stub has to mirror the real signature.
+    monkeypatch.setattr(bs, "probe_symbol", lambda n, **kw: n == "GOLD.i#")
 
     assert bs.resolve_broker_symbol("COPPER") is None
     assert bs.resolve_broker_symbol("GOLD") == "GOLD.i#"
@@ -309,13 +315,13 @@ def test_uninitialised_terminal_does_not_poison_the_cache(monkeypatch):
     bs._CACHE.clear()
     bs._FAILED.clear()
 
-    monkeypatch.setattr(bs, "ensure_mt5_terminal", lambda: False)
+    monkeypatch.setattr(bs, "ensure_mt5_terminal", lambda **kw: False)
     assert bs.resolve_broker_symbol("XAUUSD") is None
     assert "XAUUSD" not in bs._FAILED, "the failure was cached and would never be retried"
 
     # Terminal comes up -> the very next call must resolve.
-    monkeypatch.setattr(bs, "ensure_mt5_terminal", lambda: True)
-    monkeypatch.setattr(bs, "probe_symbol", lambda n: n == "GOLD.i#")
+    monkeypatch.setattr(bs, "ensure_mt5_terminal", lambda **kw: True)
+    monkeypatch.setattr(bs, "probe_symbol", lambda n, **kw: n == "GOLD.i#")
     assert bs.resolve_broker_symbol("XAUUSD") == "GOLD.i#"
 
     bs._CACHE.clear()

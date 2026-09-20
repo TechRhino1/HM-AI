@@ -414,10 +414,24 @@ class MT5Client:
             return {"status": "FAILED", "reason": "order_type must be BUY or SELL"}
         if not isinstance(volume, (int, float)) or not math.isfinite(volume) or volume <= 0:
             return {"status": "FAILED", "reason": "volume must be a positive finite number"}
+
+        # Capture BEFORE `_reconnect_if_needed()`. With no terminal installed,
+        # `init_connection()` rewrites `self.mode` to "paper" and returns True,
+        # so by the time the branch below runs the client no longer remembers
+        # that a live/demo order was asked for. That silent downgrade erases
+        # the only evidence that real money was booked against a price no
+        # broker ever quoted — so read the requested mode now and report it as
+        # `is_fallback` on the fill (D1).
+        requested_mode = str(self.mode or "").lower()
         self._reconnect_if_needed()
         resolved = self.resolve_symbol_name(symbol)
-        
+
         if self.mode == "paper" or not MT5_AVAILABLE:
+            # A simulated fill is what paper mode ASKED for, so the row is
+            # honest as `paper`. The same branch also runs for a live/demo
+            # client whenever `MT5_AVAILABLE` is false, and that one is a
+            # fallback: the journal must be able to tell the two apart.
+            is_fallback = requested_mode != "paper"
             price = self._paper_fill_price(symbol, reference_price)
             if price is None:
                 return {
@@ -461,6 +475,7 @@ class MT5Client:
                     "type": order_type,
                     "volume": volume,
                     "price": price,
+                    "is_fallback": is_fallback,
                     "comment": f"[PAPER] {comment}"
                 }
 
@@ -589,6 +604,11 @@ class MT5Client:
                     "position_id": position_id,
                     "volume": result.volume,
                     "price": result.price,
+                    # Spelled out rather than left absent: a reader that does
+                    # `res.get("is_fallback")` cannot tell "False" from "never
+                    # sent", and an absent key is how a frontend renders the
+                    # empty state on success.
+                    "is_fallback": False,
                     "comment": result.comment
                 }
 
