@@ -1212,3 +1212,45 @@ Measured on a live `HM_start.py live` run, MT5 down.
 * **A route that merges broker rows must tag them.** The MT5 deal merge appended rows with no
   `origin` key (16 of 50); a client filtering on `origin` then renders the empty state on success —
   the "frontend reads a field the server never sends" failure again.
+
+## Serving the platform: three separate reasons a read never came back (round 40l)
+
+Measured on `HM_start.py live` with the MT5 terminal down. All three produce the same symptom —
+"this endpoint hangs" — and none of them was in the endpoint.
+
+1. **`socket.getfqdn` on the bind path.** `http.server.HTTPServer.server_bind` ends with
+   `self.server_name = socket.getfqdn(host)`, a REVERSE DNS lookup. `py-spy` put MainThread in
+   `server_bind -> getfqdn (socket.py:811)` and `netstat` showed **no listener at all** — while the
+   banner had printed and both tunnels were up, so it looked exactly like the GIL-starvation hang.
+   `jarvis/api/server.py` now binds through `_NoReverseDNSHTTPServer`, which skips the lookup
+   (`server_name` only fills the `Server:` header). `tests/test_server_bind_no_dns.py` also asserts
+   the stock class *does* call it, so the override cannot become dead code silently.
+2. **`mt5.initialize()` on a request thread.** `database.sync_mt5_history` called it directly —
+   bypassing the one gate — from `fetch_recent_trades`, i.e. from `/api/history`. With nothing to
+   attach to, that call tries to LAUNCH a terminal and blocks 60-100s holding the GIL. Two request
+   threads were parked in it while `/api/history`, `/api/telemetry_state`, `/api/market-status` and
+   `/api/radar` timed out and `/` and `/classic` served in 0.15s.
+3. **`get_account_snapshot()` on a request thread.** `/api/telemetry_state` refreshed from the
+   broker whenever the cached balance was 0; that connects on first use, and `init_connection`
+   retries with 1+2+4+8+16s backoff ≈ 31s. Now a read only refreshes when a connection is ALREADY
+   held. Connecting is the background synchroniser's job.
+
+**The `timeout=` argument does not bound the launch path.** Measured: with no terminal running,
+`mt5.initialize(timeout=8000)` had still not returned after 100s. A bounded timeout is not a fix for
+this; only not making the call is. `broker_symbols.ensure_mt5_terminal` therefore asks the OS
+whether a `terminal64.exe`/`terminal.exe` process is running (microseconds, cannot block) and
+refuses to call `initialize()` when there is nothing to attach to. `JARVIS_MT5_ALLOW_LAUNCH=1`
+restores the old behaviour. The check is skipped for stand-ins (no `__file__`), so a test fake never
+depends on the developer's desktop.
+
+**Also: the MT5 terminal is a CHILD of the process that called `initialize()`.** Killing the server
+with `psutil.Process(pid).children(recursive=True)` (or `taskkill /T`) takes the terminal with it —
+measured: the terminal logged `14:53:49 System: terminal stopped due to system shutdown` exactly when
+the platform was killed. After that it could not be restarted from here at all: a direct
+`terminal64.exe` launch exits immediately (bash reports 127; the earlier `0xC0000135`
+STATUS_DLL_NOT_FOUND) and leaves **no entry in its own log**, and a `Start-Process` launch reports
+RUNNING at 10s and is gone by the next tool call. Only a terminal started outside the sandbox stays
+up. **Do not kill the platform with `/T` if you want to keep the broker session.**
+
+Result after all three fixes: all 12 public endpoints answer **HTTP 200 in 0.13-0.22s** with no
+terminal, and `/api/diagnostics` honestly reports `MT5: RECONNECTING`, `DATA_FEED: SYNTHETIC`.

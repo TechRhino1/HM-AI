@@ -1,6 +1,7 @@
 import sqlite3
 import json
 import logging
+import time
 from datetime import datetime, timezone
 import threading
 import os
@@ -20,6 +21,12 @@ from jarvis.data.schema_version import add_columns, migrate
 # choices are the other three. Anything not in the tuple lands as "unknown"
 # rather than being guessed at.
 ORIGINS = ("broker", "paper", "synthetic", "unknown")
+
+#: How long a read path will reuse the last broker sync before paying for
+#: another one. A `/api/history` read used to re-read 30 days of deals every
+#: time; on the live server that parked request threads inside the terminal
+#: attach and timed the endpoint out.
+_MT5_SYNC_MIN_INTERVAL_SEC = 30.0
 
 
 def _origin_filter(origin):
@@ -185,6 +192,12 @@ class SQLiteTradeDB:
         if self.db_path and self.db_path != ":memory:":
             ensure_data_dir()
         self._local = threading.local()
+        #: Read paths call `sync_mt5_history`; this keeps a read from turning
+        #: into a broker round-trip on every request. PER INSTANCE on purpose —
+        #: class-level state leaked the window across unrelated databases, so a
+        #: freshly built DB could inherit another one's stamp and silently skip
+        #: its first sync. See the method for the measurement.
+        self._last_mt5_sync = 0.0
         self._init_db()
 
     def _get_conn(self):
@@ -327,14 +340,43 @@ class SQLiteTradeDB:
             logger.error(f"Failed to log trade to DB: {e}")
 
     def sync_mt5_history(self, days: int = 30, limit: int = 100):
-        """Syncs executed and closed trades from MT5 broker history into SQLite database."""
+        """Syncs executed and closed trades from MT5 broker history into SQLite database.
+
+        Called from the READ path (`fetch_recent_trades`), so it must never
+        attach to the terminal itself. It used to do exactly that:
+
+            if not mt5.terminal_info():
+                mt5.initialize()          # unbounded, and bypasses the one gate
+
+        `initialize()` with no terminal to attach to tries to launch one and
+        blocks 60-100s inside native code HOLDING THE GIL — and because this ran
+        on the request thread, every `/api/history` request froze the whole
+        process for that long. Measured on the live server: `py-spy` showed two
+        request threads parked in `fetch_recent_trades -> sync_mt5_history`
+        while `/api/history`, `/api/telemetry_state`, `/api/market-status` and
+        `/api/radar` all timed out and the UI pages served fine.
+
+        The gate also gives the honest answer: no terminal in this process means
+        there is nothing to sync FROM, so returning early is correct, not a
+        degradation.
+        """
+        from jarvis.data.broker_symbols import ensure_mt5_terminal
+
+        if not ensure_mt5_terminal():
+            return
+
+        # A read must not trigger a sync per request. With a terminal up, every
+        # `/api/history` call re-read 30 days of deals; the throttle keeps the
+        # read cheap and leaves the polling to the background synchroniser.
+        now = time.time()
+        if now - self._last_mt5_sync < _MT5_SYNC_MIN_INTERVAL_SEC:
+            return
+        self._last_mt5_sync = now
+
         try:
             import MetaTrader5 as mt5
             from datetime import datetime, timedelta, timezone
             from jarvis.data.symbol_registry import resolve
-            
-            if not mt5.terminal_info():
-                mt5.initialize()
 
             # Broker server time can be ahead of local machine time (e.g. GMT+3 / EET)
             from_date = datetime.now() - timedelta(days=days)

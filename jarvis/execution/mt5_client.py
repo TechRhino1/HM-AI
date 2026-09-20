@@ -51,6 +51,8 @@ class MT5Client:
         self.mode = mode.lower()  # "live", "paper", "demo"
         self.timeout_sec = timeout_sec
         self.is_connected = False
+        #: De-duplicates the "cannot reach the broker" log line. See `_init()`.
+        self._last_init_error = None
         self.symbol_alias_cache: Dict[str, str] = {}
         self._paper_positions = MT5Client._shared_paper_positions
         self._paper_pending_orders = MT5Client._shared_paper_pending_orders
@@ -94,9 +96,23 @@ class MT5Client:
 
                     if not ensure_mt5_terminal():
                         err = mt5.last_error()
-                        logger.error(f"MT5 initialization failed: {err}")
+                        # Log once per distinct reason, not once per attempt.
+                        # This sits inside a six-attempt backoff loop that every
+                        # broker-touching worker calls, so an unconditional
+                        # ERROR here produced 544 lines in 30 minutes on the live
+                        # platform — for a state that is expected (no terminal
+                        # running) and already explained by the gate's own
+                        # warning. An ERROR that fires 18 times a minute for a
+                        # known condition is how a real error gets missed.
+                        if err != self._last_init_error:
+                            self._last_init_error = err
+                            logger.warning(
+                                "MT5 not available (%s). Market data and execution "
+                                "report as unavailable until a terminal is running.", err,
+                            )
                         return False
                     self.is_connected = True
+                    self._last_init_error = None
                     acc = mt5.account_info()
                     if acc:
                         logger.info(f"Connected to MT5 Server: {acc.server} | Login: #{acc.login} | Equity: ${acc.equity:.2f}")

@@ -143,6 +143,11 @@ def test_a_live_frame_is_stamped_with_a_verdict(monkeypatch):
     monkeypatch.setattr(df_mod, "mt5", _FakeMT5)
     # Deriving the real offset needs a live terminal; pin it.
     monkeypatch.setattr(df_mod, "broker_utc_offset", lambda **kwargs: 0)
+    # The gate is not what this test is about, and leaving it live made the test
+    # depend on whether a MetaTrader terminal happened to be running on the
+    # machine — it passed on a desktop with one open and fell back to
+    # SYNTHETIC_FALLBACK without. Stubbed, the freshness stamp is what is tested.
+    monkeypatch.setattr(df_mod, "ensure_mt5_terminal", lambda *a, **k: True)
 
     frame = df_mod.DataFeedEngine(mt5_client=_Client()).fetch_rates("EURUSD", "H1", num_bars=3)
 
@@ -383,3 +388,100 @@ def test_the_orchestrator_still_decides_on_a_fresh_frame(monkeypatch):
         assert res["decision"] is not None
     finally:
         orch.stop()
+
+
+# ---------------------------------------------------------------------------
+# Log volume on the fallback path.
+#
+# A missing terminal is expected here (paper mode never establishes one, and a
+# stopped terminal is not a fault), but the warning sat inside `fetch_rates`,
+# which runs per symbol per timeframe on every 8s cache expiry. Measured on
+# `HM_start.py live` with no terminal: ~3,300 WARNING lines in 17 minutes, all
+# the same sentence. That is how a real error gets missed, so the line is now
+# one per (symbol, timeframe) and the set is cleared on recovery.
+# ---------------------------------------------------------------------------
+
+import logging  # noqa: E402  (grouped with the tests that use it)
+
+
+class TestFallbackWarningIsNotRepeated:
+    @staticmethod
+    def _engine(monkeypatch, df_mod):
+        class _Client:
+            mode = "live"
+
+            @staticmethod
+            def resolve_symbol_name(name):
+                return name
+
+        monkeypatch.setattr(df_mod, "MT5_AVAILABLE", True)
+        monkeypatch.setattr(df_mod, "ensure_mt5_terminal", lambda *a, **k: False)
+        return df_mod.DataFeedEngine(mt5_client=_Client())
+
+    def test_one_warning_per_symbol_timeframe_not_per_fetch(self, monkeypatch, caplog):
+        import jarvis.market.data_feed as df_mod
+
+        engine = self._engine(monkeypatch, df_mod)
+        with caplog.at_level(logging.WARNING, logger="JARVIS_DataFeed"):
+            # Varying num_bars defeats the 8s cache, so each call really does
+            # reach the fallback branch: without the de-dup this is 4 lines.
+            for bars in (100, 200, 300, 400):
+                engine.fetch_rates("EURUSD", "H1", num_bars=bars)
+
+        lines = [r for r in caplog.records if "falls back to synthetic bars" in r.getMessage()]
+        assert len(lines) == 1, f"expected one line, got {len(lines)}"
+
+    def test_a_different_timeframe_is_its_own_line(self, monkeypatch, caplog):
+        """One line per symbol/timeframe, not one per symbol and not one total."""
+        import jarvis.market.data_feed as df_mod
+
+        engine = self._engine(monkeypatch, df_mod)
+        with caplog.at_level(logging.WARNING, logger="JARVIS_DataFeed"):
+            engine.fetch_rates("EURUSD", "H1", num_bars=100)
+            engine.fetch_rates("EURUSD", "H1", num_bars=200)
+            engine.fetch_rates("EURUSD", "M15", num_bars=100)
+
+        lines = [r for r in caplog.records if "falls back to synthetic bars" in r.getMessage()]
+        assert len(lines) == 2, f"expected H1 once and M15 once, got {len(lines)}"
+
+    def test_recovery_is_announced_and_rearms_the_warning(self, monkeypatch, caplog):
+        """A *later* outage must still warn - a set that is never cleared would
+        silence the second outage forever."""
+        import jarvis.market.data_feed as df_mod
+
+        engine = self._engine(monkeypatch, df_mod)
+        with caplog.at_level(logging.WARNING, logger="JARVIS_DataFeed"):
+            engine.fetch_rates("EURUSD", "H1", num_bars=100)
+
+        # Terminal comes back: the next fetch is live, not synthetic.
+        class _FakeMT5:
+            @staticmethod
+            def copy_rates_from_pos(symbol, timeframe, start, count):
+                import numpy as _np
+
+                return _np.array(
+                    [(int(time_now()), 1.0, 1.1, 0.9, 1.05, 10)],
+                    dtype=[
+                        ("time", "i8"), ("open", "f8"), ("high", "f8"),
+                        ("low", "f8"), ("close", "f8"), ("tick_volume", "i8"),
+                    ],
+                )
+
+        monkeypatch.setattr(df_mod, "mt5", _FakeMT5)
+        monkeypatch.setattr(df_mod, "broker_utc_offset", lambda **kwargs: 0)
+        monkeypatch.setattr(df_mod, "ensure_mt5_terminal", lambda *a, **k: True)
+        with caplog.at_level(logging.INFO, logger="JARVIS_DataFeed"):
+            frame = engine.fetch_rates("EURUSD", "H1", num_bars=500)
+
+        assert frame.attrs["data_source"] == "LIVE_MT5"
+        assert any("terminal is back" in r.getMessage() for r in caplog.records)
+        assert engine._terminal_unavailable_warned == set()
+
+        # Outage again: it must warn, not stay silent.
+        monkeypatch.setattr(df_mod, "ensure_mt5_terminal", lambda *a, **k: False)
+        caplog.clear()  # records accumulate across the test; count only this outage
+        with caplog.at_level(logging.WARNING, logger="JARVIS_DataFeed"):
+            engine.fetch_rates("EURUSD", "H1", num_bars=600)
+
+        lines = [r for r in caplog.records if "falls back to synthetic bars" in r.getMessage()]
+        assert len(lines) == 1, "the second outage was silenced"

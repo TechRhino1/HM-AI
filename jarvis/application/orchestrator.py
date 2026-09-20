@@ -115,7 +115,19 @@ class JarvisOrchestrator:
 
         self.event_bus.subscribe('trade_closed', self._on_trade_closed)
 
-        self.mt5_client = MT5Client(magic_number=magic_number, mode=self.mode)
+        # `auto_init=False`: connecting in the constructor is what stops the
+        # platform from serving. Measured on `HM_start.py live` with the terminal
+        # down — `py-spy dump` put MainThread here, in
+        # `MT5Client.__init__ -> init_connection -> TimeoutGuard.run_sync`,
+        # waiting on a guard thread that was itself stuck inside
+        # `mt5.initialize()`. That call blocks in native code HOLDING THE GIL, so
+        # the guard could not even be scheduled to time out, and the main thread
+        # never reached `run_web_server`. Nothing needs the eager call: every
+        # operation goes through `_reconnect_if_needed()`, which connects on
+        # first use. Constructing without connecting means the web server binds
+        # even when the broker is unreachable — which is exactly when an operator
+        # needs the UI.
+        self.mt5_client = MT5Client(magic_number=magic_number, mode=self.mode, auto_init=False)
         self.data_feed = DataFeedEngine(self.mt5_client)
         self.context_engine = MarketContextEngine()
         self.regime_classifier = MarketRegimeClassifier()

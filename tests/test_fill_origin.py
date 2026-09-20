@@ -209,7 +209,10 @@ class SyncStampsBrokerTest(unittest.TestCase):
         )
         fake = SimpleNamespace(
             terminal_info=lambda: SimpleNamespace(connected=True),
-            initialize=lambda: True,
+            # `**kw` because the gate calls initialize(timeout=...): a fake that
+            # refuses the kwarg makes the gate report "no terminal" and the sync
+            # silently does nothing.
+            initialize=lambda **kw: True,
             history_deals_get=lambda *a, **k: [deal],
         )
         with patch.dict(sys.modules, {"MetaTrader5": fake}), \

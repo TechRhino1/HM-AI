@@ -19,6 +19,7 @@ These tests assert the client dials the gate, not the terminal.
 
 from __future__ import annotations
 
+import logging
 import unittest
 from unittest import mock
 
@@ -106,6 +107,38 @@ class InitGateTest(unittest.TestCase):
             client = self._client()
             client.init_connection()
         self.assertEqual(client.mode, "paper")
+
+    def test_a_dead_terminal_is_not_logged_once_per_attempt(self):
+        """Measured: 544 ERROR lines in 30 minutes on the live platform.
+
+        `_init` runs inside a six-attempt backoff loop that every
+        broker-touching worker calls, so an unconditional log here fires ~18
+        times a minute for a condition that is expected and already explained by
+        the gate's own warning. That volume is how a real error gets missed.
+        """
+        fake = _FakeMT5()
+        with mock.patch.object(mc, "MT5_AVAILABLE", True), \
+                mock.patch.object(mc, "mt5", fake), \
+                mock.patch("time.sleep", lambda *_a, **_k: None), \
+                mock.patch("jarvis.data.broker_symbols.ensure_mt5_terminal",
+                           return_value=False), \
+                self.assertLogs(mc.logger, level="WARNING") as captured:
+            client = self._client()
+            client.init_connection()
+            client.init_connection()
+
+        records = captured.records
+        not_available = [r for r in records if "MT5 not available" in r.getMessage()]
+        self.assertEqual(len(not_available), 1,
+                         [r.getMessage() for r in records])
+        self.assertEqual(
+            [r.levelname for r in records if r.levelno >= logging.ERROR], [],
+            "an expected condition (no terminal) must not be logged at ERROR",
+        )
+        self.assertEqual(
+            fake.initialize_calls, 0,
+            "the retry loop reached the terminal instead of the gate",
+        )
 
 
 if __name__ == "__main__":

@@ -52,7 +52,9 @@ class _FakeMT5:
     def terminal_info(self):
         return SimpleNamespace(connected=True)
 
-    def initialize(self):
+    def initialize(self, **kw):
+        # Mirrors the real signature: the gate passes `timeout=` so that a
+        # missing terminal cannot block for the package's 60s default.
         return True
 
     def history_deals_get(self, *args, **kwargs):

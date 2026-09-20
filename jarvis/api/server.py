@@ -8,6 +8,7 @@ import hashlib
 import logging
 import mimetypes
 import math
+import socketserver
 from datetime import datetime, timezone, timedelta
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
@@ -422,11 +423,22 @@ class JarvisRequestHandler(BaseHTTPRequestHandler):
                 snap = self.state_manager.get_state_snapshot()
                 acc_dict = snap.get("account")
                 if not acc_dict or acc_dict.get("balance", 0) == 0:
-                    acc = self.mt5_client.get_account_snapshot()
-                    pos = self.mt5_client.get_open_positions()
-                    if acc and acc.login > 0:
-                        self.state_manager.sync_broker_state(acc, pos)
-                    snap = self.state_manager.get_state_snapshot()
+                    # Only refresh from the broker when a connection is ALREADY
+                    # held. `get_account_snapshot()` connects on first use, and
+                    # `init_connection` retries with 1+2+4+8+16s backoff — so
+                    # calling it here parked a request thread for ~31s whenever
+                    # the terminal was down. Measured on the live server:
+                    # `/api/telemetry_state` timed out at 15s while every other
+                    # endpoint answered in ~0.15s, which reads as "this endpoint
+                    # is broken" rather than "a read is paying for a connect".
+                    # Connecting is the background synchroniser's job; a read
+                    # reports what is known, and reports nothing as nothing.
+                    if getattr(self.mt5_client, "is_connected", False):
+                        acc = self.mt5_client.get_account_snapshot()
+                        pos = self.mt5_client.get_open_positions()
+                        if acc and acc.login > 0:
+                            self.state_manager.sync_broker_state(acc, pos)
+                        snap = self.state_manager.get_state_snapshot()
                 
                 from jarvis.market.sessions import SessionEngine
                 sym = query.get("symbol", ["XAUUSD"])[0]
@@ -1232,6 +1244,35 @@ class JarvisRequestHandler(BaseHTTPRequestHandler):
     def _serve_options_ui(self):
         self._serve_template("india_options.html")
 
+class _NoReverseDNSHTTPServer(ThreadingHTTPServer):
+    """`ThreadingHTTPServer` without the blocking reverse-DNS lookup on bind.
+
+    `http.server.HTTPServer.server_bind` ends with
+    `self.server_name = socket.getfqdn(host)`. `getfqdn` is a REVERSE DNS
+    lookup, and where that lookup does not answer it blocks for as long as the
+    resolver takes. Measured here on `HM_start.py live`: `py-spy dump` put
+    MainThread in `server_bind -> getfqdn (socket.py:811)` while the port was
+    never opened, so the platform looked like it had hung at startup even
+    though nothing about the broker was involved. Every other symptom of a
+    wedged start (tunnels up, workers busy, banner printed) was present.
+
+    `server_name` only fills the `Server:` response header, so the literal host
+    is a correct substitute and costs nothing.
+    """
+
+    def server_bind(self):
+        socketserver.TCPServer.server_bind(self)
+        host, port = self.server_address[:2]
+        self.server_name = host
+        self.server_port = port
+
+
+def _build_server(host: str, port: int) -> ThreadingHTTPServer:
+    """One place that constructs the listener, so both entry points agree."""
+    _NoReverseDNSHTTPServer.allow_reuse_address = True
+    return _NoReverseDNSHTTPServer((host, port), JarvisRequestHandler)
+
+
 def start_server(host: str = "127.0.0.1", port: int = 8501, mt5_client: Optional[MT5Client] = None,
                  orchestrator: Optional[Any] = None) -> ThreadingHTTPServer:
     if host not in {"127.0.0.1", "::1", "localhost"} and os.environ.get("JARVIS_COOKIE_SECURE", "").lower() not in {"1", "true", "yes"}:
@@ -1241,7 +1282,7 @@ def start_server(host: str = "127.0.0.1", port: int = 8501, mt5_client: Optional
     if orchestrator is not None:
         JarvisRequestHandler.configure_orchestrator(orchestrator)
     ThreadingHTTPServer.allow_reuse_address = True
-    server = ThreadingHTTPServer((host, port), JarvisRequestHandler)
+    server = _build_server(host, port)
     JarvisRequestHandler.start_background_syncer()
     logger.info(f"HM Algo 2.0 Web Terminal Server running at http://{host}:{port}")
     return server
@@ -1255,7 +1296,7 @@ def run_web_server(port: int = 8501, host: str = "127.0.0.1", mt5_client: Option
     if orchestrator is not None:
         JarvisRequestHandler.configure_orchestrator(orchestrator)
     ThreadingHTTPServer.allow_reuse_address = True
-    server = ThreadingHTTPServer((host, port), JarvisRequestHandler)
+    server = _build_server(host, port)
     JarvisRequestHandler.start_background_syncer()
     logger.info(f"HM Algo 2.0 Web Terminal Server running at http://{host}:{port}")
     try:

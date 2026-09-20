@@ -302,6 +302,33 @@ def hm_start(mode: str = "live", port: int = 8501, host: str = "127.0.0.1", trad
     print(f" -> Admin Login                : admin / hm2026admin", flush=True)
     print("=" * 95, flush=True)
 
+    # Attach to the MetaTrader terminal BEFORE anything is served.
+    #
+    # This is the one call site allowed to LAUNCH the terminal (`allow_launch`).
+    # With no terminal running, `initialize()` starts `terminal64.exe` and can
+    # block 60-100s inside native code while HOLDING THE GIL. At boot that is
+    # acceptable — nothing is listening yet — and on a request thread it is
+    # fatal, which is why every read path leaves the flag at its default and
+    # refuses. Skipping the launch entirely is not an option: starting the
+    # terminal used to be a side effect of `initialize()` on a worker thread,
+    # so gating it out everywhere left `HM_start.bat live` booting, serving,
+    # and quietly reporting SYNTHETIC bars with no way to trade.
+    try:
+        from jarvis.data.broker_symbols import ensure_mt5_terminal
+
+        if ensure_mt5_terminal(allow_launch=True):
+            logger.info("MetaTrader 5 terminal attached; live bars and execution are available.")
+        else:
+            logger.warning(
+                "Could not attach to (or launch) the MetaTrader 5 terminal. The "
+                "platform will serve, but market data is SYNTHETIC and orders "
+                "cannot be sent. Start the terminal manually "
+                "(C:\\Program Files\\MetaTrader 5\\terminal64.exe), log in to the "
+                "account, then restart HM_start."
+            )
+    except Exception as exc:
+        logger.warning("Terminal bring-up failed: %s", exc)
+
     orch_thread = threading.Thread(target=orchestrator.start, daemon=True, name="hm_orchestrator")
     orch_thread.start()
     logger.info(f"Autonomous Multi-Asset Trading Engine active ({actual_mode} mode, style {trade_style.upper()}).")

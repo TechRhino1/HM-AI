@@ -239,6 +239,13 @@ class DataFeedEngine:
         # A symbol the broker does not offer re-warns on every poll, for every
         # timeframe. One line each, like `_stale_warned`.
         self._no_rates_warned: set = set()
+        # A missing terminal is an *expected* condition here (paper mode never
+        # establishes one, and a stopped terminal is not an error), but it is
+        # re-tested on every poll: 20 symbols x 12 timeframes x every 8s cache
+        # expiry produced ~3,300 WARNING lines in 17 minutes, which is how a
+        # real error gets missed. One line per (symbol, timeframe), and the set
+        # is cleared on recovery so a *later* outage still warns.
+        self._terminal_unavailable_warned: set = set()
         # What the last fetch actually returned. Market-data health is a
         # *measured* property of this engine; it used to be inferred from the
         # execution account's login, which reported OFFLINE forever in paper
@@ -322,15 +329,28 @@ class DataFeedEngine:
             # `copy_rates_from_pos`, the broker answers 0 rows, and every frame
             # silently becomes SYNTHETIC_FALLBACK.
             if not ensure_mt5_terminal():
-                logger.warning(
-                    "MT5 terminal unavailable for market data; %s %s falls back to "
-                    "synthetic bars. (Reading bars is independent of execution mode.)",
-                    symbol, timeframe,
-                )
+                key = (symbol, timeframe)
+                if key not in self._terminal_unavailable_warned:
+                    self._terminal_unavailable_warned.add(key)
+                    logger.warning(
+                        "MT5 terminal unavailable for market data; %s %s falls back to "
+                        "synthetic bars. (Reading bars is independent of execution mode.) "
+                        "Further fallbacks for this symbol/timeframe are silent until the "
+                        "terminal returns.",
+                        symbol, timeframe,
+                    )
                 df = self._generate_realistic_rates(symbol, timeframe, num_bars)
                 df.attrs["data_source"] = "SYNTHETIC_FALLBACK"
                 df.attrs["freshness"] = FRESHNESS_UNKNOWN
                 return df
+
+            if self._terminal_unavailable_warned:
+                logger.info(
+                    "MT5 terminal is back; market data for %d symbol/timeframe "
+                    "combination(s) is live again.",
+                    len(self._terminal_unavailable_warned),
+                )
+                self._terminal_unavailable_warned.clear()
 
             resolved_sym = self.mt5_client.resolve_symbol_name(symbol) if hasattr(self.mt5_client, "resolve_symbol_name") else symbol
             mt5_tf = TF_MAP.get(timeframe, 16385)

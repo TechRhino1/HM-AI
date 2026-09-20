@@ -96,15 +96,86 @@ _TERMINAL_READY = False
 _LAST_INIT_ATTEMPT = 0.0
 _INIT_RETRY_SEC = 30.0
 _init_lock = threading.Lock()
+# The gate is dialled from the scan loop, so a refusal re-fires once per
+# `_INIT_RETRY_SEC`. Measured on `HM_start.py live` with no terminal: 6 lines in
+# 2.5 minutes (~2,900/day) of the same sentence, which is how a real error gets
+# missed. Warn once per outage; the retry itself is unaffected. Cleared when the
+# gate next succeeds so a *later* outage still warns.
+_NO_TERMINAL_WARNED = False
+
+# `initialize()` with no terminal answering waits for the IPC pipe for a
+# DEFAULT OF 60 SECONDS, and it does so inside a native call while HOLDING THE
+# GIL. Measured on a live `HM_start.py live` with the terminal down: six workers
+# inside that call starved the main thread so completely that `run_web_server`
+# never reached `ThreadingHTTPServer` — the process stayed up for 40+ minutes,
+# started both tunnels, and never listened on :8501. A Python-side timeout
+# cannot interrupt it (the guard thread cannot even be scheduled while the GIL
+# is held), so the only lever is the C call's own timeout.
+#
+# HONEST LIMIT, measured: this bounds the ATTACH path only. When there is no
+# terminal to attach to, `initialize()` tries to launch one and the argument is
+# ignored — `initialize(timeout=8000)` had still not returned after 100s. That
+# is why the process check in `ensure_mt5_terminal` exists; this constant is the
+# second line of defence, not the first.
+# Override with JARVIS_MT5_INIT_TIMEOUT_MS.
+_INIT_TIMEOUT_MS = int(os.environ.get("JARVIS_MT5_INIT_TIMEOUT_MS", "10000"))
+
+_TERMINAL_EXE_NAMES = ("terminal64.exe", "terminal.exe")
 
 
-def ensure_mt5_terminal(mt5_module=None) -> bool:
+def _terminal_process_running() -> Optional[bool]:
+    """Is a MetaTrader 5 terminal process running? ``None`` when we cannot tell.
+
+    Cheap and non-blocking on purpose: it is the gate that keeps a 60-100s
+    GIL-holding native call out of the process. ``None`` means "no opinion" and
+    the caller proceeds as it did before this check existed, so a machine
+    without ``psutil`` is no worse off.
+    """
+    try:
+        import psutil
+    except Exception:
+        return None
+    try:
+        for proc in psutil.process_iter(["name"]):
+            name = (proc.info.get("name") or "").lower()
+            if name in _TERMINAL_EXE_NAMES:
+                return True
+        return False
+    except Exception:
+        return None
+
+
+def _is_real_mt5_package(mt5) -> bool:
+    """True only for the imported ``MetaTrader5`` package, not a stand-in.
+
+    The process check below asks the OS a question about THIS machine, which is
+    only meaningful when we are about to talk to the real package. A stand-in
+    injected through ``sys.modules`` (the test fakes) has no ``__file__``, and
+    gating it on whether a real terminal happens to be running would make every
+    test's outcome depend on the developer's desktop — the same class of
+    mistake as letting a stand-in latch ``_TERMINAL_READY``.
+    """
+    return isinstance(getattr(mt5, "__file__", None), str)
+
+
+def ensure_mt5_terminal(mt5_module=None, allow_launch: bool = False) -> bool:
     """Initialise the MT5 terminal once per process so bars are readable.
 
     Independent of execution mode on purpose. Cached on success; a failure is
     retried at most once every :data:`_INIT_RETRY_SEC` so a 1 Hz poll loop
     cannot hammer ``initialize()`` (which attaches to the terminal and is not
     cheap). Returns True only when the terminal is genuinely up.
+
+    `allow_launch` is the BOOT-TIME switch and defaults to False. With no
+    terminal running, ``initialize()`` does not merely attach — it LAUNCHES
+    ``terminal64.exe`` and waits 60-100s inside native code holding the GIL.
+    That is tolerable once, at startup, before anything needs to be served; it
+    is fatal on a request thread, which is why every read path leaves this
+    False. `HM_start.py` is the one caller that passes True, because launching
+    the terminal is exactly what starting the platform is supposed to do — it
+    used to happen as a side effect of `initialize()` and gating it out
+    everywhere left `HM_start.bat live` with no terminal and synthetic bars.
+    ``JARVIS_MT5_ALLOW_LAUNCH=1`` forces the same behaviour process-wide.
 
     `mt5_module` is honoured INSTEAD of the global package. A caller that
     supplies its own terminal owns its lifecycle, and reaching past it to the
@@ -136,7 +207,15 @@ def ensure_mt5_terminal(mt5_module=None) -> bool:
             logger.debug("injected MT5 module has no readable terminal_info: %s", exc)
             return False
         try:
-            return bool(mt5_module.initialize())
+            return bool(mt5_module.initialize(timeout=_INIT_TIMEOUT_MS))
+        except TypeError:
+            # A stand-in that predates the timeout argument. Still bounded by
+            # the caller's own guard; do not lose the attempt over a signature.
+            try:
+                return bool(mt5_module.initialize())
+            except Exception as exc:
+                logger.debug("injected MT5 module could not be initialized: %s", exc)
+                return False
         except Exception as exc:
             logger.debug("injected MT5 module could not be initialized: %s", exc)
             return False
@@ -144,21 +223,78 @@ def ensure_mt5_terminal(mt5_module=None) -> bool:
     with _init_lock:
         if _TERMINAL_READY:
             return True
-        now = time.time()
-        if now - _LAST_INIT_ATTEMPT < _INIT_RETRY_SEC:
-            return False
-        _LAST_INIT_ATTEMPT = now
         try:
             mt5 = _mt5()
         except Exception:
             return False
+
+        real_package = _is_real_mt5_package(mt5)
+
+        # The retry throttle bounds the expensive `initialize()` below. It is
+        # consulted here but only CONSUMED after the cheap checks have passed,
+        # because a refusal that costs nothing must not spend the window.
+        now = time.time()
+        if now - _LAST_INIT_ATTEMPT < _INIT_RETRY_SEC:
+            return False
+
+        # Do NOT call initialize() when there is nothing to attach to.
+        #
+        # With no terminal running, `initialize()` tries to LAUNCH one and then
+        # waits for its IPC pipe. That wait is 60-100s, it happens inside native
+        # code HOLDING THE GIL, and — measured — the `timeout=` argument does not
+        # bound it: `initialize(timeout=8000)` had still not returned after 100s.
+        # A Python-side guard cannot rescue it either, because no other thread
+        # can be scheduled to run the guard while the GIL is held.
+        #
+        # Consequence on `HM_start.py live`: the process binds :8501 and then
+        # never answers a single request, because the accept loop cannot get the
+        # GIL. `netstat` shows a listener and `curl` times out — which reads as a
+        # networking problem and is not one.
+        #
+        # Asking the OS whether the terminal is running costs microseconds and
+        # cannot block, so it is the right gate. Set JARVIS_MT5_ALLOW_LAUNCH=1 to
+        # restore the old launch-and-wait behaviour.
+        #
+        # NOTE the return below deliberately does NOT set `_LAST_INIT_ATTEMPT`.
+        # Doing so made one "no terminal" answer refuse *every* caller for the
+        # next 30s, including callers that cannot block — the suite drives this
+        # path with a stand-in module. Measured as 4 order-dependent failures (3
+        # in `test_position_id_join`, 1 in `test_fill_origin`) that each passed
+        # in isolation. Only an actual initialize() attempt spends the window.
+        launch_allowed = allow_launch or os.environ.get("JARVIS_MT5_ALLOW_LAUNCH") == "1"
+        if real_package and not launch_allowed:
+            if _terminal_process_running() is False:
+                global _NO_TERMINAL_WARNED
+                if not _NO_TERMINAL_WARNED:
+                    _NO_TERMINAL_WARNED = True
+                    logger.warning(
+                        "No MetaTrader 5 terminal process is running. Refusing to call "
+                        "initialize(): it would try to launch one and block this whole "
+                        "process for 60-100s holding the GIL, which stops the web server "
+                        "answering. Start the MetaTrader 5 terminal and retry. Market "
+                        "data falls back to synthetic bars until then; this is logged "
+                        "once per outage."
+                    )
+                return False
+
+        # Committing to the call that can block: this is what the window is for.
+        _LAST_INIT_ATTEMPT = now
+
         try:
-            if not mt5.initialize():
+            if not mt5.initialize(timeout=_INIT_TIMEOUT_MS):
                 logger.warning("MT5 initialize() failed for market data: %s", mt5.last_error())
                 return False
             if mt5.terminal_info() is None:
                 return False
             _TERMINAL_READY = True
+            if _NO_TERMINAL_WARNED:
+                # Re-arm the warning: the next outage must be reported, not
+                # silenced by the fact that we already complained once.
+                _NO_TERMINAL_WARNED = False
+                logger.info(
+                    "MetaTrader 5 terminal is now available for market data; "
+                    "the no-terminal warning is re-armed."
+                )
             logger.info("MT5 terminal initialized for market data.")
             return True
         except Exception as exc:
@@ -189,11 +325,12 @@ def reset_cache() -> None:
     a symbol resolved against one broker stays resolved after switching to
     another, and `_TERMINAL_READY` would suppress re-initialization.
     """
-    global _TERMINAL_READY, _LAST_INIT_ATTEMPT
+    global _TERMINAL_READY, _LAST_INIT_ATTEMPT, _NO_TERMINAL_WARNED
     _CACHE.clear()
     _FAILED.clear()
     _TERMINAL_READY = False
     _LAST_INIT_ATTEMPT = 0.0
+    _NO_TERMINAL_WARNED = False
 
 
 def probe_symbol(name: str, mt5_module=None) -> bool:

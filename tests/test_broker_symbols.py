@@ -68,9 +68,14 @@ class FakeMT5:
         self.raise_on = set(raise_on)
         self.calls = {"initialize": 0, "terminal_info": 0, "symbol_info": [],
                       "symbol_select": [], "copy_rates": [], "symbols_get": 0}
+        self.init_timeouts = []
 
-    def initialize(self):
+    def initialize(self, **kw):
+        # Mirrors the real signature: `initialize(timeout=...)` is the ONLY way
+        # to stop a dead terminal blocking for 60s while holding the GIL, so a
+        # fake that swallows the kwarg would hide the defect entirely.
         self.calls["initialize"] += 1
+        self.init_timeouts.append(kw.get("timeout"))
         return self._initialize
 
     def last_error(self):
@@ -172,12 +177,180 @@ class TestEnsureTerminal:
     def test_an_exception_from_initialize_is_swallowed(self, broker, monkeypatch):
         class Boom:
             TIMEFRAME_H1 = H1
-            def initialize(self):
+            def initialize(self, **kw):
                 raise RuntimeError("terminal on fire")
             def last_error(self):
                 return (-1, "boom")
         monkeypatch.setitem(sys.modules, "MetaTrader5", Boom())
         assert bs.ensure_mt5_terminal() is False
+
+    def test_initialize_is_always_bounded(self, broker):
+        """A dead terminal must cost seconds, not the package's 60s default.
+
+        Measured consequence of the default: six workers inside `initialize()`
+        held the GIL almost continuously, so `Thread.start()` could not complete
+        and the main thread never built `ThreadingHTTPServer` — HM stayed up for
+        40+ minutes with no listener on :8501. A Python-side timeout cannot
+        interrupt the native call, so this kwarg is the only lever there is.
+        """
+        mt5 = broker(initialize=False)
+        bs.ensure_mt5_terminal()
+        assert mt5.init_timeouts == [bs._INIT_TIMEOUT_MS]
+        assert 0 < bs._INIT_TIMEOUT_MS <= 30_000, (
+            f"_INIT_TIMEOUT_MS={bs._INIT_TIMEOUT_MS} is not a useful bound; the "
+            f"point is to be far below the package's 60s default"
+        )
+
+    def test_the_retry_still_pays_the_bound_every_time(self, broker, monkeypatch):
+        """A bounded call must not become an unbounded one on the retry path."""
+        mt5 = broker(initialize=False)
+        bs.ensure_mt5_terminal()
+        monkeypatch.setattr(bs, "_LAST_INIT_ATTEMPT", time.time() - bs._INIT_RETRY_SEC - 1)
+        bs.ensure_mt5_terminal()
+        assert mt5.init_timeouts == [bs._INIT_TIMEOUT_MS, bs._INIT_TIMEOUT_MS]
+
+    def test_a_stand_in_without_the_kwarg_is_still_used(self, broker, monkeypatch):
+        """An injected module that predates `timeout=` must not lose the attempt."""
+        class Old:
+            TIMEFRAME_H1 = H1
+            def initialize(self):
+                return True
+            def terminal_info(self):
+                return object()
+            def last_error(self):
+                return (-1, "n/a")
+        assert bs.ensure_mt5_terminal(mt5_module=Old()) is True
+
+
+class TestNoTerminalProcess:
+    """`initialize()` must not be called when there is nothing to attach to.
+
+    Measured: with no terminal running, `initialize()` tries to LAUNCH one and
+    blocks 60-100s inside native code holding the GIL, and the `timeout=`
+    argument does not bound it — `initialize(timeout=8000)` had still not
+    returned after 100s. On `HM_start.py live` that leaves a process that has
+    bound :8501 and never answers a request, because the accept loop can never
+    take the GIL. Asking the OS whether the terminal is running costs
+    microseconds and cannot block.
+    """
+
+    def _real_looking(self, broker, **kw):
+        mt5 = broker(**kw)
+        # Only the imported package is gated on the machine's process list.
+        mt5.__file__ = "C:/fake/MetaTrader5/__init__.py"
+        return mt5
+
+    def test_no_terminal_process_means_no_in_process_initialize(self, broker, monkeypatch):
+        mt5 = self._real_looking(broker, known=["XAUUSD"])
+        monkeypatch.setattr(bs, "_terminal_process_running", lambda: False)
+        assert bs.ensure_mt5_terminal() is False
+        assert mt5.calls["initialize"] == 0, (
+            "called initialize() with no terminal running — that is the call that "
+            "freezes the whole process for 60-100s"
+        )
+        assert bs.terminal_ready() is False
+
+    def test_a_running_terminal_process_still_initializes(self, broker, monkeypatch):
+        mt5 = self._real_looking(broker, known=["XAUUSD"])
+        monkeypatch.setattr(bs, "_terminal_process_running", lambda: True)
+        assert bs.ensure_mt5_terminal() is True
+        assert mt5.calls["initialize"] == 1
+
+    def test_a_stand_in_is_never_gated_on_the_desktop(self, broker, monkeypatch):
+        """A test fake must not depend on whether a terminal runs on this machine."""
+        mt5 = broker(known=["XAUUSD"])          # no __file__ -> not the real package
+        monkeypatch.setattr(bs, "_terminal_process_running", lambda: False)
+        assert bs.ensure_mt5_terminal() is True
+        assert mt5.calls["initialize"] == 1
+
+    def test_an_unanswerable_process_check_is_not_a_veto(self, broker, monkeypatch):
+        """No psutil -> no opinion -> behave as before this check existed."""
+        mt5 = self._real_looking(broker, known=["XAUUSD"])
+        monkeypatch.setattr(bs, "_terminal_process_running", lambda: None)
+        assert bs.ensure_mt5_terminal() is True
+        assert mt5.calls["initialize"] == 1
+
+    def test_allow_launch_restores_the_old_behaviour(self, broker, monkeypatch):
+        mt5 = self._real_looking(broker, known=["XAUUSD"])
+        monkeypatch.setattr(bs, "_terminal_process_running", lambda: False)
+        monkeypatch.setenv("JARVIS_MT5_ALLOW_LAUNCH", "1")
+        assert bs.ensure_mt5_terminal() is True
+        assert mt5.calls["initialize"] == 1
+
+    def test_the_boot_path_may_launch_the_terminal(self, broker, monkeypatch):
+        """`HM_start` is allowed to LAUNCH the terminal; read paths are not.
+
+        Launching used to be a side effect of `initialize()`, so refusing it on
+        every path left `HM_start.bat live` booting, serving, and reporting
+        SYNTHETIC bars with no way to trade.
+        """
+        mt5 = self._real_looking(broker, known=["XAUUSD"])
+        monkeypatch.setattr(bs, "_terminal_process_running", lambda: False)
+
+        assert bs.ensure_mt5_terminal(allow_launch=True) is True
+        assert mt5.calls["initialize"] == 1, "the boot path must be allowed to launch"
+
+    def test_a_read_path_still_refuses_to_launch(self, broker, monkeypatch):
+        """Control for the above: the default must keep the freeze fixed."""
+        mt5 = self._real_looking(broker, known=["XAUUSD"])
+        monkeypatch.setattr(bs, "_terminal_process_running", lambda: False)
+
+        assert bs.ensure_mt5_terminal() is False
+        assert mt5.calls["initialize"] == 0
+
+    def test_a_cheap_refusal_does_not_open_a_retry_window(self, broker, monkeypatch):
+        """The throttle must bound only the call that can actually block.
+
+        Regression: the retry throttle ran BEFORE the cheap process check, so a
+        single "no terminal" answer refused *every* caller for the next 30s -
+        even though the answer was already known and the refusal cost nothing.
+        """
+        self._real_looking(broker, known=["XAUUSD"])
+        monkeypatch.setattr(bs, "_terminal_process_running", lambda: False)
+
+        assert bs.ensure_mt5_terminal() is False
+        assert bs._LAST_INIT_ATTEMPT == 0.0, (
+            "a refusal that cost nothing opened a 30s window that blocks everyone"
+        )
+
+    def test_a_stand_in_caller_survives_an_earlier_refusal(self, broker, monkeypatch):
+        """The victim shape, reproduced directly.
+
+        Refuse the real package (no terminal), then serve a stand-in caller - the
+        way the suite drives `sync_mt5_history`. Before the fix the second call
+        was refused from the first call's retry window, which is what made 3
+        `test_position_id_join` tests and 1 `test_fill_origin` test fail in a full
+        run while each passed in isolation.
+        """
+        self._real_looking(broker, known=["XAUUSD"])
+        monkeypatch.setattr(bs, "_terminal_process_running", lambda: False)
+        assert bs.ensure_mt5_terminal() is False
+
+        stand_in = broker(known=["XAUUSD"])   # no __file__ -> cannot block
+        assert bs.ensure_mt5_terminal() is True, (
+            "the earlier refusal blacked out a caller that could not block"
+        )
+        assert stand_in.calls["initialize"] == 1
+
+    def test_the_real_package_is_recognised(self):
+        """`_is_real_mt5_package` must not be trivially True or False.
+
+        The whole gate hangs off this: if it returned True for a test fake, the
+        fake's outcome would depend on the developer's desktop; if it returned
+        False for the real package, the 60-100s freeze would come back.
+        """
+        import types
+        real = types.ModuleType("MetaTrader5")
+        real.__file__ = "C:/.../site-packages/MetaTrader5/__init__.py"
+        assert bs._is_real_mt5_package(real) is True
+        assert bs._is_real_mt5_package(object()) is False
+        assert bs._is_real_mt5_package(None) is False
+
+    def test_the_installed_package_actually_has_a_file(self):
+        """Guards the guard: the real module must expose `__file__`, or
+        `_is_real_mt5_package` would silently disable the process check."""
+        import MetaTrader5
+        assert isinstance(getattr(MetaTrader5, "__file__", None), str)
 
     def test_the_first_call_always_attempts(self, broker, monkeypatch):
         """_LAST_INIT_ATTEMPT starts at 0, so a fresh process is never throttled."""
