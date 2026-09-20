@@ -33,7 +33,7 @@ gap: **`TRAPS.md` § Running the platform**.
 
 ## Baselines
 
-**pytest 2920 passed / 0 failed / 20 deselected** (2026-09-20) — green, not tolerated. Parse
+**pytest 2930 passed / 0 failed / 20 deselected** (2026-09-20) — green, not tolerated. Parse
 `--junit-xml=...`: the harness truncates pytest's stdout tail, so `-rf` never prints.
 
 **Run the suite with `env -u HTTP_PROXY -u HTTPS_PROXY -u http_proxy -u https_proxy NO_PROXY='*'` and

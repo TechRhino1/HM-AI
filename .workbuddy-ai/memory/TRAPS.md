@@ -1846,3 +1846,34 @@ to make.
 **Rule: a schema migration fires on first open.** If a repro must touch the real store, copy it
 first (`cp` to `.scratch/`), and remember that `TradeMemory` resolves *relative* paths against
 `DATA_DIR`, so pass an absolute one.
+
+### 41a — A finding can be right about the code and wrong about the fix
+
+AI4 said "the gate/sizing probability excludes the only fitted model". True — `MetaLabeler` is the
+only batch-fitted model and it is excluded. But it had already been measured: **test AUC 0.481**
+(train 0.746), 0.479 with the primary model's outputs (train 0.783), and top-decile selection
+**lowered** the win rate (0.341 vs a 0.359 base).
+
+Wiring in a coin-flip model would be a regression dressed as a fix. **Measure before accepting the
+stated remedy**, and if the measurement contradicts it, record the rejection *with the numbers* and
+leave a test that fails if someone applies it later. "Excluded" is not the same as "should be
+included".
+
+### 41a2 — A check that is absent is not the same as a check that passed
+
+`predict_proba` returns `None` with no model, and the code then simply never added
+`"ML Meta-Label Confirmation"` to `quality_gate.checks`. Because a missing check does not block,
+"we never evaluated this" read exactly like "we evaluated it and it confirmed".
+
+Same shape as D19 (NULL vs 0.0), C2 (a price of 0.0), and AI5 (a fabricated 85.0): **an absent value
+inherits a benign default and the difference is invisible.** Add an explicit `not_evaluated` list.
+
+Corollary: **a field nobody serialises is write-only.** `DecisionObject.to_dict` enumerated
+`quality_gate` field by field, so the new list never reached telemetry until it was added there too
+— and to the decision payload in `server.py`. Check every serialisation site, not just the schema.
+
+### 41a3 — `DecisionEngine` has no `decide()`; the entry point is `evaluate()`
+
+I wrote a source assertion against `DecisionEngine.decide` and got `AttributeError`. Guessed from the
+domain. Verify a symbol exists before asserting on its source — and note that source assertions
+couple tests to method names, so they break on a rename (accepted cost, documented each time).
