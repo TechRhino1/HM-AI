@@ -388,6 +388,56 @@ class TestTerminalReady:
 
 
 # ---------------------------------------------------------------------------
+# terminal_live
+# ---------------------------------------------------------------------------
+
+class TestTerminalLive:
+    """`terminal_live()` is the liveness-aware sibling of the latch.
+
+    The latch is correct for what it documents, but all three of its consumers
+    were asking "is the broker link up RIGHT NOW". A terminal that dies
+    mid-session left the latch True, so every synthetic frame was read as "the
+    broker does not offer this symbol" and the orchestrator refused to decide on
+    every symbol: the radar emptied and nothing traded, silently, with a warning
+    that blamed the symbol. Measured in the suite as 3 order-dependent failures
+    (`0 != 6`), each of which passed in isolation.
+    """
+
+    def test_false_before_any_initialization(self, broker):
+        assert bs.terminal_live() is False
+
+    def test_true_only_when_the_process_is_still_there(self, broker, monkeypatch):
+        broker(known=[])
+        bs.ensure_mt5_terminal()
+        assert bs.terminal_ready() is True, "precondition: the latch is set"
+
+        monkeypatch.setattr(bs, "_terminal_process_running", lambda: True)
+        assert bs.terminal_live() is True
+
+        # The terminal dies: the latch stays True, this must not.
+        monkeypatch.setattr(bs, "_terminal_process_running", lambda: False)
+        assert bs.terminal_ready() is True, "the latch is unchanged by design"
+        assert bs.terminal_live() is False, (
+            "a dead terminal must not license refusing every synthetic frame"
+        )
+
+    def test_an_unanswerable_process_check_falls_back_to_the_latch(self, broker, monkeypatch):
+        """No psutil means no opinion - do not invent a dead terminal."""
+        broker(known=[])
+        bs.ensure_mt5_terminal()
+        monkeypatch.setattr(bs, "_terminal_process_running", lambda: None)
+        assert bs.terminal_live() is True
+
+    def test_it_never_attaches(self, broker, monkeypatch):
+        """Read-only, like `terminal_ready`: a health check cannot block."""
+        mt5 = broker(known=[])
+        monkeypatch.setattr(bs, "_terminal_process_running", lambda: False)
+        bs.terminal_live()
+        bs.terminal_live()
+        assert mt5.calls["initialize"] == 0
+
+
+# ---------------------------------------------------------------------------
 # probe_symbol
 # ---------------------------------------------------------------------------
 

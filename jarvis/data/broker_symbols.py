@@ -41,6 +41,7 @@ __all__ = [
     "probe_symbol",
     "ensure_mt5_terminal",
     "terminal_ready",
+    "terminal_live",
     "reset_cache",
 ]
 
@@ -315,6 +316,37 @@ def terminal_ready() -> bool:
     suspending it. It is not a liveness probe.
     """
     return _TERMINAL_READY
+
+
+def terminal_live() -> bool:
+    """`terminal_ready()` AND the terminal process is still running.
+
+    `terminal_ready()` latches on success and never re-checks, which is right
+    for the job it documents. It is the WRONG primitive for "is the broker link
+    up right now", and that is how all three of its consumers were using it.
+
+    The failure mode is silent and total. Once the latch is True, a terminal
+    that dies mid-session leaves it True, so every frame that falls back to
+    synthetic bars is read as evidence that the broker does not offer that
+    symbol. `run_cycle_for_symbol` then refuses to decide for every symbol, the
+    radar empties, and nothing is ever traded -- while the only log line blames
+    the symbol ("this broker does not appear to offer X"), which is the opposite
+    of the truth.
+
+    Measured in the suite: with `_TERMINAL_READY` latched by an earlier test,
+    `test_multi_style_radar` goes from 6 opportunities to 0 (`0 != 6`) with
+    exactly that warning, while the same test passes in isolation. Two more
+    tests fail the same way. That is the same defect an operator hits after
+    restarting the terminal mid-session.
+
+    Costs one psutil process scan -- microseconds, cannot block, and it is the
+    same check the init gate already relies on. An unanswerable check (no
+    psutil) falls back to the latch rather than inventing a dead terminal.
+    """
+    if not _TERMINAL_READY:
+        return False
+    running = _terminal_process_running()
+    return True if running is None else running
 
 
 def reset_cache() -> None:

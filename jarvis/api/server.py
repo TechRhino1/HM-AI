@@ -18,7 +18,7 @@ from jarvis.application.state_manager import StateManager, GLOBAL_STATE
 import threading
 import time
 from jarvis.market.data_feed import DataFeedEngine, first_untrusted_frame, first_unusable_frame
-from jarvis.data.broker_symbols import terminal_ready
+from jarvis.data.broker_symbols import terminal_live
 from jarvis.api.copilot import JarvisCopilot
 from jarvis.execution.mt5_client import MT5Client
 from jarvis.data.schemas import ExecutionMode
@@ -241,7 +241,7 @@ class JarvisRequestHandler(BaseHTTPRequestHandler):
                                 # same reason and with the same
                                 # only-when-the-broker-is-reachable scope as the
                                 # orchestrator's gate.
-                                if terminal_ready():
+                                if terminal_live():
                                     _bad_role, _bad_source = first_unusable_frame(mtf)
                                     if _bad_role:
                                         logger.warning(

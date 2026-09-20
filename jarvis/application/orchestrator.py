@@ -11,7 +11,7 @@ from typing import Dict, List, Any, Optional, Tuple
 from jarvis.application.state_manager import StateManager, GLOBAL_STATE
 from jarvis.application.event_bus import EventBus, GLOBAL_EVENT_BUS
 from jarvis.market.data_feed import DataFeedEngine
-from jarvis.data.broker_symbols import terminal_ready
+from jarvis.data.broker_symbols import terminal_live
 from jarvis.market.market_context import MarketContextEngine
 from jarvis.intelligence.regime_engine import MarketRegimeClassifier
 from jarvis.intelligence.opportunity_arbiter import UniversalOpportunityArbiter
@@ -192,9 +192,13 @@ class JarvisOrchestrator:
                 acc = self.mt5_client.get_account_snapshot()
                 if acc and acc.login > 0:
                     self.state_manager.update_service_health("MT5", "CONNECTED")
-                elif terminal_ready():
+                elif terminal_live():
                     # Terminal is up and answering; we are simply not sending
                     # orders. The broker is reachable - say so.
+                    # `terminal_live()`, not the latch: reporting CONNECTED off a
+                    # latched flag keeps claiming a broker link that a died-mid-
+                    # session terminal no longer provides, and health flags must
+                    # be measured rather than inferred.
                     self.state_manager.update_service_health(
                         "MT5", "SIMULATED" if self.mode == "paper" else "CONNECTED"
                     )
@@ -399,7 +403,7 @@ class JarvisOrchestrator:
             }
 
         # 1c. Fabricated bars must not be reasoned on either, but only when the
-        # broker link is actually up. Gating on `terminal_ready()` makes this
+        # broker link is actually up. Gating on `terminal_live()` makes this
         # fire in exactly one case: we have a working terminal and it still
         # answered nothing for this symbol -- i.e. the broker does not offer it
         # (`WTI` sits in the default symbol list and is absent at XM, so the feed
@@ -407,7 +411,12 @@ class JarvisOrchestrator:
         # analysed it as if it were real). With the terminal down we keep the
         # synthetic frame so the UI still renders, and execution is already
         # blocked because `get_account_snapshot()` reports login 0.
-        if terminal_ready():
+        #
+        # `terminal_live()`, not `terminal_ready()`: the latter latches on
+        # success, so a terminal that died mid-session kept this gate firing and
+        # every symbol was refused -- the radar emptied and nothing was traded,
+        # silently. Measured: 6 opportunities became 0.
+        if terminal_live():
             bad_role, bad_source = self._first_unusable_frame(mtf_data)
             if bad_role:
                 _key = (symbol, active_trade_style)

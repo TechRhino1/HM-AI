@@ -95,6 +95,24 @@ def _no_real_terminal(monkeypatch):
     monkeypatch.setattr(df_mod, "ensure_mt5_terminal", lambda: True)
 
 
+@pytest.fixture
+def weekday_market(monkeypatch):
+    """Pin the calendar so the cold-history warm-up is reachable every day.
+
+    The warm-up and the retry it guards only run when a frame classifies as
+    STALE, and `classify_bar_freshness` answers MARKET_CLOSED instead whenever
+    `now` sits in the weekly close. A ~20h-old bar is therefore STALE
+    Monday-Friday and MARKET_CLOSED on Saturday/Sunday, so these three tests
+    silently depended on the day the suite ran: measured, 3 failures every
+    weekend and green on a weekday, with no code change between them.
+
+    The weekend rule itself is covered where it belongs —
+    `test_candle_freshness::test_the_same_gap_on_a_saturday_is_market_closed_not_stale`
+    — and the classifier still runs for real here; only the calendar is pinned.
+    """
+    monkeypatch.setattr(df_mod, "_is_weekend_gap", lambda now_utc: False)
+
+
 class FakeClient:
     """A client that resolves to the broker's real name, as live mode does."""
 
@@ -148,7 +166,7 @@ def test_terminal_unavailable_falls_back_and_says_so(monkeypatch):
 
 # ── 2. Cold-history warm-up ────────────────────────────────────────────────
 
-def test_cold_symbol_is_retried_until_history_lands(monkeypatch):
+def test_cold_symbol_is_retried_until_history_lands(monkeypatch, weekday_market):
     """The first read of a cold symbol returns a stale tail; one bounded retry
     must recover the real bars instead of refusing a good symbol."""
     now = time.time()
@@ -166,7 +184,7 @@ def test_cold_symbol_is_retried_until_history_lands(monkeypatch):
     assert df.attrs["data_source"] == "LIVE_MT5"
 
 
-def test_genuinely_stale_feed_is_still_reported_stale(monkeypatch):
+def test_genuinely_stale_feed_is_still_reported_stale(monkeypatch, weekday_market):
     """The warm-up must not become a way to hide a truly stalled feed."""
     now = time.time()
     # Every read is stale -> the retry must give up and report the truth.
@@ -179,7 +197,7 @@ def test_genuinely_stale_feed_is_still_reported_stale(monkeypatch):
     assert df.attrs["data_source"] == "LIVE_MT5"
 
 
-def test_warmup_is_paid_once_per_symbol(monkeypatch):
+def test_warmup_is_paid_once_per_symbol(monkeypatch, weekday_market):
     """A second fetch of the same symbol must not wait again."""
     now = time.time()
     fake = FakeMT5(stale_epoch=now - 20 * 3600, fresh_epoch=now - 3600, fresh_after_calls=1)
