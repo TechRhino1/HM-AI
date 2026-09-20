@@ -1916,3 +1916,35 @@ the *test*: a well-formed file whose profile *contents* don't parse escapes to t
 change with a 16-symbol consequence: 11 profiles carry a negative OOS expectancy, so the policy refuses
 most of the universe. Ship the wire **opt-in** with the measured table (11 refused / 5 tradeable), and
 let the operator decide. Completing a wiring task is not licence to change the live book.
+
+### 41c1 — A finding label without text is a plan defect, not a small omission
+
+The audit produced AI1–AI16; only AI1–AI10 reached the backlog. AI7 was transcribed as a bare label in
+a milestone's membership line and AI11–AI15 were dropped entirely — no text anywhere
+(`git log --all -S` finds only the label). **A plan whose item has no description cannot be executed or
+verified**, and the milestone's exit criteria are silently incomplete. When transcribing agent output,
+assert the count: 16 findings in, 16 rows out.
+
+### 41c2 — Discarding a model must discard its training record with it
+
+`_load_model` applied saved weights only when the feature count matched, but then read `bias` and
+`training_steps` unconditionally. Add a feature → hand-written priors reported as a fitted model with
+204 training steps. **A partial rollback leaves the new state wearing the old state's credentials.**
+Reset every derived field together, and carry a provenance flag (`weights_source`) so "fitted" is never
+indistinguishable from "never trained".
+
+**Latent is not a defence.** It does not fire today; it fires on the next schema change, silently, in
+production — and reports failure as success.
+
+### 41c3 — A swallowed save error makes learning look like it is working
+
+`_save_model_internal` caught everything with `pass`. A model that cannot be written forgets everything
+at the next restart, while `training_steps` keeps climbing **in memory**, so every in-process metric
+says it is learning. **Any counter that is incremented before the durable write is a claim about a
+future that may not happen.** Log the failure.
+
+### 41c4 — Order mutations so they do not shadow each other
+
+Mutation 1 replaced a three-line block that contained the exact line mutation 2 targeted, so mutation 2
+silently did not apply and the count understated (7/16 instead of 8/16). **Have the mutation script
+report which mutations failed to match**, and treat an unapplied mutation as zero evidence.

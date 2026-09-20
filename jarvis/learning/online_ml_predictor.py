@@ -119,6 +119,11 @@ class OnlineMLPredictor:
         self.weights = self.DEFAULT_WEIGHTS.copy()
         self.bias = 0.20  # Baseline log-odds corresponding to ~55-58% win rate
         self.training_steps = 10
+        # Where the current weights came from. "prior" means the hand-written
+        # DEFAULT_WEIGHTS -- i.e. the model has learned nothing. Every caller
+        # that reports "the model has N training steps" must be able to tell
+        # that apart from weights it actually fitted.
+        self.weights_source = "prior"
         self._lock = threading.Lock()
         self._grad_buffer = []
         self._batch_size = 3
@@ -525,6 +530,10 @@ class OnlineMLPredictor:
                 self._feature_importance = np.abs(self.weights).copy()
 
                 self._grad_buffer.clear()
+                # The weights are no longer whatever was on disk: they have been
+                # moved by this process. Keeping the label at "disk" (or worse,
+                # at "prior") would understate what the model knows.
+                self.weights_source = "trained"
                 self._save_model_internal()
 
     def get_feature_importance(self) -> Dict[str, float]:
@@ -558,8 +567,12 @@ class OnlineMLPredictor:
             }
             with open(self.model_file, "w") as f:
                 json.dump(data, f, indent=2)
-        except Exception:
-            pass
+        except Exception as exc:
+            # Silent here was the real defect: a model that cannot be written is
+            # a model that forgets everything on the next restart, and every
+            # in-process metric (training_steps, Brier) keeps climbing as if the
+            # learning were being banked.
+            logger.error("could not save model to %s: %s", self.model_file, exc)
 
     def _load_model(self):
         from jarvis.config.runtime import is_offline
@@ -570,6 +583,7 @@ class OnlineMLPredictor:
             with self._lock:
                 self.weights = self.DEFAULT_WEIGHTS.copy()
                 self._feature_importance = np.abs(self.weights).copy()
+                self.weights_source = "offline"
             return
         with self._lock:
             if os.path.exists(self.model_file):
@@ -579,10 +593,42 @@ class OnlineMLPredictor:
                     loaded_weights = data.get("weights")
                     if isinstance(loaded_weights, list) and len(loaded_weights) == self.n_features:
                         self.weights = np.array(loaded_weights, dtype=float)
+                        # Only a model whose weights we can actually apply may
+                        # contribute its fitted bias and its step count.
+                        self.bias = float(data.get("bias", self.bias))
+                        self.training_steps = int(data.get("training_steps", 10))
+                        self.weights_source = "disk"
                     else:
+                        # The saved model was fitted on a DIFFERENT feature set,
+                        # so its weights cannot be applied to this vector at all.
+                        # Its bias and its training_steps belong to that
+                        # discarded model and must be discarded with it.
+                        #
+                        # The old code kept them: after any change to
+                        # FEATURE_NAMES the predictor would report a fitted bias
+                        # and 200+ training steps while running on hand-written
+                        # priors that had never seen a trade -- every gate that
+                        # trusts `training_steps` would believe the model was
+                        # trained. Learning that did not happen, reported as
+                        # learning that did.
                         self.weights = self.DEFAULT_WEIGHTS.copy()
-                    self.bias = float(data.get("bias", self.bias))
-                    self.training_steps = int(data.get("training_steps", 10))
+                        self.bias = 0.20
+                        self.training_steps = 10
+                        self.weights_source = "prior"
+                        logger.warning(
+                            "discarded %s: saved weights have %d features but this "
+                            "build defines %d -- the model is back to untrained "
+                            "priors (training_steps reset to 10)",
+                            os.path.basename(self.model_file),
+                            len(loaded_weights) if isinstance(loaded_weights, list) else -1,
+                            self.n_features,
+                        )
                     self._feature_importance = np.abs(self.weights).copy()
                 except Exception:
                     self.weights = self.DEFAULT_WEIGHTS.copy()
+                    self._feature_importance = np.abs(self.weights).copy()
+                    self.weights_source = "prior"
+                    logger.warning(
+                        "could not read %s -- starting from untrained priors",
+                        os.path.basename(self.model_file),
+                    )

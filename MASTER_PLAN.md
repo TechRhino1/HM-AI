@@ -41,7 +41,7 @@ defects from deliberate design.
 |---|---|---|
 | Full-stack architect | topology, boundaries, flows, scalability, frontend | A1–A17 |
 | Data specialist | stores, schemas, pipelines, provenance, retention | D1–D17 |
-| AI engineer | signal, models, labels, learning, backtest validity | AI1–AI16 |
+| AI engineer | signal, models, labels, learning, backtest validity | AI1–AI16 | **Only AI1–AI10 reached the backlog table.** AI7 was transcribed as a bare label in the M3 membership line and **AI11–AI15 were dropped entirely** — their text is not in any commit, any report file, or any note, so it is unrecoverable. AI7 has been **re-derived** from its domain (see M3). AI11–AI15 remain **unknown** and the M3 exit criteria below are therefore not provably complete. Re-running that agent, or re-auditing its domain, is the only way to close this. |
 | Python expert | concurrency, error handling, deps, test quality | P1–P17 |
 
 **Every finding below was re-verified by the lead before being planned.** Two agent
@@ -811,6 +811,42 @@ and the wire through the orchestrator's own helper with a patched profile source
 itself cannot be driven without a broker, so the verdict-forwarding, the guard keying and the branch
 order are pinned by **source assertion**. **13 of 27 tests go red** under `.scratch/mutate_ai9.py`, and
 all ten mutations kill at least one test.
+
+**AI7 — a discarded model must not keep its training record.** *Re-derived: the original text was
+lost in transcription (see §4).* Auditing its domain — models and learning validity inside M3 —
+found this in `OnlineMLPredictor._load_model`:
+
+```python
+if isinstance(loaded_weights, list) and len(loaded_weights) == self.n_features:
+    self.weights = np.array(loaded_weights, dtype=float)
+else:
+    self.weights = self.DEFAULT_WEIGHTS.copy()      # fitted weights discarded
+self.bias = float(data.get("bias", self.bias))      # ...but its bias kept
+self.training_steps = int(data.get("training_steps", 10))   # ...and its step count
+```
+
+The moment `FEATURE_NAMES` changes — which is what an ML system does — every learned weight is
+thrown away and replaced by the hand-written priors, while the **discarded** model's fitted bias and
+its step count are still reported. The live artefact `jarvis_online_ml_weights.json` records **204
+training steps** today, so adding one feature would report 204 steps on weights that have never seen
+a trade. Everything that reads `training_steps` — drift detection, the annealing schedule
+`eta = lr / sqrt(training_steps)`, any "is it trained yet?" gate — would be reasoning about a model
+that does not exist.
+
+**This is latent, and that is not a defence.** It does not fire today (24 saved == 24 defined). It
+fires on the next feature addition, silently, in production, and presents the failure as success.
+
+Fixed: a discarded model is discarded whole — bias and step count reset with the weights. New
+`weights_source` flag, set on every path (`prior` / `disk` / `trained` / `offline`), so "fitted" is
+never indistinguishable from "never trained". Two adjacent silences fixed with it:
+
+* a corrupt artefact left no provenance at all;
+* `_save_model_internal` swallowed every write error with a bare `pass`, so a model that could not
+  persist — and therefore forgot everything at the next restart — looked exactly like one that was
+  learning, because `training_steps` kept climbing in memory. It now logs.
+
+`tests/test_ml_weights_cannot_claim_training.py` (16). **8 of 16 go red** under
+`.scratch/mutate_ai7.py`, one per mutation.
 
 ### M4 — Raise the architecture ceiling *(~3 weeks)*
 A2/A4 engine process split, A1 one radar contract, A13 shared frontend modules, P10 packaging,
