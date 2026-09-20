@@ -1749,3 +1749,56 @@ I first skipped the ML update entirely; the suite caught it
 to avoid guessing a step size is the wrong trade** — and note the failing fixture was unrealistic (it
 set only `features`, no geometry), so the temptation was to "fix" the test. Fix the fix instead; the
 production path always stores `entry`/`sl`/`risk_dist`.
+
+### 40y — Hermeticity needs BOTH ends: construction and the run
+
+`offline_mode()` around a backtest's `run_backtest()` is **too late**. Every stateful component on
+the decision path (`OnlineMLPredictor`, `MetaLabeler`, `ConfidenceCalibrationEngine`,
+`SelfLearningEngine`, `RealtimeOptimizer`, and `StrategyBandit` via `StrategySelector`) loads
+**eagerly in its own constructor** — measured: the predictor woke with 199 live training steps and
+weights `[0.363, ...]` where the neutral prior is `[0.35, ...]` / 10 steps.
+
+And wrapping only the constructor is **not enough**: `SelfLearningEngine.get_regime_multiplier` and
+`get_pattern_win_rate_and_ev` consult `is_offline()` at *call* time and hit the live journal
+otherwise (0.9 vs 1.0; 25 samples / 0.39 win rate vs 0 / 0.50).
+
+**Rule: a hermeticity fix must cover where state is LOADED and where it is READ.** Check both.
+
+### 40y2 — Do not assert "the value looks neutral" when the state file is untracked
+
+`jarvis_online_ml_weights.json` is **untracked**, so a fresh clone has none: a test asserting
+"the backtest's ML weights are the neutral prior" passes with the fix removed. It is a test that
+cannot go red.
+
+Fix: spy on the mechanism, not the artefact. The components do `from jarvis.config.runtime import
+is_offline` *inside* their methods, so `monkeypatch.setattr(runtime, "is_offline", spy)` is picked up
+at call time — then assert the spy saw `True`. Works on a machine with no learned state at all.
+
+**Rule: before relying on a fixture that already exists, check whether it is committed.** A test
+whose precondition is "someone has been trading" is not a test.
+
+### 40y3 — `is_offline()` is read at CALL time, not construction time
+
+I reported `SelfLearningEngine` as ignoring the flag, because my probe built the engine inside
+`offline_mode()` and then called the getters *outside* it. The guards were correct; my harness was
+wrong. When a component defers its guard check into the method, the probe must be inside the context
+too — and this cuts the other way as well: it is exactly why the run has to be wrapped (40y).
+
+### 40y4 — Grep for the CLASS, not the attribute name
+
+Looking for a bandit on the backtest path, I grepped `self.bandit` / `self.strategy_bandit` and
+found nothing. `DecisionEngine` actually holds `self.ensemble_bandit = EnsembleStrategyBandit()`
+(no disk I/O) **and** builds `StrategySelector()`, which owns the persisting `StrategyBandit`.
+
+**To find a dependency, grep the class name** (`StrategyBandit`), not the attribute you expect
+(`self.bandit`). Attribute names are chosen by the caller and will not match your guess.
+
+### 40y5 — Some defects are real but not mutation-visible
+
+A leaky backtest and a hermetic one produce **identical** results when run twice in a row, because
+both read the same static file. The damage is that today's backtest disagrees with next month's —
+which no unit test can show.
+
+**Rule: when a mutation cannot turn a test red, say so** rather than inflating the count. Pin what
+is provable (the flag was engaged), document what is not (temporal reproducibility), and do not
+claim the fix is proven by a test that would pass without it.

@@ -1,6 +1,6 @@
 # HM-AI / HM Algo 2.0 — index
 
-Injected every session and **hard-truncated at ~6,520 bytes** — stay under or the tail vanishes.
+Injected every session and **hard-truncated at ~6,520 bytes** — stay under or the tail is lost.
 Pointers and paid-for rules only; detail lives elsewhere.
 
 * Root: **`MASTER_PLAN.md`** — ranked backlog + milestones M0–M5. **`AGENT_SYSTEM.md`** — the
@@ -33,17 +33,16 @@ gap: **`TRAPS.md` § Running the platform**.
 
 ## Baselines
 
-**pytest 2894 passed / 0 failed / 20 deselected** (2026-09-20) — green, not tolerated. Parse
+**pytest 2902 passed / 0 failed / 20 deselected** (2026-09-20) — green, not tolerated. Parse
 `--junit-xml=...`: the harness truncates pytest's stdout tail, so `-rf` never prints. Weekend-only
 failures are a clock dependency — **`TRAPS.md` § 40n**.
 
 **Run the suite with `env -u HTTP_PROXY -u HTTPS_PROXY -u http_proxy -u https_proxy NO_PROXY='*'` and
 `--basetemp=.scratch/ptmp-$TS`** — a proxy hangs localhost HTTP; cleaning >50 temp entries trips the
-bulk-delete guard: exit 1 with every test passing. A *fixed* one is worse: pytest removes it at
-session start.
+bulk-delete guard: exit 1 with every test passing. A *fixed* one is worse: pytest removes it.
 
-`tools/` — 11 harnesses, all green; counts and failure modes: **`TRAPS.md` § Tool harnesses**.
-`tools/gcm_wrap.sh` = the push helper.
+`tools/` — 11 harnesses, all green; failure modes: **`TRAPS.md` § Tool harnesses**. `tools/gcm_wrap.sh`
+= the push helper.
 
 ## Rules worth repeating
 
@@ -51,13 +50,13 @@ session start.
   call `broker_symbols.ensure_mt5_terminal()` itself or every frame becomes synthetic. Health flags
   must be **measured**, not inferred. **Never call `mt5.initialize()` on a request path** — with no
   terminal it holds the GIL forever and one request wedges the server (D18); only not making the call
-  is a fix, and the proof must come from outside the process.
+  is a fix.
 * **The UI has no request timeout** — an empty result must still repaint; a watchdog must state a
   stall.
 * **MT5 times are BROKER-SERVER time, not UTC** — use `jarvis/data/broker_time.py`. Local probes:
   **`curl --noproxy '*'`** (else "upstream connect failed").
-* **A frontend that reads a key the server never sends renders the empty state on success** (3
-  instances) — read the real payload before writing its reader.
+* **A frontend reading a key the server never sends renders the empty state on success** (3×) — read
+  the real payload first.
 * **A refused order is answered with HTTP 200** — decide from the body's `status`
   (`FAILED`/`BLOCKED`), never `res.ok`. Broker sends `reason`; server validation sends `error` with
   400.
@@ -65,18 +64,17 @@ session start.
   EXIT time; **neither column is safe**. Run `tools/audit_trades.py`. **Shared defect? grep the other
   front end first.**
 * **`curl -s -o /dev/null -w '%{http_code}'` exits 23** — an `&&` chain built on it silently skips
-  every later step. Use `;` between probes.
+  later step. Use `;` between probes.
 * **Risk limits come from `config/settings.json`**; risk state is scoped by execution mode. Re-anchor
   only via `tools/reset_risk_baseline.py`. **`TRAPS.md` § Risk control.**
 * **A price must be finite AND `> 0`.** `_is_finite(0.0)` is True, and an empty frame gives
-  `bid = 0.0` — from which an entry was minted and a **negative** stop passed the last gate. One shared
-  predicate, `schemas.is_observed_price`. C2 closed.
-* **A label must describe the thing it names.** Provenance reported for the anchor price, not the
-  series (D5); `expected_value` overwritten with the outcome (112/112); `ai_score` fabricated `85.0`.
-* **Pruning per-ticket state on close destroys the only record of the path** — the close hardcoded
-  `mfe=0.0` on 36/36. D19: retain, NULL when unsampled.
+  `bid = 0.0` — from which an entry was minted and a **negative** stop passed the last gate. C2 closed.
+* **A label must describe the thing it names.** Provenance of the anchor price, not the series (D5);
+  `expected_value` = the outcome (112/112); `ai_score` = `85.0`.
+* **Pruning per-ticket state destroys the only record of the path** — close hardcoded `mfe=0.0` on
+  36/36. D19: retain, NULL when unsampled.
 * **Truncating values cannot shrink a payload spread across many small fields** — eliding every field
-  over 256 B left the 63 KB snapshot at 94%. Drop *fields*: 33% (`get_state_digest`).
+  over 256 B left the 63 KB snapshot at 94%. Drop *fields*: 33%.
 * **A hung native call holds the MT5 lock forever** — `TimeoutGuard` bounds the *caller*, not the lock;
   5/5 wedged. `TrackedRLock` bounds the wait and names the holder. Keep serialisation: MT5 bindings
   are not thread-safe.
@@ -84,6 +82,9 @@ session start.
   denominated in R → leave it alone, but the win/loss IS measured, so still record the trade. In
   `update_online` R only weights the gradient → omit the arg (None coerces to +1R). `float(x or 1.0)`
   turns `0.0` into 1.0 too. AI6.
+* **Hermeticity needs both ends.** Stateful components load eagerly in `__init__`, so wrapping only a
+  backtest's *run* is too late; `SelfLearningEngine` re-reads the journal at *call* time, so the
+  constructor alone is not enough. AI8.
 
 ## Signal quality — **the entry signal has no measured edge.**
 
@@ -94,5 +95,5 @@ overlaps are counted honestly (94,937 rows = **327 independent bets**). **`AUDIT
 ## Environment
 
 Writes outside the project dir are refused. Bash, not the other Windows shell. Python 3.13.12 at
-`…\binaries\python\versions\3.13.12\python.exe`. Server binds **127.0.0.1 only**. Rest: **`TRAPS.md`
-§ Environment**.
+`…\binaries\python\versions\3.13.12\python.exe`; server binds **127.0.0.1 only**. Rest: **`TRAPS.md` §
+Environment**.
