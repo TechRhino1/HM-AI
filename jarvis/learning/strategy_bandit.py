@@ -143,20 +143,33 @@ class StrategyBandit:
         self,
         strategy: str,
         is_win: Any,
-        r_multiple: float = 1.0,
+        r_multiple: Optional[float] = None,
         regime: str = "GLOBAL",
         style: str = "SWING"
     ):
         """
         Updates strategy bandit Beta priors (alpha, beta) and UCB statistics
         after a closed trade for the given (regime, style, strategy) triple.
+
+        AI6: `r_multiple` is Optional and None means "the R-multiple was not
+        measurable for this trade" — NOT "it made 1R". The win/loss is still
+        recorded, because that IS measured; only the R-denominated terms are
+        withheld.
+
+        The previous signature defaulted to 1.0 and coerced with
+        `float(r_multiple or 1.0)`, so an explicit None AND an honest 0.0 both
+        collapsed to a positive reward. A trade whose size was never measured was
+        therefore banked as a +1R winner, which is the same class of error as the
+        `2.0 if is_win else -1.0` the orchestrator used to invent.
         """
         with self._lock:
             reg_key = str(regime or "GLOBAL").upper()
             style_key = str(style or "SWING").upper()
             strat_key = self._canonical_strategy(strategy)
             is_win_int = 1 if (is_win is True or is_win == 1 or (isinstance(is_win, (int, float)) and is_win > 0)) else 0
-            r_mult = max(0.1, min(5.0, float(r_multiple or 1.0)))
+            # None stays None ("magnitude unknown"); an honest 0.0 stays 0.0 and is
+            # floored at 0.1, no longer promoted to a positive reward by `or 1.0`.
+            r_mult = None if r_multiple is None else max(0.1, min(5.0, float(r_multiple)))
 
             # 1. Initialize context path if missing
             if reg_key not in self.priors:
@@ -184,8 +197,14 @@ class StrategyBandit:
             target_entry["pulls"] += 1
 
             if is_win_int == 1:
-                target_entry["alpha"] += max(0.5, min(3.0, r_mult))
-                target_entry["rewards"] += max(1.0, r_mult)
+                # `alpha` counts wins: a win is a win whether or not its size was
+                # measured, so an unknown R takes the neutral one-win increment
+                # instead of an R-weighted one.
+                target_entry["alpha"] += 1.0 if r_mult is None else max(0.5, min(3.0, r_mult))
+                # `rewards` is denominated in R. An unknown R must not move it at all:
+                # this is exactly the term a fabricated +1R used to land on.
+                if r_mult is not None:
+                    target_entry["rewards"] += max(1.0, r_mult)
             else:
                 target_entry["beta"] += 1.0
                 target_entry["rewards"] -= 0.5
@@ -203,8 +222,15 @@ class StrategyBandit:
                     self.rewards[reg][s] *= 0.98
 
             self.counts[reg_key][strat_key] += 1
-            reward_val = (1.0 * max(1.0, r_mult)) if is_win_int else -0.5
-            self.rewards[reg_key][strat_key] += reward_val
+            # AI6: the legacy UCB accumulator is denominated in R too, so an unknown
+            # R leaves it alone — the same split as the priors above. (Left as-is it
+            # was `max(1.0, None)`, which raises TypeError.) The -0.5 loss convention
+            # does not depend on R, so a loss still costs the same.
+            if is_win_int:
+                if r_mult is not None:
+                    self.rewards[reg_key][strat_key] += max(1.0, r_mult)
+            else:
+                self.rewards[reg_key][strat_key] -= 0.5
 
             self._save_state_internal()
 

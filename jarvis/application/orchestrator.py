@@ -3,6 +3,7 @@ HM Algo 2.0 — Master System Orchestrator.
 Coordinates data feeds, multi-symbol radar scans, parallel analyst clusters, risk authorization, MT5 state synchronization, and execution.
 """
 import time
+import json
 import logging
 import threading
 from datetime import datetime, timezone
@@ -237,6 +238,59 @@ class JarvisOrchestrator:
         self.mt5_client.shutdown()
         logger.info("HM Algo 2.0 Orchestrator stopped.")
 
+    def _recover_pending_features(self, ticket):
+        """Rebuild the open-time context for `ticket` from the trade journal.
+
+        AI6. `self._pending_features` is a plain dict, so it is empty for every
+        trade opened before the current process — the learning loop then skips the
+        ML update and the bandit update, and R becomes the invented 2.0 / -1.0
+        fallback. `record_trade` already wrote everything needed to
+        `trade_records`, so a close can be reconstructed from disk.
+
+        Returns None when there is no row, which is the honest answer: it means
+        "this ticket was never journalled", not "R was +2".
+        """
+        getter = getattr(self.trade_memory, "fetch_trade", None)
+        if not callable(getter):
+            return None
+        try:
+            row = getter(ticket)
+        except Exception as e:
+            logger.warning("Could not read trade %s from the journal: %s", ticket, e)
+            return None
+        if not row:
+            return None
+
+        entry = float(row.get("entry_price") or 0.0)
+        sl = float(row.get("sl") or 0.0)
+        features = row.get("ml_features")
+        if isinstance(features, str):
+            try:
+                features = json.loads(features)
+            except Exception:
+                features = None
+
+        out = {
+            "strategy": row.get("strategy") or "UNKNOWN",
+            "regime": row.get("regime") or "GLOBAL",
+            "trade_style": "SWING",
+            "type": row.get("trade_type") or "BUY",
+            "entry": entry,
+            "sl": sl,
+            # 0.0 when the stop was never stored. |entry - 0| is NOT a risk distance --
+            # on EURUSD it reads as 11,000 pips -- so a missing stop must disable the
+            # R calculation rather than hand it a nonsense denominator.
+            "risk_dist": abs(entry - sl) if (entry > 0 and sl > 0) else 0.0,
+            "symbol": row.get("symbol"),
+        }
+        # `update_online` only runs when "features" is present, so a row with no stored
+        # vector still gets the bandit and the close bookkeeping. An ABSENT vector must
+        # not become a sample: `record_trade` json-dumps `[]` when none was given, and a
+        # gradient step on an all-zero feature vector is a fabricated observation.
+        if features:
+            out["features"] = features
+        return out
+
     def _on_trade_closed(self, data):
         ticket = data.get("ticket")
         pnl = float(data.get("pnl", 0.0))
@@ -245,6 +299,12 @@ class JarvisOrchestrator:
         new_equity = float(data.get("equity", 0.0))
 
         pending = self._pending_features.pop(ticket, None)
+        if pending is None:
+            # AI6: `_pending_features` is process-local, so any trade that spans a
+            # restart arrives here with nothing — and the learning loop below is
+            # skipped entirely, while R falls back to an invented +/-. Everything
+            # needed was persisted at open, so recover it instead of guessing.
+            pending = self._recover_pending_features(ticket)
         strategy = pending.get("strategy", data.get("strategy", "UNKNOWN")) if pending else data.get("strategy", "UNKNOWN")
         regime_name = pending.get("regime", data.get("regime", "GLOBAL")) if pending else data.get("regime", "GLOBAL")
         trade_style = pending.get("trade_style", data.get("trade_style", "SWING")) if pending else data.get("trade_style", "SWING")
@@ -265,7 +325,12 @@ class JarvisOrchestrator:
         ).upper()
         is_sell = direction.startswith("SELL") or direction.startswith("SHORT")
 
-        r_multiple = 2.0 if is_win else -1.0
+        # AI6: None means "not derivable", and must stay that way. The old fallback
+        # was `2.0 if is_win else -1.0` — a number invented from the outcome flag,
+        # which is then fed to the bandit as if it had been measured. A trade with
+        # no journal row and no geometry has an UNKNOWN R, and unknown is a
+        # different fact from "made 2R".
+        r_multiple = None
         if pending and pending.get("risk_dist", 0) > 0 and exit_price > 0:
             entry = float(pending.get("entry", 0.0) or 0.0)
             risk_dist = float(pending.get("risk_dist", 1.0) or 1.0)
@@ -274,6 +339,14 @@ class JarvisOrchestrator:
             # gradient weighting cannot collapse to zero.
             raw_r = price_delta / risk_dist
             r_multiple = round(raw_r if abs(raw_r) >= 0.01 else (0.01 if raw_r >= 0 else -0.01), 2)
+        elif pending is None:
+            logger.warning(
+                "Trade #%s closed with no open-time context: not in _pending_features "
+                "and not in the trade journal. R-multiple is UNKNOWN, so the ML "
+                "update is skipped and the bandit records the win/loss with no "
+                "reward magnitude, rather than either being fed an invented value.",
+                ticket,
+            )
 
         # 1. Update SQLite trade records (§17)
         if ticket:
@@ -293,10 +366,34 @@ class JarvisOrchestrator:
             )
 
         # 2. Update ML SGD predictor with return weighting (§17)
+        #
+        # AI6: what R means is different here than it is to the bandit, and the two
+        # must not be treated alike. To the bandit, `rewards` is a RECORDED quantity
+        # denominated in R, so an unknown R has to withhold it. Here R is only the
+        # WEIGHT on the gradient (`return_weight = ... abs(float(r_multiple or 1.0))`)
+        # -- a hyperparameter of the update, not a datum anything later reads as "this
+        # trade made 1R". The label being learned is `is_win`, which is measured
+        # regardless.
+        #
+        # So an unknown R takes the standard step: the argument is OMITTED, letting
+        # `update_online`'s declared default apply. It must not be *passed* as None,
+        # because the implementation coerces it and an explicit None would be
+        # indistinguishable from a measured +1R. Skipping the update entirely would
+        # throw away a real labelled sample to avoid guessing a step size.
         if pending and "features" in pending:
-            self.ml_predictor.update_online(pending["features"], is_win, r_multiple=r_multiple)
+            if r_multiple is None:
+                self.ml_predictor.update_online(pending["features"], is_win)
+            else:
+                self.ml_predictor.update_online(pending["features"], is_win, r_multiple=r_multiple)
 
         # 3. Update Multi-Armed Bandit with Thompson Sampling (§17)
+        #
+        # AI6: the bandit gets the trade even when R is unknown, because the
+        # win/loss IS measured — only the magnitude is not. `record_outcome` takes
+        # None to mean "no reward magnitude", which withholds the R-denominated
+        # term instead of fabricating one. (Passing None used to be coerced to +1R
+        # by `float(r_multiple or 1.0)`, so an unmeasured trade was banked as a
+        # winning one.)
         self.strategy_bandit.record_outcome(
             strategy=strategy,
             is_win=is_win,
@@ -316,9 +413,14 @@ class JarvisOrchestrator:
         if len(all_closed) >= 10:
             self.decision_engine.calibrator.update_calibration_from_history(all_closed)
 
+        # AI6: `None` must be printed as UNKNOWN. Formatting it with `%.2f`/`{:.2f}`
+        # would render the string "None" and, in the old code, the value was
+        # invented outright — either way the log claimed a measurement that the
+        # learning loop did not have.
+        r_display = "UNKNOWN" if r_multiple is None else f"{r_multiple:+.2f}R"
         logger.info(
             f"🔄 Closed-trade self-learning loop completed for #{ticket}: "
-            f"PnL=${pnl:.2f}, Win={is_win}, R={r_multiple}, Strat={strategy}, Regime={regime_name}, Style={trade_style}"
+            f"PnL=${pnl:.2f}, Win={is_win}, R={r_display}, Strat={strategy}, Regime={regime_name}, Style={trade_style}"
         )
 
     @staticmethod

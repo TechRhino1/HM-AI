@@ -266,6 +266,27 @@ class TradeMemory:
             rows = cur.fetchall()
             return [dict(r) for r in rows]
 
+    def fetch_trade(self, ticket) -> Optional[Dict[str, Any]]:
+        """The one row for `ticket`, or None.
+
+        AI6: the orchestrator keeps the features and geometry it needs at close in a
+        process-local dict, so a restart loses them and the learning loop silently
+        does nothing for every trade that spans one. Everything needed — type,
+        entry, sl, tp, symbol, strategy, regime, and the feature vector — is already
+        persisted here at open, so this is what lets a close be reconstructed after
+        a restart instead of falling back to an invented R-multiple.
+        """
+        try:
+            key = int(ticket)
+        except (TypeError, ValueError):
+            return None
+        with self._lock:
+            self._conn.row_factory = sqlite3.Row
+            cur = self._conn.cursor()
+            cur.execute("SELECT * FROM trade_records WHERE ticket = ?", (key,))
+            row = cur.fetchone()
+            return dict(row) if row else None
+
     def update_closed_trade(
         self,
         ticket: int,

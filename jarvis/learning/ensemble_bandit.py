@@ -4,7 +4,7 @@ Combines LinUCB (Linear Upper Confidence Bound), Thompson Sampling (Beta distrib
 and EXP3 (Exponential-weight algorithm for Exploration and Exploitation) to dynamically re-weight strategy selection.
 """
 import numpy as np
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
 class EnsembleStrategyBandit:
     """Ensemble Multi-Armed Bandit Strategy Allocator."""
@@ -46,8 +46,15 @@ class EnsembleStrategyBandit:
         best_strat = max(scores.items(), key=lambda x: x[1])[0]
         return best_strat
 
-    def record_outcome(self, strategy: str, is_win: bool, r_multiple: float = 1.0):
-        """Updates internal bandit state with outcome reward."""
+    def record_outcome(self, strategy: str, is_win: bool, r_multiple: Optional[float] = None):
+        """
+        Updates internal bandit state with outcome reward.
+
+        AI6: `r_multiple` None means the R was NOT measurable, not that it was 1R.
+        The win/loss is still recorded, because that is measured; the R-denominated
+        reward is withheld. Unchanged, `max(0.5, None)` raised TypeError — so this
+        consumer would have crashed rather than silently mis-recorded.
+        """
         if strategy not in self._counts:
             self.strategies.append(strategy)
             self._counts[strategy] = 0
@@ -57,6 +64,7 @@ class EnsembleStrategyBandit:
         self._counts[strategy] += 1
         if is_win:
             self._wins[strategy] += 1
-            self._rewards[strategy] += max(0.5, r_multiple)
+            if r_multiple is not None:
+                self._rewards[strategy] += max(0.5, float(r_multiple))
         else:
             self._rewards[strategy] -= 0.5

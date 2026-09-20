@@ -119,7 +119,7 @@ attribution and reentrancy, which neither mutation disturbs.
 |---|---|---|---|---|
 | AI5 | Self-learning averages the outcome, not the forecast | H | M | ✅ **FIXED** 2026-09-20 — the forecast is no longer overwritten (112/112 rows had `expected_value == realized_pnl`; 84 had a fabricated `ai_score=85.0`); the engine now reads `realized_pnl` and `expected_value` explicitly. **Historical rows need `tools/repair_forecast_column.py`** |
 | AI8 | `BacktestEngine` is not hermetic | H | M | Measured: live weights, live trade memory, live bandit state leak into backtests |
-| AI6 | Learning loop dies on restart; fallback R is fabricated | H | S | `_pending_features` is process-local; `r_multiple = 2.0/-1.0` invented |
+| AI6 | Learning loop dies on restart; fallback R is fabricated | H | S | ✅ **FIXED** 2026-09-20 — context recovered from the journal via `TradeMemory.fetch_trade`; `r_multiple` is `None` when not derivable and both bandits take `Optional[float]` (`float(r_multiple or 1.0)` turned an explicit None into **+1R**; `max(0.5, None)` raised `TypeError`). See M3 below |
 | C8 | Gross vs net P&L; no fee columns anywhere | H | M | `database.py:226` vs `state_synchronizer.py:73`; unmeasurable by construction |
 | D5 | Bar fallback is a synthetic random walk | H | M | ✅ **FIXED** 2026-09-20 — provenance now travels *with* the series (`CandleSeries.source`); see M2 below |
 | D3 | No migration mechanism; two copies already drifted | H | M | ✅ **FIXED** 2026-09-20 — all 4 versioned stores on `migrate()`; refusal proved 12-red vs 3 |
@@ -551,7 +551,7 @@ AI2, AI3, AI5, AI6, AI7, AI8, AI9.
 **Exit:** a backtest run twice produces byte-identical results; the learning loop survives a
 restart; walk-forward geometry either reaches live levels or is labelled advisory in the UI.
 
-**Done so far:** AI2/AI3 (labels, via D10 + D19), **AI5** (below).
+**Done so far:** AI2/AI3 (labels, via D10 + D19), **AI5** and **AI6** (both below).
 
 **AI5 — the forecast is no longer overwritten.** Measured on the live journal: **112/112 closed rows**
 had `expected_value == realized_pnl`, and **84 rows** carried `ai_score = 85.0`. Two write sites did it:
@@ -582,6 +582,47 @@ the coverage is uneven and I will not pretend otherwise: the two write sites liv
 `sync_mt5_history`, which cannot be driven without a broker, so they are pinned by **source
 assertions**, not behaviour — a runtime mutation cannot turn them red. The engine half is genuinely
 behavioural: **5 of 12 tests go red** under `.scratch/revert_ai5_fixes.py`.
+
+**AI6 — the learning loop survives a restart, and an unknown R stays unknown.** One root cause,
+`_pending_features` being a plain dict, and two consequences:
+
+1. **Learning died on every restart.** Direction, entry, stop, symbol, strategy, regime and the
+   feature vector are captured at open into that dict. A trade opened before the current process
+   arrived at `_on_trade_closed` with `pending is None`, so the ML update and the bandit update were
+   skipped outright — even though `record_trade` had already persisted every one of them to
+   `trade_records`.
+2. **R was invented from the outcome flag.** The fallback was `2.0 if is_win else -1.0`: a number
+   derived from the very quantity the learner is meant to predict, then banked as if measured.
+
+The consumers could not refuse it. `float(r_multiple or 1.0)` in `StrategyBandit.record_outcome`
+turned an explicit `None` into **+1R**, and also collapsed an honest `0.0` into +1R. In
+`EnsembleStrategyBandit`, `max(0.5, None)` raised `TypeError` outright.
+
+Fixed by recovering the context rather than guessing: `TradeMemory.fetch_trade` returns the one row
+and `_recover_pending_features` rebuilds the open-time context from it. Three details matter:
+
+* `risk_dist` is **0.0 when the stop was never stored**. `|entry - 0|` is not a risk distance — on
+  EURUSD it reads as 11,000 pips — so a missing stop disables the R calculation instead of handing it
+  a nonsense denominator.
+* An **absent feature vector stays absent**. `record_trade` json-dumps `[]` when none was given, and
+  a gradient step on an all-zero feature vector is a fabricated observation.
+* R is `None` when it cannot be derived, and stays `None`.
+
+**The two consumers are treated differently on purpose, and that is the part worth reviewing.** To
+the bandit, `rewards` is a *recorded quantity* denominated in R, so an unknown R must withhold it —
+but the win/loss IS measured, so the trade is still recorded and only the R-denominated term is
+skipped. To `update_online`, R is only the *weight* on the gradient, a hyperparameter that nothing
+later reads as "this trade made 1R", while the label being learned is `is_win`, which is measured
+regardless. So the ML update still runs and the argument is **omitted**, letting `update_online`'s
+declared default apply. Passing `None` explicitly would be coerced and would be indistinguishable
+from a measured +1R; skipping the update would discard a real labelled sample to avoid guessing a
+step size. `StrategyBandit` and `EnsembleStrategyBandit` now both take `Optional[float]` and treat
+`None` as "magnitude unknown".
+
+`tests/test_learning_survives_restart.py` (28 tests). **Mutation-proved: 19 go red** under
+`.scratch/mutate_ai6.py`. The 9 survivors pin contracts the mutation does not move — an unknown
+ticket returning `None`, a loss still costing the bandit's −0.5, a measured R still being credited,
+and the neutral one-win increment (1.0 either way, so it cannot discriminate).
 
 ### M4 — Raise the architecture ceiling *(~3 weeks)*
 A2/A4 engine process split, A1 one radar contract, A13 shared frontend modules, P10 packaging,
