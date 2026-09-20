@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 import numpy as np
 
 from jarvis.data.determinism import stable_seed
+from jarvis.data.schemas import is_observed_price
 
 logger = logging.getLogger("jarvis.data.tradingview")
 
@@ -678,7 +679,29 @@ class TradingViewDataProvider:
                         quote = v
                         break
 
-        if not quote or quote.get("price", 0.0) <= 0.0:
+        if not quote or not is_observed_price(quote.get("price")):
+            return None
+
+        # ── Never build a series on a fabricated anchor ────────────────────────
+        # `fetch_quotes` supplies a labelled fallback quote (source
+        # "profile_reference", `is_fallback` True) when the network is down or the
+        # symbol is unresolved. That is tolerable for a DISPLAY read, but the candle
+        # series below is anchored to it — every bar, the "genuine live OHLCV" last
+        # bar included — so the whole series would be fabricated while looking
+        # exactly like real data. The caller makes it worse: `_try_tradingview`
+        # returns whatever comes back, and `fetch_real_candles` logs it as
+        # "Live TradingView candles for %s (%d bars)".
+        #
+        # Refusing here is what lets the tier hierarchy do its job: Tier 4 returns
+        # None so the caller generates *calibrated baseline* candles that announce
+        # themselves as such. A labelled fallback beats an unlabelled fabrication.
+        if quote.get("is_fallback"):
+            logger.warning(
+                "Refusing to build candles for %s: the anchor quote is a fallback "
+                "(source=%r), so the entire series would be fabricated. Returning None "
+                "so the data hierarchy can fall through to a labelled source.",
+                clean_sym, quote.get("source"),
+            )
             return None
 
         # Build candle series anchored to live TradingView quote

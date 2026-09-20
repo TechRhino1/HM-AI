@@ -64,7 +64,7 @@ recommendations were rejected on verification (see §6) — one of them would ha
 | **P1** | Timeout-guard pool wedges permanently after 16 hangs | H | S | `timeout_guard.py:37-47` — `future.result(timeout=)` never cancels; `_get_executor` only rebuilds on `_shutdown`, which never flips. **Proved:** 16 hung calls → every later call returns its default forever | ✅ **FIXED** — per-pool stuck counter + `done_callback` release + pool replacement; `health()` exposed |
 | **P4** | Execution guard is a TOCTOU → duplicate orders | H | S | `orchestrator.py:493-496` reads under lock then **releases**; claim happens 90 lines later at `:586`. Two sweeps both see "free" | ✅ **FIXED** — atomic compare-and-claim at the send site; loser releases risk and skips |
 | **C1** | Configured risk limit is not enforced | H | S | `position_sizing.py:86-89` clamps to literal `1.50` vs configured `0.5`, then multiplies by two more factors *outside* the clamp. Measured 27 real breaches; ticket 935634011 XAUUSD risked $299 = 39.2% of equity, lost $305 | Clamp to the configured limit; apply multipliers inside it; hard pre-trade assert |
-| **C2** | Fabricated prices are still being persisted | H | S | `tradingview_provider.py:583` — `base_p = 1.0850` EURUSD, 65000 BTC, 3500 ETH, 150 SOL. 136/245 rows; newest is today | Return `None`, refuse the order; add `origin` column |
+| **C2** | Fabricated prices are still being persisted | H | S | `tradingview_provider.py:583` — `base_p = 1.0850` EURUSD, 65000 BTC, 3500 ETH, 150 SOL. 136/245 rows; newest is today | ✅ **FIXED** — see the M1 table below: the entry price is now refused at three layers when it derives from an unobserved price |
 | **D4** | 54% of `trade_records` lives only in an uncheckpointed WAL | H | S | `.db` alone = 16 rows; `.db`+`-wal` = 35. `-wal` is 201,912 B, never checkpointed | `wal_checkpoint(TRUNCATE)` on shutdown; back up `-wal`/`-shm` |
 | **D2** | Reconciliation joins on the wrong MT5 identifier | H | M | `log_trade` stores `result.order`; `sync_mt5_history` matches `WHERE ticket = position_id` (`database.py:195,266`). 212 tickets can never close | Persist order ticket *and* position id; join on position id |
 | **A3** | Symbol universe is dead config | H | S | `settings.json` `allowed_symbols` has **no reader**; orchestrator hardcodes 13 (`orchestrator.py:51-55`); `_bg_loop` hardcodes a third list | `JarvisOrchestrator.__init__` defaults to `SETTINGS.trading.symbols` |
@@ -147,7 +147,7 @@ C1, C2, D4, D2, A3, P2.
 **Exit:** no trade can open that exceeds `equity × max_risk_per_trade_pct`; zero new rows with a
 fabricated price over a 24h run; `.db` alone contains 100% of `trade_records`.
 
-**Status (2026-09-20): 5 of 6 done** (C2 deliberately deferred — see below).
+**Status (2026-09-20): 6 of 6 done.**
 
 | Item | Status | Result |
 |---|---|---|
@@ -155,7 +155,7 @@ fabricated price over a 24h run; `.db` alone contains 100% of `trade_records`.
 | **D4** WAL checkpoint | ✅ Done | `TradeMemory` checkpoints (TRUNCATE) after every write and before close. Verified pre-fix: a copy of the `.db` alone did not even contain the `trade_records` **table** — schema and rows were both trapped in a 16KB WAL. |
 | **A3** symbol universe | ✅ Done | `JarvisOrchestrator` defaults to `SETTINGS.trading.symbols`. **⚠ Behaviour change: the effective universe drops 13 → 5** (`XAUUSD, EURUSD, GBPUSD, USDJPY, BTCUSD`). If the wider set is wanted, add it to `trading.allowed_symbols`. |
 | **P2** timeout status | ✅ Done | `send_market_order` timeout now returns `UNKNOWN`, not `FAILED`; the orchestrator holds the risk reservation and starts the cooldown instead of releasing and retrying; the UI treats `UNKNOWN` as "not confirmed" so it can never render as a filled trade. Classified in the response-contract test as its own `INDETERMINATE` class. |
-| **C2** fabricated prices | ⏸ Deferred — see below | |
+| **C2** fabricated prices | ✅ Done | The entry price is now refused when it derives from an unobserved price, at three layers — see below. |
 | **D2** position-id join | ✅ Done | `executed_trades` gains `position_id` (migrated via the existing `ALTER TABLE` map); `send_market_order` resolves and returns it from the deal; both `log_trade` callers persist it; `sync_mt5_history` joins `position_id = ? OR (position_id IS NULL AND ticket = ?)` so legacy rows still close. Measured on `jarvis_history.db`: **155 rows** with `closed_at` NULL and `realized_pnl` 0.0. Proven pre-fix: the sync INSERTED a duplicate row instead of closing the original. |
 
 **C1 — what it exposed.** Tightening the clamp made `test_d1_online_ml_and_trade_memory_learning_loop`
@@ -170,14 +170,41 @@ that account happened to be. At 0.01 lots XAUUSD risks 1.31% of $762.51 — insi
 by arithmetic accident. Fixed by pinning `orch.state_manager.update_account(...)` in the test; the
 underlying leak (paper mode reads the live balance) is now **finding A18**, below.
 
-**C2 — why deferred.** The provider already tags fallback quotes with `is_fallback: True`, but
-exactly one consumer checks it (`mt5_client.py:311`, the already-fixed `_paper_fill_price`). The
-trade prices reach the journal via `execution_engine.py:92`
-(`fill_price = res.get("price", decision.entry_price)`), so the ongoing fabricated rows originate
-in the **decision engine's** price, not the provider's fallback — that chain needs its own
-investigation. Half-fixing it by deleting the fallback would also break the stocks/india display
-paths, which legitimately need a reference price. Cheapest correct next step: add an `origin`
-column and refuse to log a trade whose price carries `is_fallback`.
+**C2 — what it turned out to be.** The deferral note above was right that the fabricated *rows* come from
+the **decision engine's** price rather than the provider's fallback, and that this chain needed its own
+investigation. Following that chain end to end located the mechanism, and it is not the provider at all:
+
+`market_context.build_context` sets `current_price = bid = 0.0` and `ask = spread × pip_size` when the
+primary frame is **empty** (feed down, cold symbol). Every entry price is minted from `context.ask` (BUY) or
+`context.bid` (SELL), so an unobserved market became a real-looking order. Measured for BTCUSD:
+`entry_price = 0.02`, `stop_loss = -0.04` — and `position_sizing` read a risk distance of 0.06 against a
+65 000 instrument and returned **100 lots**, i.e. **6.5M USD of exposure for a 50 USD risk budget**
+(EURUSD 90k, XAUUSD 185k for the same 50 USD). All of it passed `trade_guard`, because `_is_finite(0.0)` is
+True and the inverted-geometry comparisons (`stop_loss >= entry_price` for a BUY) are False when the entry
+itself is ~0.
+
+Fixed at three layers, at the three places the invariant can be broken, plus the provider's own laundering:
+
+* **`schemas.is_observed_price`** — one predicate: a tradeable price is finite **and strictly positive**.
+* **`dynamic_levels.calculate_levels`** — refuses to *mint* an entry price, returning a HOLD-shaped result
+  with `data_unavailable: True` (the same key set the callers index, so no `None` to guard against).
+* **`decision_engine._compute_bias_and_levels`** — refuses to emit a *direction*, because
+  `decision_action` becomes EXECUTE on `gate_passed and bias in (BUY, SELL)`; a BUY/SELL verdict beside a
+  zero entry would have been marked executable.
+* **`trade_guard.validate_pre_execution`** — refuses to *authorize*: the finiteness loop now also requires
+  a positive price, so any other producer of a `DecisionObject` is caught too.
+* **`tradingview_provider.fetch_candles`** — returns `None` when its anchor quote is a fallback
+  (`is_fallback: True`). The series is anchored to that quote bar by bar, so returning it would be a
+  fabrication indistinguishable from real data — and `fetch_real_candles` logs whatever comes back as
+  "Live TradingView candles". Refusing lets the tier hierarchy fall through to Tier 4, which labels itself.
+
+The provider's *display* fallback is untouched, deliberately: it is labelled (`source: "profile_reference"`,
+`is_fallback: True`) and both its consumers already refuse it (`mt5_client.py:360`, `execution_engine.py:27`).
+Deleting it would break the stocks/india panels, which legitimately need a reference price.
+
+Pinned by `tests/test_unobserved_price_refusal.py` (49 tests) and `TestNonPositivePrices` in
+`tests/test_trade_guard.py`. **Mutation-proved:** neutering the three predicates turns **26** of the new
+tests red.
 
 ### M2 — Make the data trustworthy *(~1 week)*
 D3 migrations, D1 `origin` column, D5 bar provenance, D10/D11 real labels, A10 read-only reads.

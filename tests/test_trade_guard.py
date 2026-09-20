@@ -407,6 +407,62 @@ class TestNonFiniteValues:
         assert run(decision(bias="SELL", entry=1.1, stop_loss=float("-inf")))["passed"] is False
 
 
+class TestNonPositivePrices:
+    """A price must be strictly positive, not merely finite.
+
+    `_is_finite(0.0)` is True, so the finiteness loop admitted a zero price — and
+    with the entry at ~0 the inverted-geometry comparisons below it are all False,
+    so a NEGATIVE stop loss passed too. A zero price is not a rare edge: it is
+    exactly what `market_context` produces for an empty primary frame
+    (`current_price = bid = 0.0`, `ask = spread * pip`). Measured consequence — the
+    levels engine minted entry 0.02 / stop -0.04 for BTCUSD, and the sizer read a
+    risk distance of 0.06 against a 65 000 instrument and returned 100 lots: 6.5M
+    USD of exposure against a 50 USD risk budget.
+    """
+
+    def test_a_zero_entry_is_rejected(self):
+        r = run(decision(bias="BUY", entry=0.0, stop_loss=-0.001, take_profit=0.001))
+        assert r["passed"] is False
+        assert any("entry price" in x for x in r["reasons"])
+
+    def test_a_negative_stop_is_rejected(self):
+        """`stop_loss >= entry_price` is False when the stop is negative."""
+        r = run(decision(bias="BUY", entry=0.02, stop_loss=-0.04, take_profit=0.17))
+        assert r["passed"] is False
+        assert any("stop loss" in x for x in r["reasons"])
+
+    def test_a_negative_take_profit_is_rejected(self):
+        r = run(decision(bias="SELL", entry=0.0, stop_loss=0.06, take_profit=-0.15))
+        assert r["passed"] is False
+        assert any("take profit" in x for x in r["reasons"])
+
+    def test_a_zero_stop_is_rejected(self):
+        assert run(decision(bias="BUY", entry=1.1, stop_loss=0.0))["passed"] is False
+
+    def test_a_zero_take_profit_is_rejected(self):
+        assert run(decision(bias="BUY", entry=1.1, take_profit=0.0))["passed"] is False
+
+    def test_the_reason_says_not_positive(self):
+        r = run(decision(bias="BUY", entry=0.0, stop_loss=1.0, take_profit=2.0))
+        assert "positive" in r["reasons"][0]
+
+    def test_the_exact_decision_an_unobserved_market_used_to_produce_is_rejected(self):
+        """All three prices at zero — the shape an empty primary frame yields."""
+        r = run(decision(symbol="BTCUSD", bias="BUY", entry=0.0, stop_loss=0.0, take_profit=0.0))
+        assert r["passed"] is False
+        assert len(r["reasons"]) >= 3
+
+    def test_nan_is_still_reported_as_non_finite_not_as_non_positive(self):
+        """The two branches must stay distinct: NaN is not merely "not positive"."""
+        r = run(decision(bias="BUY", entry=1.1, stop_loss=float("nan")))
+        assert "finite" in r["reasons"][0].lower()
+
+    def test_a_genuinely_positive_decision_still_passes(self):
+        """The positivity requirement must not narrow the guard for real prices."""
+        assert run(decision(bias="BUY", entry=1.1, stop_loss=1.09, take_profit=1.12))["passed"] is True
+        assert run(decision(bias="SELL", entry=1.1, stop_loss=1.11, take_profit=1.09))["passed"] is True
+
+
 # ---------------------------------------------------------------------------
 # Arguments the guard takes but does not act on
 # ---------------------------------------------------------------------------

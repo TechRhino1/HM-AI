@@ -16,7 +16,8 @@ logger = logging.getLogger("JARVIS_DynamicLevels")
 from jarvis.data.schemas import (
     MarketContext,
     RegimeOutput,
-    MarketRegime
+    MarketRegime,
+    is_observed_price,
 )
 from jarvis.data.symbol_registry import resolve as resolve_symbol
 from jarvis.intelligence.institutional_entry_engine import InstitutionalEntryEngine, INSTITUTIONAL_ENTRY_ENGINE
@@ -41,6 +42,10 @@ class DynamicRiskAndLevelsEngine:
         self.beta_vol = beta_vol
         self.gamma_spread = gamma_spread
         self.institutional_engine = institutional_engine or INSTITUTIONAL_ENTRY_ENGINE
+        # Symbols already warned about an unobserved price. This runs per symbol per
+        # radar cycle, so an un-deduplicated warning during a feed outage is the same
+        # ~3 300-lines-in-17-minutes flood the data feed had.
+        self._no_price_warned: set = set()
 
     def calculate_levels(
         self,
@@ -77,7 +82,58 @@ class DynamicRiskAndLevelsEngine:
         spec = resolve_symbol(context.symbol)
         digits = spec.digits
         pip_size = spec.pip_size if spec.pip_size > 0 else 0.0001
-        
+
+        # ── An entry price must derive from an OBSERVED price ──────────────────
+        # Every entry price below is minted from `context.ask` (BUY) or
+        # `context.bid` (SELL), and `market_context.build_context` sets
+        # `current_price = bid = 0.0` with `ask = spread * pip_size` when the
+        # primary frame is empty (feed down, cold symbol). Without this guard the
+        # engine turned a price nobody observed into a real-looking order: measured
+        # for BTCUSD, entry 0.02 with a stop of -0.04, from which the sizer — reading
+        # a risk distance of 0.06 against a 65 000 instrument — returned 100 lots,
+        # i.e. 6.5M USD of exposure for a 50 USD risk budget.
+        #
+        # Refuse rather than fabricate. A zero/NaN/absent price yields no levels; the
+        # callers must read `data_unavailable` and stand down. `bias` is forced to
+        # HOLD so nothing downstream can mistake this for a directional setup.
+        if not (
+            is_observed_price(context.current_price)
+            and is_observed_price(context.bid)
+            and is_observed_price(context.ask)
+        ):
+            if context.symbol not in self._no_price_warned:
+                self._no_price_warned.add(context.symbol)
+                logger.warning(
+                    "No observed price for %s (current_price=%r, bid=%r, ask=%r); refusing to "
+                    "compute entry/SL/TP. This is logged once per symbol per outage.",
+                    context.symbol, context.current_price, context.bid, context.ask,
+                )
+            return {
+                "bias": "HOLD",
+                "entry_price": 0.0,
+                "sl_price": 0.0,
+                "tp_price": 0.0,
+                "tp1_price": None,
+                "tp2_price": 0.0,
+                "risk_dist": 0.0,
+                "tp_dist": 0.0,
+                "rr_ratio": 0.0,
+                "first_target_price": None,
+                "first_target_volume_pct": 0.0,
+                "runner_trail_distance_atr": 0.0,
+                "entry_type": "UNAVAILABLE",
+                "protocol_details": {"protocol": "NO_OBSERVED_PRICE"},
+                "data_unavailable": True,
+            }
+
+        # The price is back; re-arm the warning so a later outage still reports.
+        if self._no_price_warned:
+            logger.info(
+                "Observed price restored for %d symbol(s); dynamic levels resumed.",
+                len(self._no_price_warned),
+            )
+            self._no_price_warned.clear()
+
         # 1. Volatility & Spread Normalization
         atr = vol.atr if vol.atr > 0 else (c_price * 0.005)
         spread_dist = max(0.0, context.ask - context.bid) if (context.ask > 0 and context.bid > 0) else (vol.current_spread_pips * pip_size)

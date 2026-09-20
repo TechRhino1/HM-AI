@@ -18,7 +18,8 @@ from jarvis.data.schemas import (
     DevilAdvocateReport,
     DecisionObject,
     TradeQualityGateResult,
-    MarketRegime
+    MarketRegime,
+    is_observed_price,
 )
 from jarvis.intelligence.strategy_selector import StrategySelector
 from jarvis.intelligence.hypothesis_engine import HypothesisEngine
@@ -86,6 +87,9 @@ class DecisionEngine:
         self.fvg_engine = FairValueGapEngine()
         self.mean_reversion_engine = MeanReversionEngine()
         self.dynamic_levels_engine = dynamic_levels_engine or DynamicRiskAndLevelsEngine()
+        # Symbols already warned about an unobserved price — this runs per symbol per
+        # cycle, so an undeduplicated warning would flood the log during an outage.
+        self._no_price_warned: set = set()
 
 
 
@@ -101,7 +105,31 @@ class DecisionEngine:
         st = context.structure
         vol = context.volatility
         c_price = context.current_price
-        
+
+        # ── No observed price ⇒ no direction, no levels ────────────────────────
+        # `calculate_levels` refuses independently, but the *bias* is decided here and
+        # returned beside the levels. Returning a BUY/SELL verdict with a zero entry
+        # would let `decision_action` mark the setup EXECUTE (it only checks
+        # `gate_passed and bias in (BUY, SELL)`), so the direction must stand down in
+        # the same breath as the prices. Returns the same 8-tuple shape as the normal
+        # path with every price at 0.0 — a value no guard can mistake for a real one.
+        if not (
+            is_observed_price(c_price)
+            and is_observed_price(context.bid)
+            and is_observed_price(context.ask)
+        ):
+            if context.symbol not in self._no_price_warned:
+                self._no_price_warned.add(context.symbol)
+                logger.warning(
+                    "No observed price for %s (current_price=%r, bid=%r, ask=%r); forcing HOLD "
+                    "and refusing to emit entry/SL/TP. Logged once per symbol per outage.",
+                    context.symbol, c_price, context.bid, context.ask,
+                )
+            return ("HOLD", 0.0, 0.0, 0.0, 0.0, 0.0, None, 0.0)
+
+        if self._no_price_warned:
+            self._no_price_warned.clear()
+
         bull_votes = sum(1 for r in analyst_reports.values() if r.bias == "BULLISH")
         bear_votes = sum(1 for r in analyst_reports.values() if r.bias == "BEARISH")
         trend_score = getattr(context.momentum, "trend_score", 0.0) if hasattr(context, "momentum") else 0.0

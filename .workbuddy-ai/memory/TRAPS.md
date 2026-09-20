@@ -1316,3 +1316,44 @@ terminal, and `/api/diagnostics` honestly reports `MT5: RECONNECTING`, `DATA_FEE
   final counts are simply never printed. Write XML and parse it.
 
 
+## Round 40o — traps added
+
+* **`0.0` is finite, so "is it a number" is not "is it a price".** `trade_guard`'s finiteness loop
+  admitted a zero entry, and with the entry at ~0 the inverted-geometry comparisons
+  (`stop_loss >= entry_price` for a BUY) are **all False** — so a *negative* stop loss passed the last
+  gate before the broker. A zero price is not an edge case in this system: it is exactly what an empty
+  primary frame is (`market_context:78-80` → `current_price = bid = 0.0`, `ask = spread × pip`).
+  **A price predicate must be `isfinite(v) and v > 0`**, and it must be ONE definition shared by the
+  producers and the gate (`schemas.is_observed_price`), or they drift.
+
+* **A plausible-looking price is more dangerous than a missing one.** Minting an entry from an
+  unobserved context produced `entry=0.02 / stop=-0.04` for BTCUSD — and the sizer, reading a risk
+  distance of 0.06 against a 65 000 instrument, returned **100 lots: 6.5M USD of exposure for a 50 USD
+  risk budget**. The 100-lot ceiling, not the geometry check, is what limited it. **Refuse to mint;
+  do not fabricate a number that flows into sizing.** Order of magnitude checks: if the "price" of
+  BTCUSD is 0.02, nothing downstream notices.
+
+* **An empty frame propagates as `0.0`, never as `None`.** Every consumer of `context.current_price`
+  sees a float, so nothing raises and no `except` runs. Guard on the value, not on a missing key.
+
+* **A refusal must keep the shape its callers index.** `calculate_levels` returns a dict both callers
+  read by key (`levels["entry_price"]`), so the refusal is a HOLD-shaped dict with `data_unavailable:
+  True` rather than `None`. Changing the arity/shape of a refusal breaks callers exactly as hard as
+  returning garbage.
+
+* **Fixing the producer is not enough if the *direction* is decided elsewhere.** `decision_action`
+  becomes EXECUTE on `gate_passed and bias in (BUY, SELL)` — the bias comes from the decision engine,
+  not the levels engine, so a BUY/SELL verdict beside a zero entry would have been marked executable.
+  **Refuse the direction in the same breath as the prices.**
+
+* **A fallback anchor launders into an unlabelled series.** `fetch_candles` builds a full OHLCV series
+  anchored to a quote that may be `is_fallback: True`, and the last bar's comment calls itself
+  "genuine live TradingView OHLCV" while `fetch_real_candles` logs it as "Live TradingView candles".
+  Labelling the *quote* does nothing for the *series*. Return `None` so the tier hierarchy falls
+  through to a tier that labels itself.
+
+* **Mutation-proof a new guard by neutering the predicate it calls.** Patching
+  `is_observed_price` back to finiteness-only (and to always-True for the producers) turns 26 of the
+  new tests red. If a test stays green under the mutation, it is pinning something else — e.g.
+  `test_a_zero_take_profit_is_rejected` is satisfied by the geometry check, not the new positivity
+  branch, so it is a behaviour pin and not proof of the fix.

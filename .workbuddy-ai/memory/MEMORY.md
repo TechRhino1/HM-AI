@@ -45,13 +45,10 @@ loads *only* in `index.html` (`dashboard.html` uses `theme_terminal.css`).
 
 ## Baselines
 
-**pytest 2646 passed / 0 failed / 20 deselected** (2026-09-20). The 3 long-standing
-`test_market_data_independence` failures are **fixed, not tolerated**: the cold-history warm-up only
-runs on a STALE verdict and `classify_bar_freshness` answers `MARKET_CLOSED` inside the weekly close,
-so a ~20h-old bar was STALE Mon-Fri and MARKET_CLOSED at weekends — a wall-clock dependency, now
-pinned by a `weekday_market` fixture. A 3-failure weekend run is no longer the baseline. Run the
-suite with `--junit-xml=...` and parse that: the harness truncates pytest's stdout tail, so `-rf`
-never prints.
+**pytest 2704 passed / 0 failed / 20 deselected** (2026-09-20) — a green baseline, not a tolerated
+one. Run with `--junit-xml=...` and parse that: the harness truncates pytest's stdout tail, so `-rf`
+never prints. Weekend-only failures are a wall-clock dependency, not a regression — see
+**`TRAPS.md` § Round 40n**.
 
 **Run the suite only with `env -u HTTP_PROXY -u HTTPS_PROXY -u http_proxy -u https_proxy NO_PROXY='*'`**
 (the sandbox exports a proxy that makes localhost HTTP hang).
@@ -86,6 +83,10 @@ never prints.
 * **Risk limits come from `config/settings.json`** (fixed in `38830eb`); risk state is scoped by
   execution mode. Re-anchor a baseline only via `tools/reset_risk_baseline.py`. Mechanism:
   **`TRAPS.md` § Risk control.**
+* **A price must be finite AND `> 0`.** `_is_finite(0.0)` is True, and an empty primary frame gives
+  `current_price = bid = 0.0` (`market_context:78-80`) — from which an entry was minted and a
+  **negative** stop passed the last gate (BTCUSD: 100 lots / 6.5M USD exposure for a 50 USD risk
+  budget). One predicate, `schemas.is_observed_price`, shared by producers and gate. C2 closed.
 
 ## Signal quality — **the entry signal has no measured edge (several ways).**
 

@@ -6,6 +6,31 @@ from dataclasses import dataclass, field, asdict
 from enum import Enum
 from typing import Dict, List, Optional, Any
 from datetime import datetime, timezone
+import math
+
+
+def is_observed_price(value: Any) -> bool:
+    """True only for a price that was actually observed on the market.
+
+    A price is observable when it is a real, finite number **strictly greater than
+    zero**. Both halves matter and both were missing:
+
+    * `float("nan")` compares False against everything, so a NaN price passes every
+      `>` / `>=` threshold silently.
+    * `0.0` is finite, so a "is this a number" check alone admits it — and a zero
+      *entry* makes the inverted-geometry comparisons (`stop_loss >= entry`) False,
+      which is how a **negative** stop loss came to be accepted.
+
+    `market_context.build_context` produces exactly `current_price = bid = 0.0` when
+    the primary frame is empty (feed down, cold symbol), so a zero price is not
+    hypothetical: it is what an unobserved market looks like in this system. Callers
+    must treat a False result as "no market data", never as "a price of zero".
+    """
+    try:
+        return math.isfinite(float(value)) and float(value) > 0.0
+    except (TypeError, ValueError):
+        return False
+
 
 class MarketRegime(str, Enum):
     TREND_BULL = "TREND_BULL"
