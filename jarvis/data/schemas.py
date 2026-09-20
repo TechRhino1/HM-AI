@@ -271,6 +271,12 @@ class DecisionObject:
     # real MT5 bars (see jarvis.intelligence.honest_base_rates). Read-only: it
     # reports what the symbol actually did, and is never used to gate or resize.
     honest_base_rate: Optional[Dict[str, Any]] = None
+    # AI10: the PRE-calibration win probability — the input `calibrate_probability()`
+    # was applied to, before the ML blend and every downstream boost/penalty.
+    # Persisted so the reliability curve can be refit against the forecast the
+    # calibrator actually saw. `None` when it was not recorded, which is NOT the
+    # same as 0.0: a fit must skip those rows rather than read them as a forecast.
+    raw_win_prob: Optional[float] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {

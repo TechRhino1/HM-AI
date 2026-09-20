@@ -134,7 +134,7 @@ attribution and reentrancy, which neither mutation disturbs.
 |---|---|---|---|
 | AI2 / AI3 | `triple_barrier_label` and MFE/MAE are 0 on every row | H | S | ✅ **FIXED** 2026-09-20 — D10 derives the label at close from the stored geometry; D19 measures MFE/MAE from the retained path, NULL when unsampled |
 | AI9 | Walk-forward validator is dead; optimizer output never reaches trading | H | M |
-| AI10 | Calibration fitted to its own output on ≤20 rows | H | M |
+| AI10 | Calibration fitted to its own output on ≤20 rows | H | M | ✅ **FIXED** 2026-09-20 — the refit now reads the persisted pre-calibration forecast (`raw_win_prob`, migration 2), needs 10 observations per bin, shrinks against the existing curve, and is forced monotonic. Measured: the old fit collapsed the whole curve (0.59→0.236, 0.86→0.464) and inverted it (0.75→0.496 but 0.95→0.464). See M3 below |
 | AI4 | Gate/sizing probability excludes the only fitted model | H | M |
 | A10 / A9 | `/api/history` re-syncs 30 days on every read; SSE pushes 144KB/s | M | M | ✅ **SSE FIXED** 2026-09-20 — measured 63,276 B/snapshot → 21,019 (33%) via `get_state_digest()`; `/api/history` half was already done |
 | ~~P5~~ | ~~MT5 connection at import time~~ | H | S | **Fixed 2026-09-20** (partial — see below). `server.py:34` built `MT5Client(mode="live")` in the **class body** and `historical_engine.py:265` built one at **module scope**. With no terminal running `mt5.initialize()` blocks in a native call **holding the GIL**, so `Thread.start()` can never complete: `import jarvis.api.server` never returned and **pytest could not even collect** (13min+, no output — and `faulthandler` itself could not fire, which is how you know it is the GIL). Both now pass `auto_init=False`; `MT5Client._reconnect_if_needed()` already connects on first use, so nothing that talks to the broker changes behaviour. **Remaining:** any *runtime* path that really calls `mt5.initialize()` without a terminal still wedges the interpreter — `initialize()` takes no `timeout` argument in MetaTrader5 5.0.6180, so it cannot be bounded from Python. Running the suite needs a terminal (or `JARVIS_BACKTEST_MODE=1`). |
@@ -551,7 +551,7 @@ AI2, AI3, AI5, AI6, AI7, AI8, AI9.
 **Exit:** a backtest run twice produces byte-identical results; the learning loop survives a
 restart; walk-forward geometry either reaches live levels or is labelled advisory in the UI.
 
-**Done so far:** AI2/AI3 (labels, via D10 + D19), **AI5**, **AI6** and **AI8** (all below).
+**Done so far:** AI2/AI3 (labels, via D10 + D19), **AI5**, **AI6**, **AI8** and **AI10** (all below).
 
 **AI5 — the forecast is no longer overwritten.** Measured on the live journal: **112/112 closed rows**
 had `expected_value == realized_pnl`, and **84 rows** carried `ai_score = 85.0`. Two write sites did it:
@@ -669,6 +669,52 @@ backtests running concurrently in one process would contend over it (one exiting
 while the other still needs it). That is the existing design and it is fine for sequential runs and
 for one-process-per-sweep; fixing it properly means giving each component an instance-level setting,
 which is M4 work.
+
+**AI10 — the reliability curve is refit from the forecast, not from itself.** Three defects, all
+measured on the live journal (22 closed rows).
+
+1. **The fit read the calibrator's own output.** `decision_engine` stores
+   `model_confidence=calibrated_win_p`, and `update_calibration_from_history` binned on
+   `model_confidence`. That number is not even the calibrator's immediate output — it is the
+   pipeline's downstream composite, blended with the ML predictor and then boosted and penalised
+   through a dozen later adjustments. So the curve decided the stored value, the stored value picked
+   the bin, and the bin refit the curve.
+2. **Any bin with 2 observations moved, 60% of the way to the observed rate.** With n in 3–5 the
+   standard error of a win rate is 0.18–0.27, and at n=2 the observed rate can only be 0.0, 0.5 or
+   1.0.
+3. **The result could be non-monotonic.**
+
+Measured effect of one refit on the live 22 rows — bins of 5/4/3/5/5 at win rates
+0.00/0.25/0.33/0.20/0.20:
+
+| bin | before | after | |
+|---|---|---|---|
+| (0.5, 0.6) | 0.590 | **0.236** | −0.354 |
+| (0.6, 0.7) | 0.660 | **0.414** | −0.246 |
+| (0.7, 0.8) | 0.740 | **0.496** | −0.244 |
+| (0.8, 0.9) | 0.820 | **0.448** | −0.372 |
+| (0.9, 1.0) | 0.860 | **0.464** | −0.396 |
+
+A raw 0.60 then mapped to **0.325** instead of 0.625, so the 55% gate became unreachable — and the
+curve came out inverted: 0.75 mapped to 0.496 while 0.95 mapped to 0.464, so a *more* confident
+forecast scored *lower*, which inverts ranking and makes the gate reward the worse trade.
+
+Fixed in four parts. `DecisionObject` carries `raw_win_prob` (the pre-calibration hypothesis
+probability — the value `calibrate_probability()` was applied to), which is threaded out of
+`_compute_blended_probability` and persisted through **migration 2** of `trade_records`; rows written
+before it are **skipped, not defaulted** — a default would manufacture a forecast the curve then
+learns from. The refit now needs `MIN_BIN_SAMPLES = 10` per bin, shrinks the data against the existing
+curve with a Beta-style prior (`(n·observed + k·prior) / (n + k)`, `k = 10`) instead of jumping 60% of
+the way, and runs `_enforce_monotonic` afterwards.
+
+`tests/test_calibration_refit.py` (17 tests). **Mutation-proved: 11 go red** under
+`.scratch/mutate_ai10.py`. The 6 survivors pin the monotonicity repair itself (called directly), the
+direct-binning edge case, the reported bin count, and persistence of a recorded value.
+
+**Consequence worth knowing:** until enough rows carry `raw_win_prob`, **the curve will not be refit
+at all** — 22 existing closed rows produce zero updates. That is intended: a curve that cannot be
+fitted honestly should not move. It also means the current shipped curve stays in force until roughly
+10 trades accumulate *per bin*, which is the point.
 
 ### M4 — Raise the architecture ceiling *(~3 weeks)*
 A2/A4 engine process split, A1 one radar contract, A13 shared frontend modules, P10 packaging,

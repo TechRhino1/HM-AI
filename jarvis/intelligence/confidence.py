@@ -50,30 +50,87 @@ class ConfidenceCalibrationEngine:
         outs = np.array(outcomes)
         return float(np.mean((preds - outs) ** 2))
 
-    def update_calibration_from_history(self, trade_records: List[Dict[str, Any]]) -> None:
-        """Updates calibration curve based on actual win rates from historical trades (§17)."""
-        if len(trade_records) < 10:
-            return
+    # AI10 — what refitting a reliability curve actually requires.
+    #
+    # Measured on the live journal (22 closed rows): the old fit updated any bin with
+    # >=2 observations and moved it 60% of the way to the observed rate. With n in 3-5
+    # the standard error of the observed rate is 0.18-0.27, so the whole curve collapsed
+    # (0.59 -> 0.24, 0.86 -> 0.46): a raw 0.60 mapped to 0.325 instead of 0.625, and the
+    # 55% gate became unreachable. It also produced a NON-MONOTONIC curve — 0.75 mapped
+    # to 0.496 while 0.95 mapped to 0.464, so a more confident forecast scored lower.
+    MIN_BIN_SAMPLES = 10
+    # Pseudo-observations pulling the update toward the existing curve. n == k means a
+    # bin that just clears the bar moves halfway; as n grows it converges to the data.
+    PRIOR_STRENGTH = 10.0
 
-        # Define bins
+    def update_calibration_from_history(self, trade_records: List[Dict[str, Any]]) -> int:
+        """Refits the reliability curve from closed trades. Returns the bins updated.
+
+        AI10: the fit reads `raw_win_prob` — the PRE-calibration forecast — and never
+        `model_confidence`. `model_confidence` is this pipeline's own downstream output
+        (blended with the ML predictor, then boosted and penalised), so fitting on it is
+        fitting the curve to itself: the curve decides the stored value, the stored value
+        picks the bin, and the bin refits the curve.
+
+        Rows with no `raw_win_prob` (written before AI10) are SKIPPED, not defaulted —
+        a default would manufacture a forecast and the curve would learn from it.
+        """
         bins = [(0.4, 0.5), (0.5, 0.6), (0.6, 0.7), (0.7, 0.8), (0.8, 0.9), (0.9, 1.0)]
         bin_stats = {b: {"wins": 0, "total": 0} for b in bins}
+        usable = 0
 
         for record in trade_records:
-            predicted_prob = float(record.get("model_confidence", record.get("predicted_probability", 0.5)))
+            raw = record.get("raw_win_prob")
+            if raw is None:
+                continue
+            try:
+                predicted_prob = float(raw)
+            except (TypeError, ValueError):
+                continue
+            usable += 1
             is_win = int(record.get("is_win", 0)) == 1
-            
+
             for b in bins:
-                if b[0] <= predicted_prob < b[1]:
+                # The top bin is closed so a forecast of exactly 1.0 is not dropped.
+                if b[0] <= predicted_prob < b[1] or (b == bins[-1] and predicted_prob == 1.0):
                     bin_stats[b]["total"] += 1
                     if is_win:
                         bin_stats[b]["wins"] += 1
                     break
-        
-        # Update calibration curve for bins with enough data — faster adaptation
+
+        if usable < self.MIN_BIN_SAMPLES:
+            return 0
+
+        updated = 0
         for b, stats in bin_stats.items():
-            if stats["total"] >= 2:  # Lowered from 3 to adapt faster on small samples
-                actual_win_rate = stats["wins"] / stats["total"]
-                # More responsive update (alpha 0.6 toward actual, was 0.5)
-                old_val = self.calibration_curve.get(b, b[0] + 0.05)
-                self.calibration_curve[b] = round(0.4 * old_val + 0.6 * actual_win_rate, 3)
+            n = stats["total"]
+            if n < self.MIN_BIN_SAMPLES:
+                continue
+            observed = stats["wins"] / n
+            prior = float(self.calibration_curve.get(b, b[0] + 0.05))
+            # Beta-style shrinkage: the data competes with the existing curve instead of
+            # overriding it, so a small bin cannot be yanked by a short unlucky run.
+            blended = (n * observed + self.PRIOR_STRENGTH * prior) / (n + self.PRIOR_STRENGTH)
+            self.calibration_curve[b] = round(min(1.0, max(0.0, blended)), 3)
+            updated += 1
+
+        if updated:
+            self._enforce_monotonic(bins)
+        return updated
+
+    def _enforce_monotonic(self, bins) -> None:
+        """A reliability curve must be non-decreasing.
+
+        Without this the per-bin updates can invert it, and then the calibrator says a
+        MORE confident forecast is LESS likely to win — which inverts ranking and makes
+        the gate reward the worse trade.
+        """
+        running = None
+        for b in bins:
+            if b not in self.calibration_curve:
+                continue
+            value = self.calibration_curve[b]
+            if running is not None and value < running:
+                value = running
+                self.calibration_curve[b] = round(value, 3)
+            running = value

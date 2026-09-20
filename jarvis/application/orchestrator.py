@@ -825,6 +825,10 @@ class JarvisOrchestrator:
                     "regime": regime.primary_regime.value,
                     "strategy": decision.strategy,
                     "model_confidence": decision.model_confidence,
+                    # AI10: the pre-calibration forecast. Without it the reliability
+                    # curve can only be refit from `model_confidence`, which is the
+                    # pipeline's own output — a curve fitting itself.
+                    "raw_win_prob": getattr(decision, "raw_win_prob", None),
                     "adversarial_penalty": decision.adversarial_penalty,
                     "expected_value": decision.expected_value,
                     "ml_features": ml_feat.tolist() if hasattr(ml_feat, "tolist") else list(ml_feat)

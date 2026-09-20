@@ -260,7 +260,7 @@ class DecisionEngine:
         pip_size = spec.pip_size
         
         if tentative_bias not in ["BUY", "SELL"]:
-            return final_win_p, loss_p, 0.0, hypotheses, calibrated_win_p, honest_base_rate
+            return final_win_p, loss_p, 0.0, hypotheses, calibrated_win_p, honest_base_rate, raw_prob
 
         est_lots = max(0.01, planned_risk_dollars / (max(risk_dist, 1e-4) * contract_size))
         pip_val_per_lot = spec.pip_value_per_lot
@@ -269,7 +269,7 @@ class DecisionEngine:
 
         ev = (final_win_p * planned_win_dollars) - (loss_p * planned_risk_dollars) - spread_cost - expected_slippage
         ev = round(float(ev), 2)
-        return final_win_p, loss_p, ev, hypotheses, calibrated_win_p, honest_base_rate
+        return final_win_p, loss_p, ev, hypotheses, calibrated_win_p, honest_base_rate, raw_prob
 
     def _apply_quality_gate(
         self,
@@ -756,7 +756,14 @@ class DecisionEngine:
                 ai_score = max(0.0, ai_score - (of_res["strength"] * 10.0))
                 logger.debug(f"[{context.symbol}] Institutional Order Flow opposes {tentative_bias}! Penalizing AI score to {ai_score:.1f}")
 
-        final_win_p, loss_p, ev, hypotheses, calibrated_win_p, honest_base_rate = self._compute_blended_probability(
+        # AI10: `raw_prob` is the pre-calibration hypothesis probability — the value
+        # `calibrator.calibrate_probability()` was actually applied to. It is carried out
+        # here so it can be persisted and later used to REFIT the curve. The refit must
+        # never bin on `model_confidence`: that number is this pipeline's own downstream
+        # output (blended with the ML predictor, then boosted and penalised through
+        # lines below), so fitting on it is fitting on the calibrator's own output.
+        (final_win_p, loss_p, ev, hypotheses, calibrated_win_p,
+         honest_base_rate, raw_prob) = self._compute_blended_probability(
             context, regime, analyst_reports, devil_report, tentative_bias, rr_ratio, risk_dist, account_balance, risk_per_trade_pct
         )
         
@@ -1247,6 +1254,7 @@ class DecisionEngine:
             calculated_risk_percent=round(risk_per_trade_pct * devil_report.invalidation_risk_coefficient, 2),
             expected_value=ev,
             model_confidence=calibrated_win_p,
+            raw_win_prob=round(float(raw_prob), 4),
             adversarial_penalty=devil_report.penalty_score,
             invalidation_levels=hypotheses.invalidation_criteria,
             bull_case=bull_case[:4],

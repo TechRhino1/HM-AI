@@ -34,6 +34,12 @@ LEGACY_COLUMNS = """ticket INTEGER PRIMARY KEY, symbol TEXT, timestamp TEXT, tra
 
 NEW_COLUMNS = {"ml_features", "triple_barrier_label"}
 
+# "Newer than this code" must be derived, never hardcoded. While SCHEMA_VERSION was 1 the
+# tests below used a literal 2; bumping the code to 2 silently turned them into
+# "current version" cases, so they passed while no longer testing the refusal at all.
+# AI10: make the number follow the code.
+NEWER_VERSION = SCHEMA_VERSION + 1
+
 
 def _build(path, columns_sql, version, extra_columns=()):
     """Create a `trade_records` file at a given shape and version."""
@@ -71,7 +77,8 @@ def db(tmp_path):
 class TestMigrationOne:
     def test_the_step_exists_for_the_version_it_names(self):
         assert MIGRATIONS[SCHEMA_VERSION] is not None
-        assert set(MIGRATIONS) == {1}
+        # Every version the code declares has a step, and no step is orphaned.
+        assert set(MIGRATIONS) == set(range(1, SCHEMA_VERSION + 1))
 
     def test_a_legacy_file_gains_both_columns(self, db):
         """uv=0, missing both columns -> migration 1 adds them and stamps 1."""
@@ -108,13 +115,13 @@ class TestMigrationOne:
 
 class TestTheRefusalTheSweepCouldNotExpress:
     def test_a_newer_file_is_not_patched_back_into_this_schema(self, db):
-        """THE DEFECT. A file from newer code (uv=2) that does NOT carry
+        """THE DEFECT. A file from newer code (uv=SCHEMA_VERSION+1) that does NOT carry
         `triple_barrier_label` — because the newer version renamed or dropped it.
 
         The sweep saw "column missing" and added it back, silently undoing the newer
         schema. `migrate()` sees `current > target`, refuses, and touches nothing.
         """
-        _build(db, LEGACY_COLUMNS, version=2)
+        _build(db, LEGACY_COLUMNS, version=NEWER_VERSION)
         assert "triple_barrier_label" not in _columns(db)
 
         TradeMemory(db_path=str(db)).close()
@@ -125,23 +132,24 @@ class TestTheRefusalTheSweepCouldNotExpress:
         assert not NEW_COLUMNS & _columns(db)
 
     def test_a_newer_file_is_not_stamped_down(self, db):
-        _build(db, LEGACY_COLUMNS, version=2)
+        _build(db, LEGACY_COLUMNS, version=NEWER_VERSION)
         TradeMemory(db_path=str(db)).close()
-        assert _version(db) == 2
+        assert _version(db) == NEWER_VERSION
 
     def test_a_newer_file_with_an_extra_column_is_still_writable(self, db):
         """Refusing to migrate is not refusing to operate.
 
-        A version-2 file plausibly has one MORE column than this code knows. The old
-        positional `INSERT ... VALUES (?, ... x22)` blew up on that
+        A version-(SCHEMA_VERSION+1) file plausibly has one MORE column than this code
+        knows. The old positional `INSERT ... VALUES (?, ... x22)` blew up on that
         ("table trade_records has 23 columns but 22 values were supplied"), so the store
         could not write to a file it had correctly decided to open. The insert now names
-        its columns, which tolerates extra ones.
+        its columns, which tolerates extra ones — provided the columns it NAMES exist, so
+        `raw_win_prob` (AI10) is included below alongside the genuinely unknown `notes`.
         """
-        _build(db, LEGACY_COLUMNS, version=2,
+        _build(db, LEGACY_COLUMNS, version=NEWER_VERSION,
                extra_columns=("ml_features TEXT", "triple_barrier_label INTEGER DEFAULT 0",
-                              "notes TEXT"))
-        assert len(_columns(db)) == 23
+                              "raw_win_prob REAL", "notes TEXT"))
+        assert len(_columns(db)) == 24
 
         tm = TradeMemory(db_path=str(db))
         tm.record_trade({"ticket": 1, "symbol": "EURUSD", "type": "BUY",
@@ -154,4 +162,4 @@ class TestTheRefusalTheSweepCouldNotExpress:
         finally:
             c.close()
         assert row == ("EURUSD", 1.1)
-        assert _version(db) == 2
+        assert _version(db) == NEWER_VERSION

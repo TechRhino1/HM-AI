@@ -18,7 +18,8 @@ logger = logging.getLogger("JARVIS_TradeMemory")
 
 # D3: 1 = `ml_features` + `triple_barrier_label`. A file at 0 predates
 # versioning and is brought up by migration 1 below.
-SCHEMA_VERSION = 1
+# AI10: 2 = `raw_win_prob` (the pre-calibration forecast).
+SCHEMA_VERSION = 2
 
 
 def _migration_1(conn: sqlite3.Connection) -> None:
@@ -36,7 +37,18 @@ def _migration_1(conn: sqlite3.Connection) -> None:
     })
 
 
-MIGRATIONS = {1: _migration_1}
+def _migration_2(conn: sqlite3.Connection) -> None:
+    """AI10: persist the PRE-calibration win probability.
+
+    Without it the only probability on a closed row is `model_confidence`, which is
+    the decision pipeline's own downstream output — so refitting the reliability
+    curve from the journal meant fitting the curve to itself. NULL means "not
+    recorded", and a fit must skip those rows rather than read them as 0.0.
+    """
+    add_columns(conn, "trade_records", {"raw_win_prob": "REAL"})
+
+
+MIGRATIONS = {1: _migration_1, 2: _migration_2}
 
 
 def derive_triple_barrier_label(entry, exit_price, sl, tp, trade_type) -> Optional[int]:
@@ -174,6 +186,7 @@ class TradeMemory:
                     regime TEXT,
                     strategy TEXT,
                     model_confidence REAL,
+                    raw_win_prob REAL,
                     adversarial_penalty REAL,
                     expected_value REAL,
                     mfe REAL,
@@ -206,10 +219,10 @@ class TradeMemory:
                 INSERT OR REPLACE INTO trade_records (
                     ticket, symbol, timestamp, trade_type, entry_price, exit_price,
                     sl, tp, lots, pnl, is_win, regime, strategy, model_confidence,
-                    adversarial_penalty, expected_value, mfe, mae, reasoning,
+                    raw_win_prob, adversarial_penalty, expected_value, mfe, mae, reasoning,
                     quality_gate, ml_features, triple_barrier_label
                 ) VALUES (
-                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
                 )
             """, (
                 trade_data.get("ticket", int(datetime.now().timestamp())),
@@ -226,6 +239,10 @@ class TradeMemory:
                 trade_data.get("regime", "NEUTRAL"),
                 trade_data.get("strategy", "TREND_FOLLOWING"),
                 trade_data.get("model_confidence", 0.5),
+                # AI10: the pre-calibration forecast, or NULL when none was recorded.
+                # Not `.get(..., 0.5)` — a default here would manufacture a forecast
+                # that the refit would then learn from.
+                trade_data.get("raw_win_prob"),
                 trade_data.get("adversarial_penalty", 0.0),
                 trade_data.get("expected_value", 0.0),
                 # D19: no fabricated 0.0. An excursion of 0.0 at open says nothing
