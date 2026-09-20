@@ -1254,3 +1254,38 @@ up. **Do not kill the platform with `/T` if you want to keep the broker session.
 
 Result after all three fixes: all 12 public endpoints answer **HTTP 200 in 0.13-0.22s** with no
 terminal, and `/api/diagnostics` honestly reports `MT5: RECONNECTING`, `DATA_FEED: SYNTHETIC`.
+
+## Round 40m — traps added
+
+* **"Launch vs no launch" is the wrong question; "where" is the right one.** Gating the terminal
+  launch out of *every* path is a regression, not a fix: `HM_start.bat` only runs
+  `python HM_start.py live`, and launching `terminal64.exe` used to be a side effect of
+  `initialize()`. The result was a platform that booted, served, and reported SYNTHETIC bars with no
+  way to trade. **Boot may launch** (blocking 60-100s costs startup time and nothing else); **read
+  paths must not** (that is what freezes the accept loop). The flag is
+  `ensure_mt5_terminal(allow_launch=...)`, default False, True only in `HM_start.py`.
+
+* **A throttle must not be stamped before the check it protects.** `_LAST_INIT_ATTEMPT` was set on
+  the way *in*, so one "no terminal" answer refused every caller for 30s — including a caller with a
+  usable injected module, which cannot block and has no reason to be refused. Symptom: 4 failures (3
+  `test_position_id_join`, 1 `test_fill_origin`) that each **passed in isolation**, with a different
+  set on the next run. Only an actual `initialize()` attempt may spend the window.
+
+* **The user-visible "terminal64 error" is MT5's `-10003`, not a string in this repo.**
+  `(-10003, "IPC initialize failed, Pipe server didn't answer in 60 sec")` = the terminal was
+  launched but never answered its IPC pipe; `(-10004, 'No IPC connection')` is the follow-up.
+  **Read the terminal's own log to tell "failed to start" from "started but never answered":**
+  `%APPDATA%\MetaQuotes\Terminal\<hash>\logs\YYYYMMDD.log`. It is UTF-16. A launch that dies before
+  MT5 logs anything means the failure is at/below process creation, not in the terminal. The data
+  dir being present, writable and lock-free rules storage out.
+
+* **A GUI application cannot be started from a non-interactive session — even with the sandbox
+  disabled.** `terminal64.exe` launches, dies, and leaves no Windows Application-error event, so the
+  OS never logged a crash: there is simply no desktop to draw on. This is why `MT5: RECONNECTING`
+  persists here no matter what; it is not evidence the terminal is broken, and it is **not** something
+  the code can work around.
+
+* **When a test file passes alone but not in the suite, suspect shared state before logic** — and
+  check it *both* with the platform running and stopped before blaming the platform. Here the failure
+  set was byte-identical in both cases, which ruled out the live server in one measurement.
+
