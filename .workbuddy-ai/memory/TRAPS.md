@@ -1948,3 +1948,25 @@ future that may not happen.** Log the failure.
 Mutation 1 replaced a three-line block that contained the exact line mutation 2 targeted, so mutation 2
 silently did not apply and the count understated (7/16 instead of 8/16). **Have the mutation script
 report which mutations failed to match**, and treat an unapplied mutation as zero evidence.
+
+### 41d1 — "Not connected" is not the same as "the broker cannot answer"
+
+`init_connection()` does NOT call `mt5.initialize()` for paper — it sets `is_connected = True` and
+returns. But the **data** path does initialise a terminal (paper trades real bars), so `account_info()`
+answers afterwards. A guard placed "below" the broker call is unreachable in exactly the normal case.
+
+**Check the mode before the call, not after.** And keep `_reconnect_if_needed()` before the mode check:
+it is what rewrites `mode` to `"paper"` when the package is absent.
+
+Two consequences worth naming: sizing becomes a function of somebody's real equity (same config, two
+machines, different size), and **test outcomes depend on test order and on the size of a real account**
+— a mocked 10,000 came back as 762.51.
+
+### 41d2 — Mutations that accumulate on one file shadow each other (second occurrence)
+
+Mutation 1 disabled an entire branch, which also disabled the line mutation 4 targeted; the combined
+run looked like 5/7 but proved nothing about mutation 4. Re-running it alone showed 1 kill.
+
+**When several mutations touch one file, verify each in isolation** before counting it as evidence. A
+kill count from a combined run is an upper bound on what the suite discriminates, not a measurement of
+each mutation.

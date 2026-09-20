@@ -204,7 +204,40 @@ class MT5Client:
         return res
 
     def get_account_snapshot(self) -> AccountSnapshot:
+        # `_reconnect_if_needed()` first: it is what rewrites self.mode to
+        # "paper" when the MT5 package is absent, and that rewrite has to be
+        # visible to the check below.
         self._reconnect_if_needed()
+
+        # Paper mode must never size against the broker.
+        #
+        # `init_connection()` does NOT call mt5.initialize() for paper -- it just
+        # sets is_connected=True -- but the DATA path does initialise a terminal
+        # to fetch real bars, so `mt5.account_info()` answers anyway, with the
+        # LIVE account. Checking the mode only *after* that call meant a paper
+        # run sized every position against the real balance: measured 762.51
+        # against a simulated book of 10,000. `MT5StateSynchronizer` then caches
+        # it into state_manager.account, so every later risk and sizing decision
+        # inherits it too.
+        if self.mode == "paper":
+            with self._lock:
+                paper_pnl = sum(getattr(p, "profit", 0.0) for p in self._paper_positions.values())
+            return AccountSnapshot(
+                login=999999,
+                server="HM Algo 2.0-PAPER",
+                balance=10000.0,
+                equity=10000.0 + paper_pnl,
+                margin=0.0,
+                free_margin=10000.0 + paper_pnl,
+                margin_level=0.0,
+                leverage=100,
+                profit=paper_pnl,
+                name="Paper Account",
+                company="HM Algo 2.0 Simulator",
+                currency="USD",
+                trade_allowed=True,
+            )
+
         if MT5_AVAILABLE and mt5 is not None:
             try:
                 with self._lock:
@@ -228,24 +261,7 @@ class MT5Client:
             except Exception as e:
                 logger.error(f"Failed to fetch live MT5 account snapshot: {e}")
 
-        if self.mode == "paper":
-            with self._lock:
-                paper_pnl = sum(getattr(p, "profit", 0.0) for p in self._paper_positions.values())
-            return AccountSnapshot(
-                login=999999,
-                server="HM Algo 2.0-PAPER",
-                balance=10000.0,
-                equity=10000.0 + paper_pnl,
-                margin=0.0,
-                free_margin=10000.0 + paper_pnl,
-                margin_level=0.0,
-                leverage=100,
-                profit=paper_pnl,
-                name="Paper Account",
-                company="HM Algo 2.0 Simulator",
-                currency="USD",
-                trade_allowed=True
-            )
+        # Paper is handled above, before any broker call is made.
 
         # Dynamic Offline / Disconnected State (Zero Hardcoded Mock Data)
         return AccountSnapshot(
