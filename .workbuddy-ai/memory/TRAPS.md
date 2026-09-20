@@ -1158,9 +1158,14 @@ showed one socket, `127.0.0.1:<eph> -> 127.0.0.1:8861`, stuck in **CLOSE_WAIT** 
 
 Measured on a live `HM_start.py live` run, MT5 down.
 
-* **`C:\Program Files\MetaTrader 5\` is broken on this box** — 9 entries, exe + folders and **no
-  DLLs**, so `terminal64.exe` exits `0xC0000135` (STATUS_DLL_NOT_FOUND). No second terminal on C: or
-  D:. Check the folder's file list before concluding MT5 "is installed".
+* **Do NOT conclude "MT5 is broken" from a missing-DLL listing.** `C:\Program Files\MetaTrader 5\`
+  really does list only 9 entries with no `.dll`, and launching `terminal64.exe` directly really
+  does exit `0xC0000135` (STATUS_DLL_NOT_FOUND) — and yet the terminal RUNS (measured: pid 23764,
+  `terminal_info().connected == True`, 1645 symbols, account XMGlobal-MT5 5 / login 101059540).
+  The MetaTrader5 *package* is what starts it, not a bare `Popen`. Concluding the install was dead
+  cost a whole cycle of wrong advice. **The only test that matters is
+  `mt5.initialize(timeout=5000)` — which is also the fast form:** the default 60s IPC wait is what
+  makes a dead terminal look like a hang.
 * **LIVE still starts, and looks healthy, but never binds :8501.** Tunnels come up
   (Cloudflare + serveo), orchestrator/watchdog/PositionMonitor all log "started", yet
   `netstat` shows no listener. `py-spy dump --pid <pid>` pinned it: **MainThread** is inside
