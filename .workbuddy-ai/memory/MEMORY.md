@@ -13,31 +13,28 @@ Pointers and paid-for rules only; detail lives elsewhere.
 
 ## Non-negotiables
 
-* **`.git/` is not safe here.** Files vanish overnight (4 incidents; the last two after `git rm` /
-  `git stash push`). Commit and push early, **never `git stash`**, keep
-  `.git/backup/repo-<ts>.bundle --all` fresh. Some paths are readable but **not writable** — write via
-  a hardlink alias in `.scratch/_restore/`; `open(alias,'w')` truncates it.
-* **The live server does not hot-reload.** Python edits need a restart; static CSS/JS/templates are
-  re-read per request. *A hang that does not reproduce in a fresh interpreter is a stale process.*
-  `py-spy dump --pid <pid>` attaches without restarting; `netstat -ano | grep 8501` for the pid.
-* **Push: bypass the credential selector immediately.** A plain `git push` produced a 0-byte log for
-  6m37s. The helper path **has a space in it**, so `-c credential.helper="!$GCM"` fails with
-  `/c/Program: No such file or directory`. Use `git -c credential.helper= -c
+* **`.git/` is not safe here.** Files vanish overnight (4 incidents; two after `git stash`). Commit and
+  push early, **never `git stash`**, keep `.git/backup/repo-<ts>.bundle --all` fresh. Some paths are
+  readable but **not writable** — write via a hardlink alias in `.scratch/_restore/`.
+* **The live server does not hot-reload.** Python edits need a restart; static files are re-read per
+  request. *A hang that does not reproduce in a fresh interpreter is a stale process.* `py-spy dump
+  --pid <pid>`; `netstat -ano | grep 8501` for the pid.
+* **Push: bypass the credential selector.** A plain `git push` hung 6m37s. The helper path **has a
+  space in it**, so `-c credential.helper="!$GCM"` fails. Use `git -c credential.helper= -c
   credential.helper='!tools/gcm_wrap.sh' push origin main`. `git status` always says `[gone]` — verify
-  with `git ls-remote origin refs/heads/main`, never the push message or exit code. Backticks in `-m`
-  are eaten by bash: use `git commit -F <file>`.
+  with `git ls-remote origin refs/heads/main`, never the push message. Backticks in `-m` are eaten by
+  bash: use `git commit -F <file>`.
 
 ## Running the platform
 
-`HM_start.py [paper|live]` boots engine + MT5 client + web server — **real MT5 data; `paper` =
-simulated fills**. **The account is DEMO** (`trade_mode == 0`) despite LIVE mode — **read
-`trade_mode`, never the server name**. **Never leave the platform alive only as a session background
-task** — point at `HM_dashboard.bat`. Routes and the `/classic` gap: **`TRAPS.md` § Running the
-platform**.
+`HM_start.py [paper|live]` — **real MT5 data; `paper` = simulated fills**. **The account is DEMO**
+(`trade_mode == 0`) despite LIVE mode — **read `trade_mode`, never the server name**. **Never leave the
+platform alive only as a session background task** — point at `HM_dashboard.bat`. Routes and the
+`/classic` gap: **`TRAPS.md` § Running the platform**.
 
 ## Baselines
 
-**pytest 2822 passed / 0 failed / 20 deselected** (2026-09-20) — green, not tolerated. Parse
+**pytest 2838 passed / 0 failed / 20 deselected** (2026-09-20) — green, not tolerated. Parse
 `--junit-xml=...`: the harness truncates pytest's stdout tail, so `-rf` never prints. Weekend-only
 failures are a wall-clock dependency, not a regression — `TRAPS.md` § 40n.
 
@@ -46,18 +43,18 @@ failures are a wall-clock dependency, not a regression — `TRAPS.md` § 40n.
 entries trips the bulk-delete guard: exit 1 with every test passing. A *fixed* basetemp is worse:
 pytest removes it at session start.
 
-`tools/` — 11 verify/audit harnesses, all green; the full list, counts and each failure mode:
-**`TRAPS.md` § Tool harnesses**. `tools/gcm_wrap.sh` = the required push credential helper.
+`tools/` — 11 verify/audit harnesses, all green; list, counts and failure modes: **`TRAPS.md` § Tool
+harnesses**. `tools/gcm_wrap.sh` = the push helper.
 
 ## Rules worth repeating
 
 * **Execution mode must not gate market data.** Paper skips `mt5.initialize()`, so the data path must
   call `broker_symbols.ensure_mt5_terminal()` itself or every frame becomes synthetic. Health flags
   must be **measured**, not inferred from the execution login. **Never call `mt5.initialize()` on a
-  request path** — with no terminal it holds the GIL forever and one request wedges the whole server
-  (D18); only not making the call is a fix, and the proof must come from outside the process.
-* **The UI has no request timeout anywhere** — an empty result must still repaint; a first-paint
-  watchdog must state a stall.
+  request path** — with no terminal it holds the GIL forever and one request wedges the server (D18);
+  only not making the call is a fix, and the proof must come from outside the process.
+* **The UI has no request timeout** — an empty result must still repaint; a watchdog must state a
+  stall.
 * **MT5 times are BROKER-SERVER time, not UTC** — use `jarvis/data/broker_time.py`. Local probes:
   **`curl --noproxy '*'`** (else "upstream connect failed").
 * **A frontend that reads a key the server never sends renders the empty state on success** (3
@@ -81,6 +78,9 @@ pytest removes it at session start.
 * **Pruning per-ticket state on close destroys the only record of the path.** The monitor dropped the
   extremes, so the close hardcoded `mfe=0.0` — 36/36 rows claimed a measured flat path. D19: retain,
   NULL when unsampled. Sampled, so it is a lower bound, not bar high/low.
+* **Truncating values cannot shrink a payload spread across many small fields** — eliding every field
+  over 256 B left the 63 KB state snapshot at 94%. Drop *fields*: the SSE digest is 33% of it
+  (`StateManager.get_state_digest`). A denylist plus a byte-budget test, never an allowlist.
 
 ## Signal quality — **the entry signal has no measured edge.**
 

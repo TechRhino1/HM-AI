@@ -1615,3 +1615,24 @@ positional parameter, and a call that visibly passes every argument fails with:
 The message points at the wrong thing — it looks like too few arguments were passed to a function that
 obviously takes one. **Check the decorator pairing above and below any insertion point.** If editing near
 a decorated function, match the decorator line too, or insert after the whole pair.
+
+---
+
+### 40u — Measure the payload's shape before choosing how to shrink it
+
+I assumed the 63 KB telemetry snapshot was big because of a few fat blobs, and designed a generic
+"elide any single value over N bytes" rule. Prototyped against the real payload, it saved almost
+nothing: **94% of the original at N=256, 84% at N=64**.
+
+The reason is the distribution, not the threshold. A radar row is 2.6 KB spread across **~34 fields of
+~77 bytes each**. No value dominates, so no value-level rule can help. What actually worked was
+dropping *fields* (an explainability denylist): 63,276 → 21,019 bytes.
+
+**Rule: before designing a reduction, print the size distribution — top-level section sizes, then the
+per-key sizes of one representative element.** If the largest single field is a small fraction of the
+total, every value-level approach is doomed and you need a field-level one. Five minutes of measurement
+replaced a change that would have shipped as a fix while saving 6%.
+
+Related: a **denylist** lets new small fields through automatically, so the digest cannot silently fall
+behind the schema — but it cannot catch a new *heavy* field. Pair it with a byte-budget assertion in a
+test, which is what turns that blind spot into a failing test instead of a surprise.

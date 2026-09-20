@@ -13,6 +13,47 @@ from jarvis.data.schemas import (
     ExecutionMode
 )
 
+# ── Stream digest (A10) ──────────────────────────────────────────────────────
+# Fields dropped from the SSE payload because they are EXPLAINABILITY, not state:
+# prose and check breakdowns a human reads once, on a detail view. Measured on the
+# live snapshot, removing them takes 63,276 bytes to 18,888 (30%) while every
+# price, level, score and grade survives. See `get_state_digest`.
+#
+# A denylist rather than an allowlist on purpose: a NEW small field passes through
+# automatically, so the digest cannot silently fall behind the schema. What the
+# denylist cannot do is catch a new *heavy* field — `tests/test_stream_digest.py`
+# asserts a byte budget, so that shows up as a failing test instead of a surprise.
+STREAM_EXPLAINABILITY_KEYS = frozenset({
+    "checks",
+    "rejection_reasons",
+    "failing_reasons",
+    "waiting_reasons",
+    "risk_factors",
+    "invalidation_levels",
+    "mtf_alignment",
+    "quality_gate",
+    "honest_base_rate",
+    "bull_case",
+    "bear_case",
+})
+
+# Bounds on the stream only. `/api/telemetry_state` stays complete, so the UI is
+# unaffected; these exist so the wire cost cannot scale with the scan universe.
+STREAM_RADAR_LIMIT = 25
+STREAM_DECISION_LIMIT = 25
+STREAM_LOG_LIMIT = 20
+
+
+def _slim_explainability(value: Any) -> Any:
+    """Recursively drop the explainability keys, at any depth."""
+    if isinstance(value, dict):
+        return {k: _slim_explainability(v)
+                for k, v in value.items() if k not in STREAM_EXPLAINABILITY_KEYS}
+    if isinstance(value, list):
+        return [_slim_explainability(v) for v in value]
+    return value
+
+
 class StateManager:
     """Central synchronized in-memory state repository."""
     _instance = None
@@ -135,6 +176,41 @@ class StateManager:
             self.logs.append(entry)
             if len(self.logs) > 500:
                 self.logs.pop(0)
+
+    def get_state_digest(self) -> Dict[str, Any]:
+        """The snapshot minus its explainability payload, for the SSE stream.
+
+        A10: `/api/stream/telemetry` re-sent the FULL snapshot on every state
+        change — measured at **63 KB** with 15 radar rows and 5 decisions, pushed
+        up to once a second, so ~63 KB/s per client and ~144 KB/s with a couple
+        of dashboards open. The bulk is prose: `checks`, `reasons`,
+        `risk_factors`, `quality_gate` — fields a human reads once on a detail
+        view, not sixty times a minute over an event stream.
+
+        Every *actionable* field survives (prices, levels, scores, grades,
+        regime), so a consumer can still rank and act. What is dropped is
+        available in full from `/api/telemetry_state`, which the UI already
+        polls; the digest says so rather than quietly omitting them.
+
+        `latest_decisions` is capped in the DIGEST only, never in the store:
+        `copilot.py` looks up arbitrary symbols in it, so evicting entries there
+        would make a real query answer "no decision" for a symbol that has one.
+        """
+        snap = self.get_state_snapshot()
+        radar = [_slim_explainability(v) for v in snap.get("radar_opportunities") or []]
+        decisions = {k: _slim_explainability(v)
+                     for k, v in list((snap.get("latest_decisions") or {}).items())}
+        snap["radar_opportunities"] = radar[:STREAM_RADAR_LIMIT]
+        snap["latest_decisions"] = dict(list(decisions.items())[:STREAM_DECISION_LIMIT])
+        snap["recent_logs"] = (snap.get("recent_logs") or [])[-STREAM_LOG_LIMIT:]
+        snap["digest"] = True
+        snap["full_endpoint"] = "/api/telemetry_state"
+        snap["omitted_fields"] = sorted(STREAM_EXPLAINABILITY_KEYS)
+        snap["dropped"] = {
+            "radar_items": max(0, len(radar) - STREAM_RADAR_LIMIT),
+            "decisions": max(0, len(decisions) - STREAM_DECISION_LIMIT),
+        }
+        return snap
 
     def get_state_snapshot(self) -> Dict[str, Any]:
         """Returns an atomic serialization of current system state for API/UI dashboards."""

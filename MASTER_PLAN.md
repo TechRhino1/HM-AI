@@ -98,7 +98,7 @@ recommendations were rejected on verification (see §6) — one of them would ha
 | AI9 | Walk-forward validator is dead; optimizer output never reaches trading | H | M |
 | AI10 | Calibration fitted to its own output on ≤20 rows | H | M |
 | AI4 | Gate/sizing probability excludes the only fitted model | H | M |
-| A10 / A9 | `/api/history` re-syncs 30 days on every read; SSE pushes 144KB/s | M | M |
+| A10 / A9 | `/api/history` re-syncs 30 days on every read; SSE pushes 144KB/s | M | M | ✅ **SSE FIXED** 2026-09-20 — measured 63,276 B/snapshot → 21,019 (33%) via `get_state_digest()`; `/api/history` half was already done |
 | ~~P5~~ | ~~MT5 connection at import time~~ | H | S | **Fixed 2026-09-20** (partial — see below). `server.py:34` built `MT5Client(mode="live")` in the **class body** and `historical_engine.py:265` built one at **module scope**. With no terminal running `mt5.initialize()` blocks in a native call **holding the GIL**, so `Thread.start()` can never complete: `import jarvis.api.server` never returned and **pytest could not even collect** (13min+, no output — and `faulthandler` itself could not fire, which is how you know it is the GIL). Both now pass `auto_init=False`; `MT5Client._reconnect_if_needed()` already connects on first use, so nothing that talks to the broker changes behaviour. **Remaining:** any *runtime* path that really calls `mt5.initialize()` without a terminal still wedges the interpreter — `initialize()` takes no `timeout` argument in MetaTrader5 5.0.6180, so it cannot be bounded from Python. Running the suite needs a terminal (or `JARVIS_BACKTEST_MODE=1`). |
 | P6 | sklearn on the critical import path (2.35s of 2.91s) | M | S |
 | P10 | No `pyproject.toml`, no lockfile, undeclared `scipy`/`tabulate` | M | M |
@@ -216,7 +216,7 @@ path performs a write; `triple_barrier_label` non-zero on closed rows.
 **Done so far:** D1 (`origin`, shipped), D5 (bar provenance, shipped), D10 (the triple-barrier
 label, shipped), D18 (the read path, shipped), **D3 closed** — all four versioned stores
 (`executed_trades`, `trade_records`, `circuit_state`, `drawdown_state`, `metadata`) on `migrate()`.
-**Still to do:** reconciling the two `jarvis_history.db` copies, A10's SSE half.
+**Still to do:** reconciling the two `jarvis_history.db` copies.
 
 **Status (2026-09-20): D3 half done — the version stamp.** All 11 databases reported
 `user_version = 0`, so no file could declare what shape it was in, and two copies of
@@ -464,6 +464,49 @@ intra-bar ordering, so it was not done here.
 round-trip and the NULL case. **Mutation-proved: 5 go red** under `.scratch/revert_d19_fixes.py` —
 the close-write, the open-default, the unsampled close, the retention and the bound. The 14 survivors
 are the measured-value, arithmetic and accessor-contract cases the mutation cannot disturb.
+
+**A10, SSE half — the stream now pushes a digest.** Measured rather than cited: `/api/telemetry_state`
+returned **63,276 bytes** (15 radar rows, 5 decisions), and `/api/stream/telemetry` re-sent the whole
+thing on every state-version change, up to once a second — **61.8 KB/s per client**, so the reported
+144 KB/s is two or three dashboards open at once.
+
+The bulk is *explainability prose*, not state: `checks` (905 B/row), `quality_gate` (1030 B/decision),
+`rejection_reasons`, `risk_factors`, `invalidation_levels`, `honest_base_rate`, `bull_case`. Fields a
+human reads once on a detail view, pushed sixty times a minute.
+
+The first thing I tried did **not** work and is worth recording: eliding any single *value* over a byte
+budget saved almost nothing (94% of the original at a 256-byte threshold, 84% at 64). The 2.6 KB per
+radar row is spread across ~34 fields of ~77 bytes each — no field dominates, so truncating values
+cannot help. What was needed was dropping *fields*.
+
+`StateManager.get_state_digest()` drops a named denylist at any depth and caps the row counts. Live
+measurement: **63,276 → 21,019 bytes (33%)**, i.e. 61.8 → 20.5 KB/s per client. Every actionable field
+survives — prices, stops, targets, scores, win/ml probabilities, EV, grade, regime, timeframe — so a
+consumer can still rank and act.
+
+Three deliberate constraints:
+
+* **A denylist, not an allowlist.** A new *small* field passes through automatically, so the digest
+  cannot silently fall behind the schema. What a denylist cannot do is catch a new *heavy* field, so
+  `test_the_byte_budget` asserts a budget and will fail if one appears.
+* **`/api/telemetry_state` is untouched and stays complete.** The dashboard, console and terminal all
+  read `radar_opportunities` and `latest_decisions` from it; reducing that would silently truncate their
+  radar. Pinned by `TestTheFullSnapshotIsUntouched`.
+* **`latest_decisions` is capped in the digest only, never evicted from the store.** `copilot.py` looks
+  up *arbitrary* symbols in it (`copilot.py:485,507`), so evicting would make a real query answer "no
+  decision" for a symbol that has one.
+
+The digest declares itself — `digest: true`, `full_endpoint`, `omitted_fields`, and a `dropped` count —
+so omission is stated rather than silent.
+
+Also worth knowing: **no frontend consumes this endpoint at all.** There is no `EventSource` and no
+fetch to `/api/stream/telemetry` anywhere in `jarvis/ui/static/`. The volume was never being paid for by
+a feature; it was an open endpoint anyone could hold open.
+
+`tests/test_stream_digest.py` (16 tests). **Mutation-proved: 9 go red** under
+`.scratch/revert_a10_fixes.py`. The 7 survivors assert the *unmodified* behaviour (the full snapshot
+must still carry the prose, must not be capped, and must not carry the digest marker) and the leaf
+pass-through cases — they cannot go red by construction.
 
 ### M3 — Make learning real *(~2 weeks)*
 AI2, AI3, AI5, AI6, AI7, AI8, AI9.

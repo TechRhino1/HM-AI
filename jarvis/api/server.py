@@ -716,8 +716,11 @@ class JarvisRequestHandler(BaseHTTPRequestHandler):
                     self.send_header("Access-Control-Allow-Origin", cors_origin)
                 self.end_headers()
 
-                # Stream initial state snapshot
-                snap = self.state_manager.get_state_snapshot()
+                # Stream initial state DIGEST, not the full snapshot.
+                # A10: the full one measured 63 KB and was re-sent on every state
+                # change, up to once a second (~63 KB/s per client). The digest is
+                # ~30% of that and names the endpoint that still has the detail.
+                snap = self.state_manager.get_state_digest()
                 init_msg = f"event: telemetry\ndata: {json.dumps(snap, default=str)}\n\n"
                 try:
                     self.wfile.write(init_msg.encode("utf-8"))
@@ -733,7 +736,7 @@ class JarvisRequestHandler(BaseHTTPRequestHandler):
                     try:
                         if cur_ver != last_ver:
                             last_ver = cur_ver
-                            cur_snap = self.state_manager.get_state_snapshot()
+                            cur_snap = self.state_manager.get_state_digest()
                             msg = f"event: telemetry\ndata: {json.dumps(cur_snap, default=str)}\n\n"
                             self.wfile.write(msg.encode("utf-8"))
                             self.wfile.flush()
