@@ -37,13 +37,27 @@ class SelfLearningEngine:
             conn = sqlite3.connect(self.db_path, timeout=5.0)
             conn.execute("PRAGMA journal_mode=WAL")
             cur = conn.cursor()
-            cur.execute("SELECT expected_value FROM executed_trades WHERE regime=? ORDER BY id DESC LIMIT ?", (regime, lookback))
-            rows = cur.fetchall()
-            
+            # AI5: learn from the OUTCOME, read explicitly.
+            #
+            # This used to read `expected_value`, which is the FORECAST — and
+            # which the close path overwrote with realised P&L, so on closed rows
+            # it held the outcome anyway. That conflation is exec-summary #4: the
+            # column meant "forecast" for open rows and "outcome" for closed ones,
+            # and this engine could not tell which it was averaging. Reading
+            # `realized_pnl` on CLOSED rows only makes the intent explicit and the
+            # sample honest: an open trade has no outcome to learn from.
+            cur.execute(
+                "SELECT realized_pnl FROM executed_trades "
+                "WHERE regime=? AND closed_at IS NOT NULL AND closed_at <> '' "
+                "ORDER BY id DESC LIMIT ?",
+                (regime, lookback),
+            )
+            rows = [r[0] for r in cur.fetchall() if r[0] is not None]
+
             if len(rows) < 5:
                 res = 1.0 # Not enough data
             else:
-                avg_ev = sum(r[0] for r in rows) / len(rows)
+                avg_ev = sum(rows) / len(rows)
                 if avg_ev > 0.5:
                     res = 1.10 # Boost
                 elif avg_ev < 0:
@@ -100,9 +114,16 @@ class SelfLearningEngine:
         try:
             conn = sqlite3.connect(self.db_path, timeout=5.0)
             cur = conn.cursor()
+            # AI5: `win_rate` was derived from `expected_value > 0` — the share of
+            # rows with a POSITIVE FORECAST, which is not a win rate at all. It
+            # only looked like one because the close path overwrote the forecast
+            # with realised P&L. Both are now read from the columns that actually
+            # hold them: outcomes from `realized_pnl` on closed rows, and the
+            # forecast average from `expected_value` where one was recorded
+            # (reconstructed broker rows have none, and say so with NULL).
             cur.execute("""
-                SELECT expected_value, ai_score, session_name, is_prime_session 
-                FROM executed_trades 
+                SELECT expected_value, realized_pnl, closed_at
+                FROM executed_trades
                 WHERE symbol=? AND regime=?
                 ORDER BY id DESC LIMIT ?
             """, (symbol, regime, lookback))
@@ -117,9 +138,15 @@ class SelfLearningEngine:
                     "empirical_edge": False
                 }
             else:
-                avg_ev = sum(r[0] for r in rows if r[0] is not None) / len(rows)
-                positive_ev_count = sum(1 for r in rows if (r[0] or 0) > 0)
-                win_rate = positive_ev_count / len(rows)
+                forecasts = [r[0] for r in rows if r[0] is not None]
+                outcomes = [r[1] for r in rows
+                            if r[2] is not None and r[2] != "" and r[1] is not None]
+
+                # Averaged over the rows that actually carry a forecast, not over
+                # every row fetched — otherwise a growing number of reconstructed
+                # rows would quietly drag this towards zero.
+                avg_ev = (sum(forecasts) / len(forecasts)) if forecasts else 0.0
+                win_rate = (sum(1 for o in outcomes if o > 0) / len(outcomes)) if outcomes else 0.50
 
                 # Conviction multiplier between 0.8x and 1.25x based on empirical pattern history
                 if win_rate >= 0.65 and avg_ev >= 1.0:
@@ -133,6 +160,14 @@ class SelfLearningEngine:
 
                 res = {
                     "sample_size": len(rows),
+                    # `sample_size` is rows fetched; these are the rows the two
+                    # statistics were ACTUALLY computed from. They differ: a
+                    # reconstructed broker row has an outcome but no forecast, and
+                    # an open row has a forecast but no outcome. Reporting only
+                    # `sample_size` made "3 rows, no outcomes" read as a measured
+                    # 50% win rate.
+                    "outcome_sample_size": len(outcomes),
+                    "forecast_sample_size": len(forecasts),
                     "avg_ev": round(avg_ev, 2),
                     "win_rate": round(win_rate, 2),
                     "conviction_multiplier": conviction_mult,

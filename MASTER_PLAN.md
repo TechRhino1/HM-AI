@@ -21,8 +21,11 @@ The platform is functionally broad and battle-tested at the edges — 40k LOC Py
    hardcoded fallback, and it is still writing today. Every statistic computed over the table is
    inflated (C2, D1, D2, D5).
 4. **The learning loop reads its own output.** `expected_value` is overwritten with realised P&L on
-   close (111/111 rows), so self-learning averages the outcome it was meant to forecast, and the
-   only "labels" (`triple_barrier_label`, `mfe`, `mae`) are 0 on 35/35 rows (AI2, AI3, AI5, D10).
+   close (**112/112 closed rows**), so self-learning averages the outcome it was meant to forecast,
+   and 84 rows carry a fabricated `ai_score = 85.0`. ✅ **the write sites are FIXED** (AI5, M3 below) —
+   no new row is corrupted; **the 112 historical forecasts are unrecoverable** and need
+   `tools/repair_forecast_column.py --apply`, which is awaiting your go-ahead. The labels
+   (`triple_barrier_label`, `mfe`, `mae`) are ✅ FIXED (D10, D19).
 
 The good news: the highest-severity items are mostly **small**. The top four are each under a day.
 
@@ -114,7 +117,7 @@ attribution and reentrancy, which neither mutation disturbs.
 
 | # | Finding | I | E | Note |
 |---|---|---|---|---|
-| AI5 | Self-learning averages the outcome, not the forecast | H | M | `self_learning.py:40`; drives live conviction 0.80–1.25 and sizing |
+| AI5 | Self-learning averages the outcome, not the forecast | H | M | ✅ **FIXED** 2026-09-20 — the forecast is no longer overwritten (112/112 rows had `expected_value == realized_pnl`; 84 had a fabricated `ai_score=85.0`); the engine now reads `realized_pnl` and `expected_value` explicitly. **Historical rows need `tools/repair_forecast_column.py`** |
 | AI8 | `BacktestEngine` is not hermetic | H | M | Measured: live weights, live trade memory, live bandit state leak into backtests |
 | AI6 | Learning loop dies on restart; fallback R is fabricated | H | S | `_pending_features` is process-local; `r_multiple = 2.0/-1.0` invented |
 | C8 | Gross vs net P&L; no fee columns anywhere | H | M | `database.py:226` vs `state_synchronizer.py:73`; unmeasurable by construction |
@@ -547,6 +550,38 @@ pass-through cases — they cannot go red by construction.
 AI2, AI3, AI5, AI6, AI7, AI8, AI9.
 **Exit:** a backtest run twice produces byte-identical results; the learning loop survives a
 restart; walk-forward geometry either reaches live levels or is labelled advisory in the UI.
+
+**Done so far:** AI2/AI3 (labels, via D10 + D19), **AI5** (below).
+
+**AI5 — the forecast is no longer overwritten.** Measured on the live journal: **112/112 closed rows**
+had `expected_value == realized_pnl`, and **84 rows** carried `ai_score = 85.0`. Two write sites did it:
+
+* the close UPDATE set `expected_value = ?` to the same value as `realized_pnl`;
+* the broker-history INSERT — a deal reconstructed from `history_deals_get`, which carries **no
+  decision** — wrote `pnl` into `expected_value` and a literal `85.0` into `ai_score`.
+
+The column therefore meant "forecast" for open rows and "outcome" for closed ones. That is destructive
+in two directions: **forecast accuracy becomes unmeasurable** (calibration/AI10 and any Brier scoring
+need both numbers, and one was gone), and `SelfLearningEngine` was averaging the very thing it was
+meant to predict to drive a 0.90/1.00/1.10 conviction multiplier on the sizing path.
+
+Worse, `get_pattern_win_rate_and_ev` called `expected_value > 0` a **`win_rate`** — the share of rows
+with a positive *forecast*, which is not a win rate at all, and only looked like one because of the
+overwrite.
+
+Fixed in three places: the INSERT writes NULL for both (no forecast exists for a reconstructed deal),
+the UPDATE no longer touches `expected_value`, and the engine reads outcomes from `realized_pnl` on
+closed rows and the forecast average from `expected_value` where one was recorded — reporting
+`outcome_sample_size` and `forecast_sample_size` separately, so "3 rows fetched, 1 with an outcome"
+can no longer read as a measured 50% win rate.
+
+**Two honesty notes.** First, **the 112 historical forecasts are unrecoverable** — overwritten in
+place, stored nowhere else. `tools/repair_forecast_column.py` will null them (and the 84 fake scores)
+but is **read-only until you run `--apply`**; I have not rewritten your trade history unasked. Second,
+the coverage is uneven and I will not pretend otherwise: the two write sites live inside
+`sync_mt5_history`, which cannot be driven without a broker, so they are pinned by **source
+assertions**, not behaviour — a runtime mutation cannot turn them red. The engine half is genuinely
+behavioural: **5 of 12 tests go red** under `.scratch/revert_ai5_fixes.py`.
 
 ### M4 — Raise the architecture ceiling *(~3 weeks)*
 A2/A4 engine process split, A1 one radar contract, A13 shared frontend modules, P10 packaging,

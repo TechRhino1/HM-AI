@@ -485,10 +485,21 @@ class SQLiteTradeDB:
                     regime_str = "TREND_BULL" if side == "BUY" else "TREND_BEAR"
                     # These rows ARE broker deals — they are reconstructed from
                     # `history_deals_get`, so `origin` is not in doubt here.
+                    #
+                    # AI5 / exec-summary #4: `ai_score` and `expected_value` used
+                    # to be written as `85.0` and `pnl`. Neither is known here —
+                    # a deal reconstructed from broker history carries no decision,
+                    # so there is no forecast to record, and 85.0 was a fabricated
+                    # score that every one of these rows shared. `expected_value`
+                    # set to the realised P&L was the worse half: it made the
+                    # forecast column mean "outcome" for reconstructed rows and
+                    # "forecast" for engine-logged ones, which is why
+                    # `self_learning` could not tell them apart. NULL is honest:
+                    # no forecast was made.
                     conn.execute('''
                         INSERT INTO executed_trades (ticket, position_id, origin, symbol, action, entry_price, sl, tp, volume, timestamp, ai_score, regime, expected_value, realized_pnl, executor, closed_at)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ''', (pid, pid, "broker", clean_sym, side, entry_p, sl_val, tp_val, vol, dt_str, 85.0, regime_str, pnl, pnl, exec_label,
+                    ''', (pid, pid, "broker", clean_sym, side, entry_p, sl_val, tp_val, vol, dt_str, None, regime_str, None, pnl, exec_label,
                           dt_str if exit_deal else None))
                 else:
                     # Update realized PnL, executor, and close timestamp for completed positions.
@@ -497,9 +508,20 @@ class SQLiteTradeDB:
                     # close time we already knew.
                     # Keyed on the matched row id, not re-matched, so the UPDATE
                     # can never hit a different row than the SELECT just found.
+                    # AI5 / exec-summary #4: `expected_value` is NOT updated here.
+                    #
+                    # It used to be set to `pnl` alongside `realized_pnl`, which
+                    # overwrote the FORECAST with the OUTCOME the moment a trade
+                    # closed — measured on the live journal: every closed row had
+                    # expected_value == realized_pnl. That destroys the forecast,
+                    # so forecast accuracy can never be measured (it blocks AI10
+                    # calibration and any Brier scoring), and it is why
+                    # `self_learning` was averaging the very thing it was supposed
+                    # to predict. The forecast is written once, at open, and is
+                    # left alone here.
                     conn.execute('''
                         UPDATE executed_trades
-                        SET realized_pnl = ?, expected_value = ?, executor = ?, timestamp = ?,
+                        SET realized_pnl = ?, executor = ?, timestamp = ?,
                             -- A row the broker's own history has now matched is
                             -- proven real, whatever it was labelled at entry.
                             origin = CASE WHEN origin IS NULL OR origin IN ('unknown', 'synthetic')
@@ -509,7 +531,7 @@ class SQLiteTradeDB:
                             sl = CASE WHEN ? > 0 THEN ? ELSE sl END,
                             tp = CASE WHEN ? > 0 THEN ? ELSE tp END
                         WHERE id = ?
-                    ''', (pnl, pnl, exec_label, dt_str,
+                    ''', (pnl, exec_label, dt_str,
                           pid, pid,
                           dt_str if exit_deal else None, dt_str if exit_deal else None,
                           sl_val, sl_val, tp_val, tp_val, row[0]))

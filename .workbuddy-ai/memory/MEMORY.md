@@ -33,12 +33,12 @@ gap: **`TRAPS.md` § Running the platform**.
 
 ## Baselines
 
-**pytest 2854 passed / 0 failed / 20 deselected** (2026-09-20) — green, not tolerated. Parse
+**pytest 2866 passed / 0 failed / 20 deselected** (2026-09-20) — green, not tolerated. Parse
 `--junit-xml=...`: the harness truncates pytest's stdout tail, so `-rf` never prints. Weekend-only
-failures are a wall-clock dependency, not a regression — `TRAPS.md` § 40n.
+failures are a clock dependency, not a regression — `TRAPS.md` § 40n.
 
 **Run the suite with `env -u HTTP_PROXY -u HTTPS_PROXY -u http_proxy -u https_proxy NO_PROXY='*'` and
-`--basetemp=.scratch/ptmp-$TS`** (UNIQUE per run) — a proxy hangs localhost HTTP, and cleaning >50 temp
+`--basetemp=.scratch/ptmp-$TS`** (UNIQUE per run) — a proxy hangs localhost HTTP; cleaning >50 temp
 entries trips the bulk-delete guard: exit 1 with every test passing. A *fixed* one is worse: pytest
 removes it at session start.
 
@@ -72,16 +72,16 @@ harnesses**. `tools/gcm_wrap.sh` = the push helper.
   `bid = 0.0` — from which an entry was minted and a **negative** stop passed the last gate. One shared
   predicate, `schemas.is_observed_price`. C2 closed.
 * **A label must describe the thing it names.** Both engines reported the **anchor price's**
-  provenance as the **series'** — a generated random walk published as `data_source: "live"`.
-  Provenance now travels *with* the data (`CandleSeries.source`); D5 closed.
+  provenance as the **series'** (D5, fixed via `CandleSeries.source`); `expected_value` was overwritten
+  with the outcome on close (112/112) and `ai_score` fabricated as `85.0` (AI5, 84 rows).
 * **Pruning per-ticket state on close destroys the only record of the path** — the monitor dropped the
-  extremes, so the close hardcoded `mfe=0.0` on 36/36 rows. D19: retain, NULL when unsampled (sampled,
-  so a lower bound, not bar high/low).
+  extremes, so the close hardcoded `mfe=0.0` on 36/36 rows. D19: retain, NULL when unsampled (a
+  sampled lower bound, not bar high/low).
 * **Truncating values cannot shrink a payload spread across many small fields** — eliding every field
-  over 256 B left the 63 KB snapshot at 94%. Drop *fields*: the SSE digest is 33% (`get_state_digest`).
+  over 256 B left the 63 KB snapshot at 94%. Drop *fields*: the digest is 33% (`get_state_digest`).
 * **A hung native call holds the MT5 lock forever** — `TimeoutGuard` bounds the *caller*, not the lock;
   5/5 later workers wedged. `TrackedRLock` bounds the wait and names the holder. Keep the serialisation:
-  the MT5 bindings are not thread-safe.
+  MT5's bindings are not thread-safe.
 
 ## Signal quality — **the entry signal has no measured edge.**
 

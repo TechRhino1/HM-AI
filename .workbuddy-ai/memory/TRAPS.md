@@ -1665,3 +1665,36 @@ pre/post measurements. The table simply had not been updated when each landed.
 A stale status table is a real defect in an audit: it sends the next reader at work that is finished,
 and hides what is genuinely left. **When a milestone table says N of N done, reconcile it against the
 summary tables above before trusting either.**
+
+---
+
+### 40w — A test that drives its own helper proves nothing about the code it names
+
+Writing `TestTheForecastSurvivesTheClose`, I wrote a `_close()` helper that mirrored the production
+UPDATE and then asserted the close does not rewrite the forecast. It passed immediately — and proved
+nothing, because the helper was written to match the fix. The production SQL lives inside
+`sync_mt5_history`, which needs a broker, so nothing in that test touches it.
+
+The tell: **the test went green on the first run and could not go red under any runtime mutation.**
+
+**Rule: if your test's setup was written from the same understanding as the fix, it verifies your
+understanding, not the code.** Ask "what would make this fail?" If the only answer is "editing my own
+helper", it is a statement of intent, not a test.
+
+Two acceptable responses, both used here:
+* Pin the untestable code at the **source** level and say so — brittle under reformatting, but better
+  than no evidence. Put it in its own class so the weaker evidence is visibly weaker.
+* Rename the helper-driven test to something that admits it (`TestTheCloseContract`) and document in
+  the docstring that it is not counted as coverage of the write sites.
+
+Report the mutation count for the part that is genuinely behavioural (5 of 12 here) and state the
+limitation for the rest. Do not quote 12 as if all 12 discriminate the fix.
+
+### 40w — When the repair is destructive, ship the tool read-only
+
+The 112 overwritten forecasts cannot be recovered — they were overwritten in place and stored nowhere
+else. Nulling them is the honest repair (a NULL is skippable; a copied outcome is something a
+calibration routine will silently learn from), but it rewrites live trade history.
+
+`tools/repair_forecast_column.py` reports by default and only writes with `--apply`. Same shape as the
+root `jarvis_history.db` question: offer the repair, do not perform it.
