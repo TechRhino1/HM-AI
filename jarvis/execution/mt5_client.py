@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from jarvis.application.timeout_guard import TimeoutGuard
 from jarvis.data.broker_time import broker_utc_offset
 from jarvis.data.schemas import AccountSnapshot, PositionSnapshot
+from jarvis.execution.broker_lock import DEFAULT_WAIT_SEC, TrackedRLock
 
 logger = logging.getLogger("JARVIS_MT5Client")
 
@@ -26,7 +27,15 @@ except ImportError:
 class MT5Client:
     _shared_paper_positions: Dict[int, PositionSnapshot] = {}
     _shared_paper_pending_orders: Dict[int, Dict[str, Any]] = {}
-    _shared_lock = threading.RLock()
+    # P3: NOT a plain RLock. This lock is held ACROSS native broker calls, and a
+    # native call that never returns cannot be interrupted — Python cannot kill a
+    # thread blocked in C. A plain RLock therefore turned one hung call into a
+    # permanent, silent wedge: every later call blocked on acquire until its own
+    # timeout fired and it quietly returned its default. `TrackedRLock` keeps the
+    # serialisation (the MT5 bindings are not thread-safe, so removing it would be
+    # a correctness bug) but bounds how long a waiter waits and records who holds
+    # it, so the wedge is reported instead of absorbed.
+    _shared_lock = TrackedRLock("mt5_shared", default_wait_sec=DEFAULT_WAIT_SEC)
 
     def __init__(self, magic_number: int = 888999, mode: str = "live", timeout_sec: float = 4.0,
                  auto_init: bool = True):
@@ -1050,6 +1059,17 @@ class MT5Client:
             res = self.close_position(p.ticket)
             results.append(res)
         return results
+
+    def broker_lock_health(self) -> Dict[str, Any]:
+        """Who currently holds the broker lock, and for how long (P3).
+
+        Every broker call in the process serialises on one lock, and that lock is
+        held across native calls that Python cannot interrupt. When one of them
+        hangs, the symptom used to be that each later call quietly timed out in
+        isolation — indistinguishable from a slow market. This names the holder
+        instead. Report it wherever `TimeoutGuard.health()` is reported.
+        """
+        return self._lock.health()
 
     def shutdown(self):
         if MT5_AVAILABLE and mt5 and self.is_connected and self.mode != "paper":

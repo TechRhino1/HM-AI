@@ -1636,3 +1636,32 @@ replaced a change that would have shipped as a fix while saving 6%.
 Related: a **denylist** lets new small fields through automatically, so the digest cannot silently fall
 behind the schema — but it cannot catch a new *heavy* field. Pair it with a byte-budget assertion in a
 test, which is what turns that blind spot into a failing test instead of a surprise.
+
+---
+
+### 40v — A timeout guard bounds the CALLER, not the resource the caller needed
+
+`TimeoutGuard.run_sync(_send, timeout_sec=5.0)` returns a default after 5s, so it looks like every
+broker call is bounded. It is not. The worker thread it abandons is still inside a native
+MetaTrader5 call **still holding `MT5Client._shared_lock`**, and Python cannot interrupt a thread
+blocked in C. Every later call then blocks on `acquire()` — measured: **5/5 later workers blocked to
+their full timeout**. `TimeoutGuard` even counts these as "stuck workers" and replaces the pool, which
+is why the guard's own health looked like it was healing while the broker was dead.
+
+**Rule: a timeout wrapper bounds the caller's WAIT, never the shared resource the work held.** Ask what
+the abandoned worker still owns. If it holds a lock, a connection, or a slot, that resource is leaked
+for as long as the native call lasts — which may be forever.
+
+Corollary for the fix: you usually cannot reclaim the resource (you cannot kill the thread). So fix the
+*visibility*, not the recovery — bound how long anyone else waits for it, and record who is holding it
+so health can name it.
+
+### 40v — Check whether the audit's own status table is stale
+
+Before starting "the next open item", verify the item is actually open. The P0 table listed five
+findings as unfixed (C1, D4, D2, A3, P2) that the M1 section below recorded as **6 of 6 done** with
+pre/post measurements. The table simply had not been updated when each landed.
+
+A stale status table is a real defect in an audit: it sends the next reader at work that is finished,
+and hides what is genuinely left. **When a milestone table says N of N done, reconcile it against the
+summary tables above before trusting either.**

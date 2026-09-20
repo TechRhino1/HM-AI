@@ -1,6 +1,6 @@
 # HM-AI / HM Algo 2.0 — index
 
-Injected every session and **hard-truncated at ~6,520 bytes** — keep under that or the tail vanishes.
+Injected every session and **hard-truncated at ~6,520 bytes** — stay under or the tail vanishes.
 Pointers and paid-for rules only; detail lives elsewhere.
 
 * Root: **`MASTER_PLAN.md`** — ranked backlog + milestones M0–M5. **`AGENT_SYSTEM.md`** — the
@@ -15,33 +15,32 @@ Pointers and paid-for rules only; detail lives elsewhere.
 
 * **`.git/` is not safe here.** Files vanish overnight (4 incidents; two after `git stash`). Commit and
   push early, **never `git stash`**, keep `.git/backup/repo-<ts>.bundle --all` fresh. Some paths are
-  readable but **not writable** — write via a hardlink alias in `.scratch/_restore/`.
+  **not writable** — write via a hardlink alias in `.scratch/_restore/`.
 * **The live server does not hot-reload.** Python edits need a restart; static files are re-read per
   request. *A hang that does not reproduce in a fresh interpreter is a stale process.* `py-spy dump
   --pid <pid>`; `netstat -ano | grep 8501` for the pid.
 * **Push: bypass the credential selector.** A plain `git push` hung 6m37s. The helper path **has a
   space in it**, so `-c credential.helper="!$GCM"` fails. Use `git -c credential.helper= -c
   credential.helper='!tools/gcm_wrap.sh' push origin main`. `git status` always says `[gone]` — verify
-  with `git ls-remote origin refs/heads/main`, never the push message. Backticks in `-m` are eaten by
-  bash: use `git commit -F <file>`.
+  with `git ls-remote origin refs/heads/main`. Backticks in `-m` are eaten: use `git commit -F <file>`.
 
 ## Running the platform
 
 `HM_start.py [paper|live]` — **real MT5 data; `paper` = simulated fills**. **The account is DEMO**
-(`trade_mode == 0`) despite LIVE mode — **read `trade_mode`, never the server name**. **Never leave the
-platform alive only as a session background task** — point at `HM_dashboard.bat`. Routes and the
-`/classic` gap: **`TRAPS.md` § Running the platform**.
+(`trade_mode == 0`) despite LIVE mode — **read `trade_mode`, never the server name**. **Don't leave the
+platform alive only as a session background task** — use `HM_dashboard.bat`. Routes and the `/classic`
+gap: **`TRAPS.md` § Running the platform**.
 
 ## Baselines
 
-**pytest 2838 passed / 0 failed / 20 deselected** (2026-09-20) — green, not tolerated. Parse
+**pytest 2854 passed / 0 failed / 20 deselected** (2026-09-20) — green, not tolerated. Parse
 `--junit-xml=...`: the harness truncates pytest's stdout tail, so `-rf` never prints. Weekend-only
 failures are a wall-clock dependency, not a regression — `TRAPS.md` § 40n.
 
 **Run the suite with `env -u HTTP_PROXY -u HTTPS_PROXY -u http_proxy -u https_proxy NO_PROXY='*'` and
 `--basetemp=.scratch/ptmp-$TS`** (UNIQUE per run) — a proxy hangs localhost HTTP, and cleaning >50 temp
-entries trips the bulk-delete guard: exit 1 with every test passing. A *fixed* basetemp is worse:
-pytest removes it at session start.
+entries trips the bulk-delete guard: exit 1 with every test passing. A *fixed* one is worse: pytest
+removes it at session start.
 
 `tools/` — 11 verify/audit harnesses, all green; list, counts and failure modes: **`TRAPS.md` § Tool
 harnesses**. `tools/gcm_wrap.sh` = the push helper.
@@ -63,8 +62,8 @@ harnesses**. `tools/gcm_wrap.sh` = the push helper.
   (`FAILED`/`BLOCKED`), never `res.ok`. Broker sends `reason`; server validation sends `error` with
   400. Contract pinned by `test_action_response_contract.py`.
 * **`executed_trades.timestamp` is not the entry time** — `database.py:287` overwrites it with the
-  EXIT time; **neither column is safe**. Run `tools/audit_trades.py`. **When a defect is shared, grep
-  the other front end first.**
+  EXIT time; **neither column is safe**. Run `tools/audit_trades.py`. **Shared defect? grep the other
+  front end first.**
 * **`curl -s -o /dev/null -w '%{http_code}'` exits 23** — an `&&` chain built on it silently skips
   every later step. Use `;` between probes.
 * **Risk limits come from `config/settings.json`**; risk state is scoped by execution mode. Re-anchor
@@ -75,21 +74,23 @@ harnesses**. `tools/gcm_wrap.sh` = the push helper.
 * **A label must describe the thing it names.** Both engines reported the **anchor price's**
   provenance as the **series'** — a generated random walk published as `data_source: "live"`.
   Provenance now travels *with* the data (`CandleSeries.source`); D5 closed.
-* **Pruning per-ticket state on close destroys the only record of the path.** The monitor dropped the
-  extremes, so the close hardcoded `mfe=0.0` — 36/36 rows claimed a measured flat path. D19: retain,
-  NULL when unsampled. Sampled, so it is a lower bound, not bar high/low.
+* **Pruning per-ticket state on close destroys the only record of the path** — the monitor dropped the
+  extremes, so the close hardcoded `mfe=0.0` on 36/36 rows. D19: retain, NULL when unsampled (sampled,
+  so a lower bound, not bar high/low).
 * **Truncating values cannot shrink a payload spread across many small fields** — eliding every field
-  over 256 B left the 63 KB state snapshot at 94%. Drop *fields*: the SSE digest is 33% of it
-  (`StateManager.get_state_digest`). A denylist plus a byte-budget test, never an allowlist.
+  over 256 B left the 63 KB snapshot at 94%. Drop *fields*: the SSE digest is 33% (`get_state_digest`).
+* **A hung native call holds the MT5 lock forever** — `TimeoutGuard` bounds the *caller*, not the lock;
+  5/5 later workers wedged. `TrackedRLock` bounds the wait and names the holder. Keep the serialisation:
+  the MT5 bindings are not thread-safe.
 
 ## Signal quality — **the entry signal has no measured edge.**
 
-Loses money on real MT5 data; 3/20 beat always-long vs 5 by chance; refit 0/20 skillful; **DSR > 0.95
-met by 0/20** once overlaps are counted honestly (94,937 rows = **327 independent bets**).
-**`AUDIT-2026-09.md`**. **Consume `spread_pips`; never multiply raw `spread` by `pip_size`.**
+Loses money on real MT5 data; 3/20 beat always-long vs 5 by chance; **DSR > 0.95 met by 0/20** once
+overlaps are counted honestly (94,937 rows = **327 independent bets**). **`AUDIT-2026-09.md`**.
+**Consume `spread_pips`; never multiply raw `spread` by `pip_size`.**
 
 ## Environment
 
 Writes outside the project dir are refused. Bash, not the other Windows shell. Python 3.13.12 at
-`…\binaries\python\versions\3.13.12\python.exe`. Server binds **127.0.0.1 only**. Rest
-(`taskkill`, `rm -rf`, `sys.path`, `py-spy`): **`TRAPS.md` § Environment**.
+`…\binaries\python\versions\3.13.12\python.exe`. Server binds **127.0.0.1 only**. Rest: **`TRAPS.md`
+§ Environment**.

@@ -63,15 +63,50 @@ recommendations were rejected on verification (see §6) — one of them would ha
 |---|---|---|---|---|---|
 | **P1** | Timeout-guard pool wedges permanently after 16 hangs | H | S | `timeout_guard.py:37-47` — `future.result(timeout=)` never cancels; `_get_executor` only rebuilds on `_shutdown`, which never flips. **Proved:** 16 hung calls → every later call returns its default forever | ✅ **FIXED** — per-pool stuck counter + `done_callback` release + pool replacement; `health()` exposed |
 | **P4** | Execution guard is a TOCTOU → duplicate orders | H | S | `orchestrator.py:493-496` reads under lock then **releases**; claim happens 90 lines later at `:586`. Two sweeps both see "free" | ✅ **FIXED** — atomic compare-and-claim at the send site; loser releases risk and skips |
-| **C1** | Configured risk limit is not enforced | H | S | `position_sizing.py:86-89` clamps to literal `1.50` vs configured `0.5`, then multiplies by two more factors *outside* the clamp. Measured 27 real breaches; ticket 935634011 XAUUSD risked $299 = 39.2% of equity, lost $305 | Clamp to the configured limit; apply multipliers inside it; hard pre-trade assert |
-| **C2** | Fabricated prices are still being persisted | H | S | `tradingview_provider.py:583` — `base_p = 1.0850` EURUSD, 65000 BTC, 3500 ETH, 150 SOL. 136/245 rows; newest is today | ✅ **FIXED** — see the M1 table below: the entry price is now refused at three layers when it derives from an unobserved price |
-| **D4** | 54% of `trade_records` lives only in an uncheckpointed WAL | H | S | `.db` alone = 16 rows; `.db`+`-wal` = 35. `-wal` is 201,912 B, never checkpointed | `wal_checkpoint(TRUNCATE)` on shutdown; back up `-wal`/`-shm` |
-| **D2** | Reconciliation joins on the wrong MT5 identifier | H | M | `log_trade` stores `result.order`; `sync_mt5_history` matches `WHERE ticket = position_id` (`database.py:195,266`). 212 tickets can never close | Persist order ticket *and* position id; join on position id |
-| **A3** | Symbol universe is dead config | H | S | `settings.json` `allowed_symbols` has **no reader**; orchestrator hardcodes 13 (`orchestrator.py:51-55`); `_bg_loop` hardcodes a third list | `JarvisOrchestrator.__init__` defaults to `SETTINGS.trading.symbols` |
-| **P2** | Timeout returns `FAILED` on the money path | H | M | `mt5_client.py:548` → `{"status":"FAILED"}`; orchestrator releases risk and **skips cooldown**. A timed-out order may have filled | `status:"UNKNOWN"`; never retry without broker reconciliation |
-| **P3** | A timed-out worker keeps the process-wide MT5 RLock | H | M | `mt5_client.py:29,40,447,512` — one hung call blocks all 52 threads | Stop holding a global lock across the broker call |
+| **C1** | Configured risk limit is not enforced | H | S | `position_sizing.py:86-89` clamps to literal `1.50` vs configured `0.5`, then multiplies by two more factors *outside* the clamp. Measured 27 real breaches; ticket 935634011 XAUUSD risked $299 = 39.2% of equity, lost $305 | ✅ **FIXED** — clamps to the configured limit with multipliers *inside* the clamp. Worst case (conviction 1.35 × evidence 1.15): **$70.00 → $50.00** on $10k, i.e. 1.40% → exactly 0.500%. See M1 |
+| **C2** | Fabricated prices are still being persisted | H | S | `tradingview_provider.py:583` — `base_p = 1.0850` EURUSD, 65000 BTC, 3500 ETH, 150 SOL. 136/245 rows; newest is today | ✅ **FIXED** — the entry price is now refused at three layers when it derives from an unobserved price. See M1 |
+| **D4** | 54% of `trade_records` lives only in an uncheckpointed WAL | H | S | `.db` alone = 16 rows; `.db`+`-wal` = 35. `-wal` is 201,912 B, never checkpointed | ✅ **FIXED** — `TradeMemory` checkpoints (TRUNCATE) after every write and before close. Pre-fix: a copy of the `.db` alone did not even contain the `trade_records` **table**. See M1 |
+| **D2** | Reconciliation joins on the wrong MT5 identifier | H | M | `log_trade` stores `result.order`; `sync_mt5_history` matches `WHERE ticket = position_id` (`database.py:195,266`). 212 tickets can never close | ✅ **FIXED** — `position_id` column persisted and joined `position_id = ? OR (position_id IS NULL AND ticket = ?)` so legacy rows still close. Measured 155 uncloseable rows pre-fix. See M1 |
+| **A3** | Symbol universe is dead config | H | S | `settings.json` `allowed_symbols` has **no reader**; orchestrator hardcodes 13 (`orchestrator.py:51-55`); `_bg_loop` hardcodes a third list | ✅ **FIXED** — `JarvisOrchestrator` defaults to `SETTINGS.trading.symbols`. **⚠ Behaviour change: universe 13 → 5.** See M1 |
+| **P2** | Timeout returns `FAILED` on the money path | H | M | `mt5_client.py:548` → `{"status":"FAILED"}`; orchestrator releases risk and **skips cooldown**. A timed-out order may have filled | ✅ **FIXED** — returns `UNKNOWN`; the orchestrator holds the reservation and starts the cooldown; the UI can never render it as filled. Its own `INDETERMINATE` class in the response-contract test. See M1 |
+| **P3** | A hung broker call holds the process-wide MT5 lock forever | H | M | `mt5_client.py:29` — one hung call blocks all 52 threads | ✅ **MITIGATED, and the stated fix was wrong** — see the note below. `TrackedRLock` bounds the *wait* and names the holder; serialisation is kept deliberately |
 
 ---
+
+**P3 — what actually got done, and why not what was originally specified.**
+
+The finding said *"stop holding a global lock across the broker call"*. **That fix would be a mistake.**
+The lock serialises calls into the MetaTrader5 Python bindings, which are not thread-safe; removing it
+trades an availability bug for a correctness one. And the lock cannot simply be *abandoned* when a call
+hangs: `TimeoutGuard` bounds the **caller**, but the worker it leaves behind is still inside a native
+call holding the lock, and Python cannot kill a thread blocked in C.
+
+Measured (`.scratch/repro_p3_lock.py`): `MT5Client._shared_lock` is a **class** attribute shared by every
+instance; wedge one worker and **5/5 later workers block to their full timeout**, each surfacing as its
+own anonymous "Timeout" default. The platform goes dead while looking merely slow.
+
+What is fixable is the two things that made it invisible:
+
+* `jarvis/execution/broker_lock.py` — `TrackedRLock`, a drop-in `RLock` that **bounds the wait**
+  (`DEFAULT_WAIT_SEC = 10`, longer than any broker timeout so the lock is never the thing that fails a
+  call) and **records the holder** — thread, task, and how long it has held. A starved waiter raises
+  `BrokerLockBusy` naming them, instead of queueing behind a call that will never finish.
+* `MT5Client.broker_lock_health()` — surfaced alongside `TimeoutGuard.health()`, so a wedged broker is
+  measured rather than inferred.
+
+Deliberately **not** changed: the serialisation itself, and the timeout applies to *acquiring* only —
+never to *holding* — so a slow-but-progressing call is untouched. Zero call-site churn (`with
+self._lock:` still works), so the blast radius is one line plus a new module.
+
+Residual risk, stated: a stuck native call still disables the broker until restart. Once a thread is
+lost inside MetaTrader5 the connection itself is suspect, so the honest goal is to *detect and report*
+it, not to pretend to recover. Full recovery needs the broker calls moved onto a single owning thread
+(an actor), which is a real change and is **not** done here.
+
+`tests/test_broker_lock.py` (16). **Mutation-proved, two separate mutations** because the change has two
+halves: reverting the client to a plain `RLock` turns **2** red (the wiring), and making the wait
+unbounded again turns **5** red (the behaviour). 7 distinct tests discriminate it; the other 9 pin
+attribution and reentrancy, which neither mutation disturbs.
 
 ## 5. Ranked backlog
 
