@@ -272,6 +272,20 @@ def hm_start(mode: str = "live", port: int = 8501, host: str = "127.0.0.1", trad
         tunnel_thread = threading.Thread(target=_start_background_tunnel, args=(port,), daemon=True, name="hm_mobile_tunnel")
         tunnel_thread.start()
 
+    # Warm the intelligence API import BEFORE any worker thread exists.
+    # `run_web_server` imports it lazily inside `configure_orchestrator`, and it
+    # is heavy (`jarvis.backtesting.optimizer`). Doing it there means it runs
+    # after the engine threads are already inside `mt5.initialize()` — which,
+    # with no terminal answering, holds the GIL for 60-100s per call — so the
+    # main thread never finished the import and `ThreadingHTTPServer` was never
+    # constructed: measured 40+ minutes with both tunnels healthy and no
+    # listener on :8501. Importing while the process is single-threaded makes
+    # the cost deterministic and removes the window entirely.
+    try:
+        import jarvis.api.intelligence_api  # noqa: F401
+    except Exception as exc:
+        logger.warning("Could not pre-import the intelligence API: %s", exc)
+
     # 2. Start Autonomous Orchestrator (defaults to LIVE mode; allows paper for testing)
     orchestrator = JarvisOrchestrator(mode=mode, trade_style=trade_style)
     actual_mode = orchestrator.mode.upper()

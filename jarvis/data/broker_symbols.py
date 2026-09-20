@@ -55,6 +55,13 @@ BROKER_ALIASES: Dict[str, List[str]] = {
     "GER40":  ["GER40Cash#", "GER40-SEP26", "DE40Cash#", "GER40"],
     "UK100":  ["UK100Cash#", "UK100-SEP26", "UK100"],
     "US500":  ["US500Cash#", "SPXUSD", "US500"],
+    # Callers that already hold a broker name pass it back in, upper-cased on
+    # the way through (`sym = symbol.upper()`), and MT5's `symbol_info` is
+    # case-SENSITIVE: "GOLD.I#" is None while "GOLD.i#" resolves. Without this
+    # entry every such call fell through to the fuzzy scan and logged
+    # "Fuzzy broker-symbol match GOLD.I# -> GOLD.i#" on a symbol that was never
+    # ambiguous — noise that hides the one warning that matters.
+    "GOLD.I#": ["GOLD.i#"],
     "BTCUSD": ["BTCUSD#", "BTCUSD"],
     "ETHUSD": ["ETHUSD#", "ETHUSD"],
     "SOLUSD": ["SOLUSD#", "SOLUSD"],

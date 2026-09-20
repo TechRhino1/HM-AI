@@ -21,11 +21,52 @@ from jarvis.data.schema_version import add_columns, migrate
 # rather than being guessed at.
 ORIGINS = ("broker", "paper", "synthetic", "unknown")
 
+
+def _origin_filter(origin):
+    """Normalise an origin filter to the values that can exist — `[]` if none can.
+
+    A caller passing something that is not an origin has almost certainly made a
+    typo (`origin="real"`, `origin="live"`), and answering that with the whole
+    table is the worst possible response: it looks exactly like a working filter
+    that happened to match everything.
+    """
+    if isinstance(origin, str):
+        wanted = [origin]
+    else:
+        try:
+            wanted = list(origin)
+        except TypeError:
+            return []
+    return [o for o in wanted if o in ORIGINS]
+
+
+def _pnl_stats(closed, total, winners, losers, open_rows):
+    """One realised-P&L bucket.
+
+    `expectancy` is None, not 0.0, when nothing has closed. 0.0 reads as
+    "measured and break-even"; None reads as "not measurable", which is the
+    truth for an empty bucket — and for the 158 engine-logged rows that have
+    never closed.
+    """
+    return {
+        "closed": int(closed),
+        "open": int(open_rows),
+        "realised_pnl": round(float(total), 2),
+        "expectancy": round(float(total) / closed, 4) if closed else None,
+        "winners": int(winners),
+        "losers": int(losers),
+    }
+
+
+def _empty_pnl():
+    return _pnl_stats(0, 0.0, 0, 0, 0)
+
 # Bumped when the shape of `executed_trades` changes. Every file written before
 # this existed is 0, which means "none of these have run".
 #   1 — every column the old sweep used to add, plus `position_id` (D2)
 #   2 — `origin`, so a row says where its price came from (D1)
-SCHEMA_VERSION = 2
+#   3 — an index on `origin`, so it can be QUERIED (see _migration_3)
+SCHEMA_VERSION = 3
 
 
 def _migration_1(conn) -> None:
@@ -92,7 +133,34 @@ def _migration_2(conn) -> None:
     conn.execute("UPDATE executed_trades SET origin = 'unknown' WHERE origin IS NULL")
 
 
-MIGRATIONS = {1: _migration_1, 2: _migration_2}
+def _migration_3(conn) -> None:
+    """Index `origin` so it can actually be queried.
+
+    D1 gave every row an origin but left no way to select on it: without an
+    index, "real money only" means a full scan of a table that grows without
+    bound, and the statistic that motivated the column in the first place stayed
+    as expensive as it was before it existed. A column nobody can filter on is
+    documentation, not data.
+
+    The index is composite — `(origin, timestamp)` — because every real question
+    is "rows of THIS origin, most recent first": `origin` alone is the leftmost
+    prefix, so a bare `WHERE origin = ?` uses it too, and `timestamp` then serves
+    the ordering and the `days` window in the same scan instead of a separate
+    sort. One index, both shapes.
+
+    `origin` is added defensively first. This step can be retried against a file
+    where step 2 was recorded but its ALTER did not land, and `CREATE INDEX` on a
+    column that is not there raises — which would abort the whole init block the
+    same way the old `position_id` index did.
+    """
+    add_columns(conn, "executed_trades", {"origin": "TEXT"})
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_executed_trades_origin_ts "
+        "ON executed_trades(origin, timestamp)"
+    )
+
+
+MIGRATIONS = {1: _migration_1, 2: _migration_2, 3: _migration_3}
 
 # Executor tags, matched as TOKENS. The old `"ai" in comment_lower` substring test
 # also matched "trailing", "pair", "main", "wait" and "chair", so a manual trade
@@ -408,7 +476,7 @@ class SQLiteTradeDB:
         except Exception as e:
             logger.error(f"Failed to sync MT5 history: {e}")
 
-    def fetch_recent_trades(self, limit=100, days=None):
+    def fetch_recent_trades(self, limit=100, days=None, origin=None):
         """Most recent journal rows, newest first.
 
         `days` narrows the window. It defaults to None — no window — so the
@@ -426,28 +494,115 @@ class SQLiteTradeDB:
         Note the internal sync still uses its own 30-day budget: it decides how
         much history to *populate*, which is a different question from how much
         to *display*.
+
+        `origin` keeps rows whose price came from the given origin(s) — pass one
+        string, or a collection to allow several. It is what makes D1 usable:
+        "broker" is the only origin that is real money. The filter is validated
+        against :data:`ORIGINS` and an unknown value selects nothing rather than
+        silently widening to everything, because a caller asking for
+        `origin="real"` must not be handed the full table and believe it filtered.
         """
         self.sync_mt5_history(days=30, limit=limit)
         conn = self._get_conn()
         try:
             cur = conn.cursor()
-            if days is None:
-                cur.execute(
-                    "SELECT * FROM executed_trades ORDER BY datetime(timestamp) DESC, id DESC LIMIT ?",
-                    (limit,))
-            else:
-                # Stored timestamps carry a +00:00 offset; SQLite's datetime()
-                # parses that and normalises to UTC, which is what datetime('now')
-                # returns too, so the comparison is apples to apples.
-                cur.execute(
-                    "SELECT * FROM executed_trades "
-                    "WHERE datetime(timestamp) >= datetime('now', ?) "
-                    "ORDER BY datetime(timestamp) DESC, id DESC LIMIT ?",
-                    (f"-{max(1, int(days))} days", limit))
+            # Stored timestamps carry a +00:00 offset; SQLite's datetime()
+            # parses that and normalises to UTC, which is what datetime('now')
+            # returns too, so the comparison is apples to apples.
+            clauses = []
+            params = []
+            if days is not None:
+                clauses.append("datetime(timestamp) >= datetime('now', ?)")
+                params.append(f"-{max(1, int(days))} days")
+            if origin is not None:
+                wanted = _origin_filter(origin)
+                if not wanted:
+                    # Asked for origins that cannot exist. Return nothing: the
+                    # alternative (ignoring the filter) looks like a working
+                    # filter that happens to agree with no filter at all.
+                    return []
+                clauses.append(f"origin IN ({','.join('?' * len(wanted))})")
+                params.extend(wanted)
+
+            where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+            params.append(limit)
+            cur.execute(
+                "SELECT * FROM executed_trades" + where +
+                " ORDER BY datetime(timestamp) DESC, id DESC LIMIT ?",
+                params)
             columns = [description[0] for description in cur.description]
             return [dict(zip(columns, row)) for row in cur.fetchall()]
         except Exception as e:
             logger.error(f"Failed to fetch trades: {e}")
             return []
+
+    def realised_pnl_by_origin(self, days=None):
+        """Realised P&L split by where each fill price came from.
+
+        This is the statistic D1 exists to make possible. Mixed together, a
+        simulated fill and a real one are one number that describes neither —
+        measured on data/jarvis_history.db, 158 of 269 rows are engine-logged and
+        none of them have ever closed, so pooling them drags every average toward
+        zero and understates the result.
+
+        Only CLOSED rows contribute: `realized_pnl = 0.0` is the sentinel for
+        "not closed" (there is no `exit_price`, so an open row carries 0.0), and
+        counting those would divide by a denominator that is mostly unfinished
+        trades. A genuine scratch exit is therefore invisible — a known limit of
+        the stored data, not of this query.
+
+        `days` windows on `timestamp`; None means no window. Returns origins that
+        are actually present, plus `ALL` (everything pooled, i.e. the number to
+        distrust) and `BROKER_ONLY` (the number to believe).
+        """
+        conn = self._get_conn()
+        params = []
+        where = "WHERE realized_pnl <> 0"
+        if days is not None:
+            where += " AND datetime(timestamp) >= datetime('now', ?)"
+            params.append(f"-{max(1, int(days))} days")
+
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT origin, COUNT(*), SUM(realized_pnl), "
+                "SUM(CASE WHEN realized_pnl > 0 THEN 1 ELSE 0 END), "
+                "SUM(CASE WHEN realized_pnl < 0 THEN 1 ELSE 0 END) "
+                "FROM executed_trades " + where + " GROUP BY origin",
+                params)
+            rows = cur.fetchall()
+
+            # Open rows per origin, so a reader can see how much of the book is
+            # still unresolved before trusting any average.
+            cur.execute(
+                "SELECT origin, COUNT(*) FROM executed_trades "
+                "WHERE realized_pnl = 0 OR realized_pnl IS NULL "
+                + (" AND datetime(timestamp) >= datetime('now', ?)" if days is not None else "")
+                + " GROUP BY origin",
+                params if days is not None else [])
+            open_by_origin = {r[0]: r[1] for r in cur.fetchall()}
+        except Exception as e:
+            logger.error(f"Failed to aggregate realised P&L: {e}")
+            return {"by_origin": {}, "ALL": _empty_pnl(), "BROKER_ONLY": _empty_pnl()}
+
+        by_origin = {}
+        for origin, closed, total, winners, losers in rows:
+            by_origin[origin if origin in ORIGINS else "unknown"] = _pnl_stats(
+                closed or 0, float(total or 0.0), winners or 0, losers or 0,
+                open_by_origin.get(origin, 0))
+
+        def _pool(keys):
+            closed = sum(by_origin[k]["closed"] for k in keys if k in by_origin)
+            wins = sum(by_origin[k]["winners"] for k in keys if k in by_origin)
+            loss = sum(by_origin[k]["losers"] for k in keys if k in by_origin)
+            total = sum(by_origin[k]["realised_pnl"] for k in keys if k in by_origin)
+            opens = sum(by_origin[k]["open"] for k in keys if k in by_origin)
+            return _pnl_stats(closed, total, wins, loss, opens)
+
+        return {
+            "by_origin": by_origin,
+            "ALL": _pool(list(by_origin)),
+            "BROKER_ONLY": _pool(["broker"]),
+        }
 
 TRADE_DB = SQLiteTradeDB()

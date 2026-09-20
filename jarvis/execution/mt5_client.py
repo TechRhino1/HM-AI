@@ -77,7 +77,22 @@ class MT5Client:
         for attempt in range(len(delays) + 1):
             def _init():
                 with self._lock:
-                    if not mt5.initialize():
+                    # Go through the ONE process-wide gate instead of calling
+                    # `mt5.initialize()` here. With no terminal answering, that
+                    # call blocks ~60-100s inside native code while HOLDING THE
+                    # GIL; six threads each doing it, five times over with
+                    # backoff, starved the main thread so completely that
+                    # `run_web_server` never reached `ThreadingHTTPServer` —
+                    # measured: HM_start.py live stayed up for 40+ minutes with
+                    # both tunnels healthy and no listener on :8501.
+                    # `ensure_mt5_terminal` serialises on one lock and refuses to
+                    # retry inside a cooldown, so a dead terminal costs one
+                    # attempt per window for the whole process, not one per
+                    # thread. Imported lazily: broker_symbols resolves the MT5
+                    # package the same way this module does.
+                    from jarvis.data.broker_symbols import ensure_mt5_terminal
+
+                    if not ensure_mt5_terminal():
                         err = mt5.last_error()
                         logger.error(f"MT5 initialization failed: {err}")
                         return False
