@@ -38,7 +38,29 @@ class BacktestEngine:
         self.context_engine = MarketContextEngine()
         self.regime_classifier = MarketRegimeClassifier()
         self.analyst_cluster = ParallelAnalystCluster(parallel=False)
-        self.decision_engine = DecisionEngine()
+        # AI8: a simulation must not be decided by weights learned from live trading.
+        #
+        # `DecisionEngine` owns every component on the decision path that is stateful
+        # against disk — `OnlineMLPredictor` (learned weights), `MetaLabeler` and
+        # `ConfidenceCalibrationEngine` (fitted models), `SelfLearningEngine` (reads
+        # the live trade journal) and `RealtimeOptimizer` (shifts the gate thresholds
+        # from realised P&L) — and every one of them loads EAGERLY, in its own
+        # constructor. So entering offline_mode() only around run_backtest() is too
+        # late: the live state is already in memory by then.
+        #
+        # Measured on this machine: the predictor woke up with 199 live training
+        # steps and weights [0.363, 0.312, 0.162, 0.227] where the neutral prior is
+        # [0.35, 0.25, 0.15, 0.20] / 10 steps; and SelfLearningEngine reported a
+        # 0.9 regime multiplier and a 25-sample 0.39 win rate from today's journal
+        # instead of the neutral 1.0 / 0 / 0.50. A backtest of June was therefore
+        # being decided by trades that happened in September.
+        #
+        # The other four collaborators are deliberately NOT wrapped: they were
+        # checked and read no disk at all.
+        from jarvis.config.runtime import offline_mode
+
+        with offline_mode():
+            self.decision_engine = DecisionEngine()
         self.risk_engine = RiskEngine(max_risk_per_trade_pct=risk_per_trade_pct, is_backtest=True)
 
     def _calc_commission(self, symbol: str, lots: float, price: float = 0.0) -> float:
@@ -121,7 +143,30 @@ class BacktestEngine:
                 out[role] = sl.drop(columns=["_done_ns"], errors="ignore")
         return out
 
-    def run_backtest(
+    def run_backtest(self, *args, **kwargs) -> Dict[str, Any]:
+        """Public entry point — the parameters are on `_run_backtest_impl`.
+
+        AI8: the entire simulation executes inside `offline_mode()`.
+
+        Constructing the engine hermetically (`__init__`) stops live state being
+        loaded, but the stateful components also consult `is_offline()` at CALL
+        time — `SelfLearningEngine.get_pattern_win_rate_and_ev` and
+        `get_regime_multiplier` hit the live trade journal unless the flag is set
+        while they run. Wrapping the run closes that half, and also guarantees a
+        backtest cannot WRITE: today it writes nothing, but any future learning
+        call inside the loop would otherwise persist to the live store.
+
+        Only seven components honour the flag (meta_labeler, realtime_optimizer,
+        self_learning, online_ml_predictor, strategy_bandit, circuit_breaker,
+        drawdown). Historical data loading is NOT one of them, so a backtest
+        still gets its bars.
+        """
+        from jarvis.config.runtime import offline_mode
+
+        with offline_mode():
+            return self._run_backtest_impl(*args, **kwargs)
+
+    def _run_backtest_impl(
         self,
         df_h1: Optional[pd.DataFrame] = None,
         symbol: str = "XAUUSD",

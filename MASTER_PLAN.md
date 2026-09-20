@@ -118,7 +118,7 @@ attribution and reentrancy, which neither mutation disturbs.
 | # | Finding | I | E | Note |
 |---|---|---|---|---|
 | AI5 | Self-learning averages the outcome, not the forecast | H | M | ✅ **FIXED** 2026-09-20 — the forecast is no longer overwritten (112/112 rows had `expected_value == realized_pnl`; 84 had a fabricated `ai_score=85.0`); the engine now reads `realized_pnl` and `expected_value` explicitly. **Historical rows need `tools/repair_forecast_column.py`** |
-| AI8 | `BacktestEngine` is not hermetic | H | M | Measured: live weights, live trade memory, live bandit state leak into backtests |
+| AI8 | `BacktestEngine` is not hermetic | H | M | ✅ **FIXED** 2026-09-20 — the engine now builds its decision path and runs inside `offline_mode()`. Measured: the predictor woke with **199 live training steps** (neutral is 10) and `SelfLearningEngine` reported a **0.9** regime multiplier and a **25-sample 0.39** win rate from today's journal. Writes were already clean; the leak is reads only. See M3 below |
 | AI6 | Learning loop dies on restart; fallback R is fabricated | H | S | ✅ **FIXED** 2026-09-20 — context recovered from the journal via `TradeMemory.fetch_trade`; `r_multiple` is `None` when not derivable and both bandits take `Optional[float]` (`float(r_multiple or 1.0)` turned an explicit None into **+1R**; `max(0.5, None)` raised `TypeError`). See M3 below |
 | C8 | Gross vs net P&L; no fee columns anywhere | H | M | `database.py:226` vs `state_synchronizer.py:73`; unmeasurable by construction |
 | D5 | Bar fallback is a synthetic random walk | H | M | ✅ **FIXED** 2026-09-20 — provenance now travels *with* the series (`CandleSeries.source`); see M2 below |
@@ -551,7 +551,7 @@ AI2, AI3, AI5, AI6, AI7, AI8, AI9.
 **Exit:** a backtest run twice produces byte-identical results; the learning loop survives a
 restart; walk-forward geometry either reaches live levels or is labelled advisory in the UI.
 
-**Done so far:** AI2/AI3 (labels, via D10 + D19), **AI5** and **AI6** (both below).
+**Done so far:** AI2/AI3 (labels, via D10 + D19), **AI5**, **AI6** and **AI8** (all below).
 
 **AI5 — the forecast is no longer overwritten.** Measured on the live journal: **112/112 closed rows**
 had `expected_value == realized_pnl`, and **84 rows** carried `ai_score = 85.0`. Two write sites did it:
@@ -623,6 +623,52 @@ step size. `StrategyBandit` and `EnsembleStrategyBandit` now both take `Optional
 `.scratch/mutate_ai6.py`. The 9 survivors pin contracts the mutation does not move — an unknown
 ticket returning `None`, a loss still costing the bandit's −0.5, a measured R still being credited,
 and the neutral one-win increment (1.0 either way, so it cannot discriminate).
+
+**AI8 — a backtest is no longer decided by live trading.** `BacktestEngine` builds a
+`DecisionEngine`, and that engine owns every component on the decision path that is stateful against
+disk: `OnlineMLPredictor` (learned weights), `MetaLabeler` and `ConfidenceCalibrationEngine` (fitted
+models), `SelfLearningEngine` (reads the live trade journal), `RealtimeOptimizer` (shifts the gate
+thresholds from realised P&L), and — via `StrategySelector` — the persisting `StrategyBandit`.
+
+Measured on this machine before the fix:
+
+| Input | What a backtest used | Neutral |
+|---|---|---|
+| ML weights | `[0.363, 0.312, 0.162, 0.227]`, **199 steps** | `[0.35, 0.25, 0.15, 0.20]`, 10 steps |
+| Regime multiplier | **0.9** | 1.0 |
+| Pattern stats | **25** samples, **0.39** win rate, avg EV 18.71 | 0 samples, 0.50, 0.0 |
+
+A simulation of June was therefore being decided by trades that happened in September — lookahead
+bias, in an engine whose own docstring promises "chronological simulation without lookahead bias".
+
+**The interesting part is where the fix has to go.** Every one of those components loads *eagerly, in
+its own constructor*, so wrapping `run_backtest()` alone is too late — the live state is already in
+memory. And wrapping only the constructor is also not enough, because `SelfLearningEngine` re-reads
+the journal at *call* time. Both halves are needed: `BacktestEngine.__init__` now builds the
+`DecisionEngine` inside `offline_mode()`, and `run_backtest()` delegates to `_run_backtest_impl`
+inside a second `offline_mode()`. The other four collaborators (`MarketContextEngine`,
+`MarketRegimeClassifier`, `ParallelAnalystCluster`, `RiskEngine`) were checked, read no disk, and are
+deliberately not wrapped.
+
+Two things this does **not** do, stated rather than hidden:
+
+* **A backtest was already writing nothing.** I hashed every state file across a run and all seven
+  were unchanged, so the leak is reads only. The run-time wrap is still worth having: it means a
+  future learning call inside the loop cannot reach the live store.
+* **The mutation cannot show the damage.** Two consecutive runs read the same static file, so they
+  agree with or without the fix. The real harm is that today's backtest disagrees with next month's,
+  which no unit test can demonstrate. `tests/test_backtest_is_hermetic.py` (9 tests) therefore spies
+  on `is_offline()` rather than asserting "the weights look neutral" — the weights file is untracked,
+  so a fresh clone has none and such a test would pass with the fix removed. **Mutation-proved: 3 go
+  red** under `.scratch/mutate_ai8.py` (construction, the bandit's priors, and the run). The 6
+  survivors mostly pin that hermeticity does not go too far — the flag is restored afterwards, the
+  bars still arrive, and nothing is written.
+
+**Residual risk:** `offline_mode()` is a process-global flag, not a per-engine setting, so two
+backtests running concurrently in one process would contend over it (one exiting restores the flag
+while the other still needs it). That is the existing design and it is fine for sequential runs and
+for one-process-per-sweep; fixing it properly means giving each component an instance-level setting,
+which is M4 work.
 
 ### M4 — Raise the architecture ceiling *(~3 weeks)*
 A2/A4 engine process split, A1 one radar contract, A13 shared frontend modules, P10 packaging,
