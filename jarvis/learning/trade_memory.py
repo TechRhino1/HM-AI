@@ -5,6 +5,7 @@ Logs rich execution records, market snapshots, MFE/MAE excursions, and decision 
 import os
 import sqlite3
 import json
+import math
 import logging
 import threading
 from typing import Dict, List, Any, Optional
@@ -18,6 +19,73 @@ logger = logging.getLogger("JARVIS_TradeMemory")
 # D3: 1 = `ml_features` + `triple_barrier_label`. Files written before this
 # existed are 0 and are treated as current.
 SCHEMA_VERSION = 1
+
+
+def derive_triple_barrier_label(entry, exit_price, sl, tp, trade_type) -> Optional[int]:
+    """Label a closed trade by WHICH BARRIER its exit reached.
+
+    The triple-barrier method (Lopez de Prado) labels a trade **+1** when the upper
+    (take-profit) barrier is touched first, **-1** when the lower (stop-loss) barrier is
+    touched first, and **0** when the vertical (time) barrier is reached instead. Only the
+    *first* touch decides, so strictly the label needs the trade's path -- but this journal
+    records only the exit, so the label is derived from the strongest evidence a row
+    actually holds: the exit price against the two barriers stored beside it.
+
+    Returns ``None`` when the row cannot answer the question (no exit, no usable entry, or
+    no barriers), so **"unlabelled" stays distinguishable from "the vertical barrier was
+    hit"**. That distinction is the whole point here. The previous code wrote ``0`` at
+    *open* time, from a ``pnl`` that does not exist yet, and ``update_closed_trade`` never
+    revisited the column -- so every row was labelled "vertical barrier" whether or not it
+    was. Measured on the live journal: 36/36 rows at 0 (one distinct value), of which 8
+    have an exit sitting on or through a stored barrier.
+    """
+    try:
+        entry = float(entry)
+        exit_price = float(exit_price)
+        sl = float(sl)
+        tp = float(tp)
+    except (TypeError, ValueError):
+        return None
+
+    if not all(math.isfinite(v) for v in (entry, exit_price, sl, tp)):
+        return None
+    # A barrier or price of 0 means "not recorded", not "a real level".
+    if min(entry, exit_price, sl, tp) <= 0.0:
+        return None
+
+    side = str(trade_type or "").strip().upper()
+    if side not in ("BUY", "LONG", "SELL", "SHORT"):
+        return None
+
+    # A float artifact can put the exit a hair INSIDE the barrier. Live row 938435830
+    # stored `sl = 111.29999999999998` and filled at `111.30`, so a plain `exit <= sl`
+    # answers "not reached" for a trade that was stopped out -- and the label would then
+    # be decided by float noise rather than by the market. The tolerance is relative and
+    # ~1e-9, far below one tick (a BTCUSD tick is ~1.2e-7 relative, a EURUSD pip ~8.7e-6),
+    # so it cannot swallow a genuine near-miss.
+    def _at(price, barrier):
+        return abs(price - barrier) <= 1e-9 * max(abs(barrier), 1.0)
+
+    if side in ("BUY", "LONG"):
+        hit_tp = exit_price >= tp or _at(exit_price, tp)
+        hit_sl = exit_price <= sl or _at(exit_price, sl)
+    else:
+        hit_tp = exit_price <= tp or _at(exit_price, tp)
+        hit_sl = exit_price >= sl or _at(exit_price, sl)
+
+    if hit_tp and hit_sl:
+        # For a well-formed trade this is unreachable: a BUY cannot exit at or above its
+        # target AND at or below its stop unless `tp <= sl`, i.e. the two barriers
+        # contradict each other. (A gap does NOT produce it -- the fill lands on or beyond
+        # whichever barrier was touched, which classifies cleanly.) A contradictory row
+        # cannot be labelled, so refuse rather than guess a direction.
+        return None
+    if hit_tp:
+        return 1
+    if hit_sl:
+        return -1
+    return 0
+
 
 class TradeMemory:
     def __init__(self, db_path: str = "jarvis_trade_memory.db"):
@@ -140,7 +208,12 @@ class TradeMemory:
                 json.dumps(trade_data.get("reasoning", {})),
                 json.dumps(trade_data.get("quality_gate", {})),
                 json.dumps(trade_data.get("ml_features", [])),
-                trade_data.get("triple_barrier_label", 1 if trade_data.get("pnl", 0.0) > 0 else (-1 if trade_data.get("pnl", 0.0) < 0 else 0))
+                # D10: do NOT invent a label here. At open there is no `pnl` to derive one
+                # from, so the old fallback (`1 if pnl > 0 else (-1 if pnl < 0 else 0)`)
+                # always evaluated to 0 -- minting "the vertical barrier was hit" for every
+                # trade before it had been closed. `update_closed_trade` derives the real
+                # label from the stored geometry; until then the row is honestly unlabelled.
+                trade_data.get("triple_barrier_label")
             ))
 
             self._conn.commit()
@@ -173,12 +246,29 @@ class TradeMemory:
         mfe: float = 0.0,
         mae: float = 0.0
     ):
-        """Updates trade outcome fields in SQLite when position closes (§17)."""
+        """Updates trade outcome fields in SQLite when position closes (§17).
+
+        Also derives `triple_barrier_label` from the row's OWN stored geometry: the close
+        is the first moment the question can be answered at all, and this is the only place
+        every caller converges. `COALESCE` keeps an explicit label supplied at open when the
+        geometry cannot decide, so a row is never downgraded from labelled to NULL.
+        """
         with self._lock:
             cur = self._conn.cursor()
+            row = cur.execute(
+                "SELECT entry_price, sl, tp, trade_type FROM trade_records WHERE ticket = ?",
+                (int(ticket),)
+            ).fetchone()
+            label = None
+            if row:
+                label = derive_triple_barrier_label(
+                    entry=row[0], exit_price=exit_price,
+                    sl=row[1], tp=row[2], trade_type=row[3],
+                )
             cur.execute("""
                 UPDATE trade_records
-                SET exit_price = ?, pnl = ?, is_win = ?, mfe = ?, mae = ?
+                SET exit_price = ?, pnl = ?, is_win = ?, mfe = ?, mae = ?,
+                    triple_barrier_label = COALESCE(?, triple_barrier_label)
                 WHERE ticket = ?
             """, (
                 float(exit_price),
@@ -186,6 +276,7 @@ class TradeMemory:
                 int(is_win),
                 float(mfe),
                 float(mae),
+                label,
                 int(ticket)
             ))
             self._conn.commit()

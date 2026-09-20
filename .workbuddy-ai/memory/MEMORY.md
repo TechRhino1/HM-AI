@@ -16,8 +16,7 @@ Pointers and paid-for rules only; detail lives elsewhere.
 * **`.git/` is not safe here.** Files vanish in the small hours (4 incidents; the last two followed
   `git rm` / `git stash push`). Commit and push early, **never `git stash`**, keep
   `.git/backup/repo-<ts>.bundle --all` fresh. Some paths are readable but **not writable** — write via
-  a hardlink alias in `.scratch/_restore/`; `open(alias,'w')` **truncates the shared object**. Which
-  paths: **`TRAPS.md` § Non-negotiables**.
+  a hardlink alias in `.scratch/_restore/`; `open(alias,'w')` **truncates the shared object**.
 * **The live server does not hot-reload.** Python edits need a restart; static CSS/JS/templates are
   re-read per request. *A hang that does not reproduce in a fresh interpreter is a stale process.*
   `py-spy dump --pid <pid>` attaches without restarting; `netstat -ano | grep 8501` for the pid.
@@ -38,16 +37,16 @@ task** — point at `HM_dashboard.bat`. Routes, the `HM_dashboard.bat` caveat an
 
 ## Baselines
 
-**pytest 2734 passed / 0 failed / 20 deselected** (2026-09-20) — a green baseline, not a tolerated
+**pytest 2771 passed / 0 failed / 20 deselected** (2026-09-20) — a green baseline, not a tolerated
 one. Run with `--junit-xml=...` and parse that: the harness truncates pytest's stdout tail, so `-rf`
 never prints. Weekend-only failures are a wall-clock dependency, not a regression — `TRAPS.md` § 40n.
 
-**Run the suite only with `env -u HTTP_PROXY -u HTTPS_PROXY -u http_proxy -u https_proxy NO_PROXY='*'`**
-(a sandbox proxy makes localhost HTTP hang).
+**Run the suite with `env -u HTTP_PROXY -u HTTPS_PROXY -u http_proxy -u https_proxy NO_PROXY='*'` and
+`--basetemp=.scratch/ptmp`** — a sandbox proxy hangs localhost HTTP, and pytest's own temp-garbage
+cleanup otherwise trips the bulk-delete guard and exits 1 with every test passing.
 
-`tools/` — 11 verify/audit harnesses, all green; the full list, counts and each one's failure mode
-(most look like a regression): **`TRAPS.md` § Tool harnesses**. `tools/gcm_wrap.sh` = the required
-push credential helper.
+`tools/` — 11 verify/audit harnesses, all green; the full list, counts and each failure mode:
+**`TRAPS.md` § Tool harnesses**. `tools/gcm_wrap.sh` = the required push credential helper.
 
 ## Rules worth repeating
 
@@ -89,7 +88,6 @@ independent bets**). **`AUDIT-2026-09.md`**. **Consume `spread_pips`; never mult
 
 ## Environment
 
-Writes outside the project dir are refused. Bash, not PowerShell; `taskkill` needs
-`MSYS_NO_PATHCONV=1`. Python 3.13.12 managed at `…\binaries\python\versions\3.13.12\python.exe`.
-`rm -rf X && cmd` swallows stdout — run the `rm` separately. Server binds **127.0.0.1 only**.
-More (incl. `sys.path` by path): `TRAPS.md` § Environment.
+Writes outside the project dir are refused. Bash, not the other Windows shell. Python 3.13.12 managed
+at `…\binaries\python\versions\3.13.12\python.exe`. Server binds **127.0.0.1 only**. Full list
+(`taskkill`, `rm -rf`, `sys.path`, `py-spy`): **`TRAPS.md` § Environment**.

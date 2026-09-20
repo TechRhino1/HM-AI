@@ -1438,3 +1438,79 @@ terminal, and `/api/diagnostics` honestly reports `MT5: RECONNECTING`, `DATA_FEE
   both vanished; the paired second edit landed each time). **Symptom: you re-measure the file and the
   byte count has not moved.** Always re-read or re-measure after a multi-edit message, and when the
   edits are on one file, issue them one per message.
+
+## Round 40q — traps added
+
+* **A label derived at OPEN from a value that does not exist yet always takes the default.**
+  `record_trade` wrote
+  `trade_data.get("triple_barrier_label", 1 if pnl > 0 else (-1 if pnl < 0 else 0))` — but a trade
+  being *opened* has no `pnl`, so the fallback **always evaluated to 0**. It minted "the vertical
+  barrier was hit" for every trade before it had been closed. **The default of a `.get()` is the
+  value that gets written whenever the caller is silent, so the default must be a value that is true
+  when the caller is silent** — here, "unlabelled".
+
+* **A column written on one path and not the other is silently frozen.** `update_closed_trade`
+  updated `exit_price / pnl / is_win / mfe / mae` and **never touched `triple_barrier_label`**, so
+  every row kept whatever it was born with. `is_win` *was* repaired (4 rows at 1), which is how you
+  can tell the close path runs at all. **When a row is created and later closed, list every outcome
+  column and check both ends** — the asymmetry is invisible from either end alone.
+
+* **A float artifact can decide a comparison — use a relative tolerance below one tick.** Live row
+  `938435830` stored `sl = 111.29999999999998` and filled at `111.30`, so `exit <= sl` answered
+  "**not reached**" for a trade that *was* stopped out: the label would have been set by float noise
+  rather than by the market. 1e-9 relative is safe because it is orders of magnitude below one tick
+  (BTCUSD ~1.2e-7 relative, a EURUSD pip ~8.7e-6), so it cannot swallow a genuine near-miss. **Any
+  "did the price reach the level" test on stored floats needs this.**
+
+* **"Both barriers hit" is contradictory geometry, not a gap.** For a well-formed BUY,
+  `exit >= tp` and `exit <= sl` cannot both hold: a gap fills *on or beyond* whichever barrier was
+  touched, which classifies cleanly. So the condition can only mean `tp <= sl` — a malformed row —
+  and the honest answer is "cannot label", not a guessed direction.
+
+* **"Not measured" must not be stored as a value that means something else.** `mfe`/`mae` are passed
+  as a literal `0.0`, and `0.0` is also a *legitimate* excursion (a trade that never went
+  favourable). The column therefore cannot distinguish "we did not measure" from "we measured zero" —
+  the same shape as C2 (`0.0` is finite), D5 (a generated series labelled `live`) and D10 (0 =
+  "vertical barrier"). **Before fixing a zero, ask which of the two it is.**
+
+* **Check that your test's premise is geometrically possible before writing it.** I asserted
+  "a gap through both barriers labels adverse" with `exit=200, sl=99, tp=101` for a BUY — but that
+  only satisfies `exit >= tp`, so the function correctly returned `+1`. The premise was impossible,
+  not the code wrong.
+
+* **A single `sl`/`tp` pair does not serve both sides.** A BUY needs `tp > entry > sl`; a SELL needs
+  `sl > entry > tp`. A parametrised case-insensitivity test that reuses one pair across `BUY` and
+  `SELL` gets "both barriers hit" → `None` for one of them. Carry per-side geometry in the params.
+
+* **A paper-scoped store can miss the version stamp its sibling has.** `data/jarvis_drawdown_state.db`
+  is `uv=1` but `data/jarvis_drawdown_state_paper.db` is `uv=0`. When auditing "every store stamps
+  itself", enumerate **every file including the `_paper` variants** — the mode-scoped ones are
+  created by a different code path and are easy to miss.
+
+* **`trade_records` is not in `jarvis_history.db`.** `data/jarvis_history.db` holds only
+  `executed_trades`; the learning table lives in `data/jarvis_trade_memory.db`. Querying the wrong
+  file returns "no such table" rather than an empty result, so a naive probe can look like missing
+  data.
+
+## Environment (round 40q — the detail moved out of MEMORY.md)
+
+* **Writes outside the project dir are refused.** Keep scratch under `.scratch/` (gitignored).
+* **Bash, not the other Windows shell.** `taskkill` needs `/PID` **with** `MSYS_NO_PATHCONV=1` — with
+  that env var set, `//PID` reaches the tool literally and is rejected as an invalid option.
+* **`rm -rf X && cmd` swallows stdout** — run the `rm` as its own command.
+* **A script run *by path* puts its own dir on `sys.path`**, so a helper in `.scratch/` cannot import
+  the package unless you add the repo root (or set `PYTHONPATH`). The same script run from the repo
+  root by relative path behaves differently.
+* **Python 3.13.12 managed** at `...binaries/python/versions/3.13.12/python.exe`; `py-spy` at
+  `...versions/3.13.12/Scripts/py-spy.exe`.
+* **The server binds 127.0.0.1 only**, so a probe from another host will not reach it.
+* **A full-suite run can exit non-zero with EVERY test passing.** Measured: `2771 passed / 0 failed`
+  and still `exit=1`, with no pytest summary line written. The cause is the sandbox's bulk-delete
+  guard: pytest rotates its previous `tmp_path` root into `pytest-of-Itrai/garbage-<uuid>` under the
+  OS temp dir and then deletes it, and once that directory holds more than **50** entries the guard
+  refuses (`[safe-delete][SAFE_DELETE_BULK_CONFIRM_REQUIRED] {"count":54,"threshold":50}`) and the
+  run exits 1. The garbage is not yours — it accumulates from every `tmp_path`-using test file
+  (`tests/test_drawdown_guard.py` contributes ~19 dirs per run). **Fix: pass
+  `--basetemp=.scratch/ptmp`**, which keeps pytest's temp root inside the project and skips the
+  rotate-to-garbage path entirely; verified `exit=0` with 0 safe-delete lines. **Never read a bare
+  `exit=1` as a test failure — check the junit XML `failures`/`errors` first.**

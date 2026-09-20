@@ -94,7 +94,7 @@ recommendations were rejected on verification (see §6) — one of them would ha
 
 | # | Finding | I | E |
 |---|---|---|---|
-| AI2 / AI3 | `triple_barrier_label` and MFE/MAE are 0 on 35/35 rows | H | S |
+| AI2 / AI3 | `triple_barrier_label` and MFE/MAE are 0 on every row | H | S | ✅ **label FIXED** 2026-09-20 (D10) — derived at close from the stored geometry; **MFE/MAE still 0** (D19) |
 | AI9 | Walk-forward validator is dead; optimizer output never reaches trading | H | M |
 | AI10 | Calibration fitted to its own output on ≤20 rows | H | M |
 | AI4 | Gate/sizing probability excludes the only fitted model | H | M |
@@ -109,6 +109,7 @@ recommendations were rejected on verification (see §6) — one of them would ha
 | A13 | 45 duplicated frontend function names across pages | M | L |
 | D7–D17 | Registry 99% empty, `bar_idx` window-relative, no retention, write-only learning columns | M | S–M |
 | **D18** | **`/api/stocks/candles` calls `mt5.initialize()` unguarded — one request wedges the server** | **H** | **S** | ✅ **FIXED** 2026-09-20 — *found while building D5, not in any agent report.* `_ensure_mt5_connected` ended in a bare `initialize()`; it now asks `broker_symbols.ensure_mt5_terminal()`, which does not launch a terminal. See M2 below. |
+| **D19** | **`mfe` / `mae` are hardcoded `0.0` at the call site — "not measured" reads as "measured zero"** | **M** | **M** | Open. `orchestrator.py:285-286` passes `mfe=0.0, mae=0.0` literally; the live path never computes an excursion. Unlike D10 these cannot be derived from the exit alone — they need the intra-trade bar path. See M2 below. |
 
 ### P3 — polish (ongoing)
 `A14–A17`, `D17`, `P8`, `P16`, and the long tail of hygiene findings.
@@ -212,8 +213,9 @@ D3 migrations, D1 `origin` column, D5 bar provenance, D10/D11 real labels, A10 r
 **Exit:** `user_version` set on every store; every row tagged `broker|paper|synthetic`; no read
 path performs a write; `triple_barrier_label` non-zero on closed rows.
 
-**Done so far:** D1 (`origin`, shipped), D5 (bar provenance, shipped), D18 (read path, shipped).
-**Still to do:** the D3 remainder, D10/D11 real labels, A10's SSE half.
+**Done so far:** D1 (`origin`, shipped), D5 (bar provenance, shipped), D10 (the triple-barrier
+label, shipped), D18 (the read path, shipped).
+**Still to do:** the D3 remainder, D19 (MFE/MAE), A10's SSE half.
 
 **Status (2026-09-20): D3 half done — the version stamp.** All 11 databases reported
 `user_version = 0`, so no file could declare what shape it was in, and two copies of
@@ -328,6 +330,56 @@ consistency check (1), and the MT5 short-circuit / unavailable / raising paths (
 skipped-when-a-terminal-is-running probe (1) and one parametrisation. `test_the_delegate_reports_
 the_same_provenance` is honestly a *consistency* pin, not a fix proof: under mutation both sides
 become `"live"` together and it still passes.
+
+---
+
+**D10 — the triple-barrier label: shipped.** The column was 0 on **36/36** live rows (one distinct
+value), including 8 whose exit sits on or through a stored barrier. Two defects stacked:
+
+1. `record_trade` derived the label at **open**, from
+   `1 if pnl > 0 else (-1 if pnl < 0 else 0)` — but a trade being *opened* has no `pnl`, so the
+   fallback always evaluated to **0**. It minted "the vertical barrier was hit" for every trade
+   before it had been closed.
+2. `update_closed_trade` updated `exit_price / pnl / is_win / mfe / mae` and **never touched the
+   label**, so the row kept the 0 it was born with. (`is_win` *was* repaired on close — 4 rows carry
+   `is_win = 1` — which is how we know the close path runs.)
+
+The label is now derived at close from the row's own stored geometry
+(`derive_triple_barrier_label`): +1 if the exit reached the take-profit barrier, −1 if it reached the
+stop, 0 if it stopped between them (the vertical barrier), and **`None` when the row cannot answer**
+— so "unlabelled" stays distinguishable from "vertical barrier hit". `COALESCE` in the UPDATE means
+an explicit caller-supplied label is never downgraded to NULL.
+
+Two things fell out of building it:
+
+* **A float artifact was deciding the label.** Live row `938435830` stored
+  `sl = 111.29999999999998` and filled at `111.30`, so a plain `exit <= sl` answered "not reached"
+  for a trade that *was* stopped out. The comparison now carries a **relative 1e-9 tolerance** — far
+  below one tick (a BTCUSD tick is ~1.2e-7 relative, a EURUSD pip ~8.7e-6), so it cannot swallow a
+  genuine near-miss. Pinned by `test_a_genuine_near_miss_is_still_a_vertical_barrier`.
+* **"Both barriers hit" is not a gap.** For a well-formed BUY, `exit >= tp` and `exit <= sl` cannot
+  both hold — a gap fills *on or beyond* whichever barrier was touched, which classifies cleanly. The
+  condition therefore means `tp <= sl`, i.e. **contradictory barriers**. The first version of the fix
+  guessed `-1` there; it now refuses (`None`), because a malformed row cannot be labelled.
+
+**Projected over the live journal: 5 × −1, 1 × +1, 16 × 0, 14 × unlabelled** (the unclosed rows).
+All six non-zero labels agree in sign with the realised `pnl` — an independent check that the
+derivation reads the right thing.
+
+**Scope, stated honestly:** nothing reads this column today — `strategy_memory.py:28-32` learns from
+`is_win` and `pnl` only, so the zeros never changed a decision. This is a *data-honesty* defect: a
+future learner reading the column would have been fed all-zeros, the same shape as C2 and D5 (a
+plausible value that actually means "unknown"). `tests/test_triple_barrier_label.py` (37 tests);
+**mutation-proved: 22 go red** under `.scratch/revert_d10_fixes.py`. The 15 survivors are the
+"expects 0", "caller-supplied label respected" and "other columns unchanged" invariants the mutation
+cannot disturb by construction.
+
+**D19 — `mfe` / `mae`: open, and *not* the same fix.** `orchestrator.py:285-286` passes
+`mfe=0.0, mae=0.0` **literally**. These are maximum favourable / adverse excursion — they need the
+trade's *path*, which the live close handler does not retain, so unlike D10 they cannot be derived
+from the exit. Two honest options: reconstruct the path from `mt5.copy_rates_range` between entry and
+exit at close time, or record `NULL` so "not measured" stops reading as "measured zero". Left open
+deliberately rather than papered over with a plausible number.
 
 ### M3 — Make learning real *(~2 weeks)*
 AI2, AI3, AI5, AI6, AI7, AI8, AI9.
