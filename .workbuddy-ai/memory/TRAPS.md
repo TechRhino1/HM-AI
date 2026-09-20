@@ -1129,3 +1129,58 @@ Full findings: `AUDIT-TRADES-2026-09.md`.
 * `executed_trades` has **no `exit_price`**, and neither table has `commission`/`swap` — so
   realised P&L cannot be recomputed and the gross-vs-net split
   (`database.py:226` vs `state_synchronizer.py:73`) cannot even be measured from the data.
+
+## Running the suite: the sandbox exports a proxy, so localhost HTTP hangs (round 40)
+
+`HTTP_PROXY`/`HTTPS_PROXY` are set to `http://127.0.0.1:8861` in every process this agent starts
+(check with `psutil.Process(pid).environ()`). A test that talks to a **local** server through a
+proxy-aware client therefore dials the sandbox proxy instead, and hangs. Measured: a full suite
+stalled at 36% for 4+ minutes with `utime`/`stime` frozen; `psutil.Process(pid).net_connections()`
+showed one socket, `127.0.0.1:<eph> -> 127.0.0.1:8861`, stuck in **CLOSE_WAIT** while the peer
+(`sandbox-cli.exe`) sat in `FIN_WAIT_2`. Nothing was wrong with the code.
+
+* **Run the suite with the proxy stripped**, or a hang here reads as a regression:
+  `env -u HTTP_PROXY -u HTTPS_PROXY -u http_proxy -u https_proxy -u ALL_PROXY -u all_proxy \
+   NO_PROXY='*' no_proxy='*' python -m pytest -q -p no:cacheprovider`.
+  Same rule as the existing `curl --noproxy '*'` note — the proxy is the trap, not the endpoint.
+* **Diagnosing a hang without a stack dump** (no `py-spy` here, and `faulthandler` cannot be
+  triggered from outside a running process): sample `cpu_times()` twice — unchanged ticks over 5s
+  means blocked, not busy. Then `open_files()` and `net_connections()` name the resource. That
+  trio identified this one without any instrumentation.
+* **Never run two suites into the same log.** Two runs holding separate offsets on one file
+  interleave and overwrite each other's progress lines, so the log shows percentages going
+  *backwards* (36% followed by 22%). That cost a whole session of misdiagnosis.
+* **A stale run stays alive.** A previous session's `-v` suite was still running 20 minutes later
+  and silently competing with the new one. Before starting a suite, list `python` processes whose
+  cmdline contains `pytest` and kill the leftovers.
+
+## Starting the platform: with MT5 unreachable, LIVE never serves HTTP (round 40)
+
+Measured on a live `HM_start.py live` run, MT5 down.
+
+* **`C:\Program Files\MetaTrader 5\` is broken on this box** — 9 entries, exe + folders and **no
+  DLLs**, so `terminal64.exe` exits `0xC0000135` (STATUS_DLL_NOT_FOUND). No second terminal on C: or
+  D:. Check the folder's file list before concluding MT5 "is installed".
+* **LIVE still starts, and looks healthy, but never binds :8501.** Tunnels come up
+  (Cloudflare + serveo), orchestrator/watchdog/PositionMonitor all log "started", yet
+  `netstat` shows no listener. `py-spy dump --pid <pid>` pinned it: **MainThread** is inside
+  `run_web_server -> configure_orchestrator -> from jarvis.api.intelligence_api import INTELLIGENCE`
+  (`intelligence_api.py:50`, the heavy `jarvis.backtesting.optimizer` import) while **six** workers
+  sit in `mt5.initialize()` (`mt5_client.py:80`, `broker_symbols.py:149`). Each call blocks 60-100s
+  **holding the GIL**, so the GIL is held almost continuously and the main thread is starved before
+  `ThreadingHTTPServer` is ever constructed. This is the known GIL-starvation trap reproduced in the
+  running platform, not in a test — so **"the process is alive and logging" is not evidence the
+  server is up. Always check for a listening socket.**
+* **Startup pays ~11 minutes before the banner**, because `JarvisOrchestrator.__init__` runs the
+  full 6-attempt MT5 retry inline (each attempt ~100s: 1+2+4+8+16s backoff plus the 60s IPC timeout).
+  The retry is *not* the 4s `TimeoutGuard` — a native call cannot be cancelled.
+* **Market data silently goes synthetic while the banner says LIVE**: `JARVIS_DataFeed` logs
+  "MT5 terminal unavailable ... XAUUSD D1 falls back to synthetic bars". Execution mode does not
+  gate market data (by design), so LIVE + no terminal = real-looking UI on fabricated bars.
+* **Detached launches die with the command here.** `Popen(..., DETACHED_PROCESS |
+  CREATE_NEW_PROCESS_GROUP)` still vanished when the bash call returned; so did `./terminal64.exe &`.
+  Long-lived processes must be started with the Bash tool's background mode, and for anything
+  permanent the user has to run `HM_start.bat live` in their own console.
+* `py-spy` is installed in the managed runtime:
+  `C:/Users/Itrai/.workbuddy-ai/binaries/python/versions/3.13.12/Scripts/py-spy.exe dump --pid <pid>`.
+  It works on Windows here and is the fastest way to prove where a live process is stuck.
