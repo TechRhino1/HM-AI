@@ -9,11 +9,49 @@ from typing import Optional
 
 from jarvis.config.paths import resolve_db_path, ensure_data_dir
 from jarvis.data.broker_time import broker_utc_offset
-from jarvis.data.schema_version import ensure_version
+from jarvis.data.schema_version import add_columns, migrate
 
-# Bumped when the shape of `executed_trades` changes. 1 = `position_id` added
-# (D2). Every file written before this existed is 0 and is treated as current.
+# Bumped when the shape of `executed_trades` changes. Every file written before
+# this existed is 0, which means "none of these have run".
 SCHEMA_VERSION = 1
+
+
+def _migration_1(conn) -> None:
+    """Everything the old sweep used to add, plus `position_id` (D2).
+
+    Idempotent, so it is safe both for a file that predates all of it and for
+    one that already has some of these columns from an earlier run of the sweep.
+    """
+    add_columns(conn, "executed_trades", {
+        "realized_pnl": "REAL DEFAULT 0.0",
+        "executor": "TEXT DEFAULT 'BOT (AI)'",
+        "session_name": "TEXT DEFAULT 'UNKNOWN'",
+        "is_prime_session": "INTEGER DEFAULT 1",
+        "adx": "REAL DEFAULT 0.0",
+        "plus_di": "REAL DEFAULT 0.0",
+        "minus_di": "REAL DEFAULT 0.0",
+        "spread_pips": "REAL DEFAULT 0.0",
+        "mtf_alignment": "TEXT DEFAULT ''",
+        "threats_json": "TEXT DEFAULT '[]'",
+        "features_json": "TEXT DEFAULT '{}'",
+        # `timestamp` means different things depending on where the row came
+        # from — entry time for an engine-logged trade, exit time for one synced
+        # from a closed broker deal. `closed_at` is unambiguous: null unless the
+        # row really is a closed trade, so a chart can draw an exit marker
+        # without guessing.
+        "closed_at": "TEXT",
+        # D2: `log_trade` stored whatever the broker call returned as "ticket",
+        # which for a market order is `result.order` — the ORDER ticket.
+        # `sync_mt5_history` closes rows by `deal.position_id`, the POSITION id.
+        # Those are different numbers, so a row written at entry could never be
+        # matched by the exit deal and stayed open forever (measured: 155 rows
+        # with closed_at NULL and realized_pnl 0.0). Persist both, join on the
+        # position id.
+        "position_id": "INTEGER",
+    })
+
+
+MIGRATIONS = {1: _migration_1}
 
 # Executor tags, matched as TOKENS. The old `"ai" in comment_lower` substring test
 # also matched "trailing", "pair", "main", "wait" and "chair", so a manual trade
@@ -99,57 +137,20 @@ class SQLiteTradeDB:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_executed_trades_timestamp ON executed_trades(timestamp);")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_executed_trades_regime ON executed_trades(regime);")
 
-            # Ensure newly added columns exist in existing tables (safe schema migration)
-            cur = conn.cursor()
-            cur.execute("PRAGMA table_info(executed_trades)")
-            cols = [row[1] for row in cur.fetchall()]
-            new_cols = {
-                "realized_pnl": "REAL DEFAULT 0.0",
-                "executor": "TEXT DEFAULT 'BOT (AI)'",
-                "session_name": "TEXT DEFAULT 'UNKNOWN'",
-                "is_prime_session": "INTEGER DEFAULT 1",
-                "adx": "REAL DEFAULT 0.0",
-                "plus_di": "REAL DEFAULT 0.0",
-                "minus_di": "REAL DEFAULT 0.0",
-                "spread_pips": "REAL DEFAULT 0.0",
-                "mtf_alignment": "TEXT DEFAULT ''",
-                "threats_json": "TEXT DEFAULT '[]'",
-                "features_json": "TEXT DEFAULT '{}'",
-                # `timestamp` means different things depending on where the row
-                # came from — entry time for an engine-logged trade, exit time
-                # for one synced from a closed broker deal. `closed_at` is
-                # unambiguous: null unless the row really is a closed trade, so
-                # a chart can draw an exit marker without guessing.
-                "closed_at": "TEXT",
-                # D2: `log_trade` stored whatever the broker call returned as
-                # "ticket", which for a market order is `result.order` -- the
-                # ORDER ticket. `sync_mt5_history` closes rows by
-                # `deal.position_id`, the POSITION id. Those are different
-                # numbers, so a row written at entry could never be matched by
-                # the exit deal and stayed open forever (measured: 155 rows with
-                # closed_at NULL and realized_pnl 0.0 on data/jarvis_history.db).
-                # Persist both and join on the position id.
-                "position_id": "INTEGER",
-            }
-            for col_name, col_def in new_cols.items():
-                if col_name not in cols:
-                    try:
-                        conn.execute(f"ALTER TABLE executed_trades ADD COLUMN {col_name} {col_def}")
-                    except Exception:
-                        pass
-
-            # AFTER the migration: an index on a column the table does not have
-            # yet raises, and because this whole block is one try/except that
-            # would abort the migration too — on an existing database it left
-            # `position_id` (and every other pending column) missing while
-            # looking like a successful init.
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_executed_trades_position_id ON executed_trades(position_id);")
+            # D3: bring the file up to the current shape one numbered step at a
+            # time. This replaces an unconditional "add whatever column is
+            # missing" sweep, which ran on every open and could express neither
+            # ordering, a backfill, nor a refusal — and which, because it was
+            # inside the same try/except as everything else, could abort partway
+            # through while the file still claimed to be fine.
+            #
+            # Steps run BEFORE the index on `position_id`: an index on a column
+            # the table does not have yet raises, and that used to abort the
+            # whole init block.
+            version = migrate(conn, "executed_trades", SCHEMA_VERSION, MIGRATIONS)
+            if version == SCHEMA_VERSION:
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_executed_trades_position_id ON executed_trades(position_id);")
             conn.commit()
-
-            # D3: stamp the shape of this file so a future migration can tell
-            # what it is looking at. 1 = `position_id` (and everything before it,
-            # which pre-dates versioning and is therefore 0 == "as old as it gets").
-            ensure_version(conn, SCHEMA_VERSION, "executed_trades")
 
             logger.info("SQLite database initialized successfully.")
         except Exception as e:

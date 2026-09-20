@@ -18,7 +18,9 @@ import unittest
 
 import pytest
 
-from jarvis.data.schema_version import ensure_version, read_version, write_version
+from jarvis.data.schema_version import (
+    ensure_version, migrate, read_version, write_version,
+)
 
 
 class SchemaVersionTest(unittest.TestCase):
@@ -62,6 +64,90 @@ class SchemaVersionTest(unittest.TestCase):
         self.assertEqual(result, 9)
         self.assertTrue(any("newer code" in line for line in captured.output),
                         captured.output)
+
+
+class MigrationRunnerTest(unittest.TestCase):
+    """The point of a version number is that a step can be run *because of* it."""
+
+    # The table as it was before any column was ever added to it.
+    ORIGINAL = """
+        CREATE TABLE executed_trades (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticket INTEGER, symbol TEXT, action TEXT, entry_price REAL,
+            sl REAL, tp REAL, volume REAL, timestamp TEXT, ai_score REAL,
+            regime TEXT, expected_value REAL
+        )
+    """
+    ADDED_BY_MIGRATION_1 = [
+        "realized_pnl", "executor", "session_name", "is_prime_session",
+        "adx", "plus_di", "minus_di", "spread_pips", "mtf_alignment",
+        "threats_json", "features_json", "closed_at", "position_id",
+    ]
+
+    def setUp(self):
+        fd, self.path = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        self.conn = sqlite3.connect(self.path)
+        self.conn.execute(self.ORIGINAL)
+        self.conn.commit()
+
+    def tearDown(self):
+        self.conn.close()
+        if os.path.exists(self.path):
+            os.remove(self.path)
+
+    def _columns(self):
+        return {row[1] for row in self.conn.execute("PRAGMA table_info(executed_trades)")}
+
+    def test_an_old_file_is_brought_up_to_date(self):
+        self.assertEqual(read_version(self.conn), 0)
+        self.assertFalse(set(self.ADDED_BY_MIGRATION_1) & self._columns())
+
+        from jarvis.data.database import MIGRATIONS, SCHEMA_VERSION
+
+        result = migrate(self.conn, "executed_trades", SCHEMA_VERSION, MIGRATIONS)
+
+        self.assertEqual(result, SCHEMA_VERSION)
+        self.assertEqual(read_version(self.conn), SCHEMA_VERSION)
+        missing = set(self.ADDED_BY_MIGRATION_1) - self._columns()
+        self.assertFalse(missing, f"migration left these columns missing: {sorted(missing)}")
+
+    def test_a_migration_is_applied_only_once(self):
+        """Re-running must be a no-op — the version is what stops it."""
+        from jarvis.data.database import MIGRATIONS, SCHEMA_VERSION
+
+        migrate(self.conn, "executed_trades", SCHEMA_VERSION, MIGRATIONS)
+        before = len(self._columns())
+        result = migrate(self.conn, "executed_trades", SCHEMA_VERSION, MIGRATIONS)
+
+        self.assertEqual(result, SCHEMA_VERSION)
+        self.assertEqual(len(self._columns()), before, "a second run changed the table")
+
+    def test_a_failing_step_leaves_the_version_alone(self):
+        """A file must never claim to be more migrated than it is."""
+        def broken(_conn):
+            raise RuntimeError("boom")
+
+        with self.assertRaises(RuntimeError):
+            migrate(self.conn, "executed_trades", 2, {1: broken, 2: broken})
+
+        self.assertEqual(read_version(self.conn), 0,
+                         "a failed migration must not be recorded as applied")
+
+    def test_a_newer_file_is_not_migrated(self):
+        from jarvis.data.database import MIGRATIONS
+
+        write_version(self.conn, 99)
+        with self.assertLogs("JARVIS_Schema", level="ERROR"):
+            result = migrate(self.conn, "executed_trades", 1, MIGRATIONS)
+        self.assertEqual(result, 99)
+        self.assertEqual(read_version(self.conn), 99)
+
+    def test_a_missing_step_stops_where_it_is(self):
+        write_version(self.conn, 1)
+        # No step registered to get from 1 to 2.
+        result = migrate(self.conn, "executed_trades", 2, {})
+        self.assertEqual(result, 1)
 
 
 class StoresStampTheirSchemaTest(unittest.TestCase):

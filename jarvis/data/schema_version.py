@@ -19,7 +19,7 @@ Rules:
 """
 import logging
 import sqlite3
-from typing import Optional
+from typing import Callable, Dict, Optional
 
 logger = logging.getLogger("JARVIS_Schema")
 
@@ -65,3 +65,58 @@ def ensure_version(conn: sqlite3.Connection, version: int, name: str) -> int:
         return current
     logger.info("%s schema: %s -> %s", name, current or "unversioned", version)
     return version
+
+
+def add_columns(conn: sqlite3.Connection, table: str, columns: Dict[str, str]) -> None:
+    """Add each column that is not there yet. Idempotent, so it is safe as a migration step."""
+    existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+    for name, definition in columns.items():
+        if name in existing:
+            continue
+        try:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {definition}")
+        except Exception as e:
+            # Not swallowed silently: a migration that half-applies is worse
+            # than one that fails, and the caller aborts on this.
+            logger.error("Could not add %s.%s (%s): %s", table, name, definition, e)
+            raise
+
+
+def migrate(conn: sqlite3.Connection, name: str, target: int,
+            steps: Dict[int, Callable[[sqlite3.Connection], None]]) -> int:
+    """Bring a store up to `target`, one numbered step at a time.
+
+    Replaces the old "add whatever column happens to be missing" sweep, which
+    ran unconditionally on every open and could express neither ordering, a
+    backfill, nor a refusal. Each step is applied at most once because the
+    version is written immediately after it — so a crash mid-migration leaves a
+    file that says how far it got, rather than one that claims to be current.
+
+    Steps must be idempotent: a step that is recorded as applied is never run
+    again, but a step that *failed* may be retried on the next open, and in that
+    case it re-runs against a partially updated table.
+
+    Raises on the first failing step, leaving the version at the last good one.
+    A half-migrated database that announces itself is recoverable; one that
+    silently claims to be current is not.
+    """
+    current = read_version(conn)
+    if current > target:
+        logger.error(
+            "%s is schema version %s but this code only knows %s — written by "
+            "newer code. Refusing to migrate.", name, current, target,
+        )
+        return current
+    while current < target:
+        nxt = current + 1
+        step = steps.get(nxt)
+        if step is None:
+            logger.error("%s has no migration from %s to %s; stopping at %s.",
+                         name, current, nxt, current)
+            return current
+        logger.info("%s: applying migration %s", name, nxt)
+        step(conn)
+        current = nxt
+        write_version(conn, current)
+        logger.info("%s migrated to schema %s", name, current)
+    return current
