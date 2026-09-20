@@ -84,7 +84,7 @@ recommendations were rejected on verification (see §6) — one of them would ha
 | AI6 | Learning loop dies on restart; fallback R is fabricated | H | S | `_pending_features` is process-local; `r_multiple = 2.0/-1.0` invented |
 | C8 | Gross vs net P&L; no fee columns anywhere | H | M | `database.py:226` vs `state_synchronizer.py:73`; unmeasurable by construction |
 | D5 | Bar fallback is a synthetic random walk | H | M | ✅ **FIXED** 2026-09-20 — provenance now travels *with* the series (`CandleSeries.source`); see M2 below |
-| D3 | No migration mechanism; two copies already drifted | H | M | `user_version=0` on all 9 DBs; root copy lacks `closed_at` |
+| D3 | No migration mechanism; two copies already drifted | H | M | ✅ **FIXED** 2026-09-20 — all 4 versioned stores on `migrate()`; refusal proved 12-red vs 3 |
 | A1 | Two radar producers, two contracts, three sort keys | H | M | UI can rank a different "best" than the engine that trades |
 | A2 | Parallel scan is a no-op — two process-wide MT5 locks | H | M | 39-task fan-out serializes; measured 2.16s cold sweep |
 | D1 | Paper and live fills share one table, no discriminator | H | S | 135/246 rows are paper; no column to filter |
@@ -214,8 +214,9 @@ D3 migrations, D1 `origin` column, D5 bar provenance, D10/D11 real labels, A10 r
 path performs a write; `triple_barrier_label` non-zero on closed rows.
 
 **Done so far:** D1 (`origin`, shipped), D5 (bar provenance, shipped), D10 (the triple-barrier
-label, shipped), D18 (the read path, shipped).
-**Still to do:** the D3 remainder, D19 (MFE/MAE), A10's SSE half.
+label, shipped), D18 (the read path, shipped), **D3 closed** — all four versioned stores
+(`executed_trades`, `trade_records`, `circuit_state`, `drawdown_state`, `metadata`) on `migrate()`.
+**Still to do:** reconciling the two `jarvis_history.db` copies, D19 (MFE/MAE), A10's SSE half.
 
 **Status (2026-09-20): D3 half done — the version stamp.** All 11 databases reported
 `user_version = 0`, so no file could declare what shape it was in, and two copies of
@@ -244,8 +245,66 @@ could not be redirected for this — conftest already records that 12 parquet-re
 path anchoring. The app resolves to `data/jarvis_history.db` (268+ rows, complete). I have not
 touched it — say the word and I'll archive it rather than delete it.
 
-Still to do for D3: reconciling those two copies, and moving the other four stores onto `migrate()`
-so they can take migrations too (they currently only stamp a version).
+**D3 remainder — `trade_records` now migrates in numbered steps.** It used to run this on
+**every open**:
+
+```python
+cur.execute("PRAGMA table_info(trade_records)")
+columns = [info[1] for info in cur.fetchall()]
+if 'ml_features' not in columns:
+    cur.execute("ALTER TABLE trade_records ADD COLUMN ml_features TEXT")
+if 'triple_barrier_label' not in columns:
+    cur.execute("ALTER TABLE trade_records ADD COLUMN triple_barrier_label INTEGER DEFAULT 0")
+```
+
+That sweep can express neither ordering, a backfill, nor a refusal, and it ignores `user_version`
+entirely. The refusal is the part that bites: given a file from **newer** code that no longer carries
+`triple_barrier_label` (renamed or dropped), the sweep **re-adds it** — silently undoing the newer
+schema — while `ensure_version` logs "written by newer code" about a change the sweep has already
+made. It is now `migrate()` with `MIGRATIONS = {1: _migration_1}`, so the step runs at most once and
+a newer file is refused rather than patched back.
+
+Writing to that newer file had a second, independent failure: `record_trade` used
+`INSERT OR REPLACE INTO trade_records VALUES (?, … ×22)` — **22 bare placeholders, no column names** —
+so it is pinned to this version's exact column count and fails outright on a 23-column file
+(`table trade_records has 23 columns but 22 values were supplied`). The insert now names its columns,
+which tolerates extra ones and is immune to reordering.
+
+`tests/test_trade_memory_migration.py` (8 tests). **Mutation-proved: only 2 go red** — and they are
+exactly the two cases that distinguish the mechanisms (`a_newer_file_is_not_patched_back_into_this_
+schema`, `a_newer_file_with_an_extra_column_is_still_writable`). The other 6 pass under both
+implementations because the sweep happened to be correct for them: it does add missing columns and
+does refuse to stamp a number down. That is the honest measure of what `migrate()` bought here —
+the *refusal*, not the mechanics.
+
+**D3 closed — the last three stores.** `circuit_breaker`, `drawdown` and `metadata_db` were
+`CREATE TABLE` + `ensure_version` with no sweep, so there was nothing to remove; each now declares
+`MIGRATIONS = {1: _migration_1}` and calls `migrate()`. What that buys is one thing, and it is not
+visible today:
+
+`ensure_version(conn, SCHEMA_VERSION, name)` stamps **whatever number the code declares**, whether or
+not anything was done to earn it. Bump `SCHEMA_VERSION` to 2 to add a column, forget the `ALTER`, and
+every existing file is labelled 2 while still missing the column — the store then reads a column that
+does not exist and gets `None` where it expects a value, which is how a risk gate fails open.
+`migrate()` refuses: with no step registered for 2 it stops at 1 and says so.
+
+Because the two are behaviourally identical *today*, the mutation proof has to simulate the mistake
+it guards against rather than the code it replaced. With `SCHEMA_VERSION` bumped to 2 and no step
+registered: **12 tests go red under `migrate()`** (the registry has no step; a fresh file stops at 1;
+an unversioned file stops at 1; opening twice stops at 1 — each × 3 stores). With the same bump under
+the old `ensure_version`: **3 go red**, because the store stamps 2 anyway and the only thing left to
+notice is the registry's shape. That 12-vs-3 gap is the whole argument for this change.
+
+`tests/test_store_migration.py` (24 tests). `test_ensure_version_would_have_stamped_it` pins the
+contrast by measurement, so if the machinery ever stops buying anything these stores can go back.
+
+**Still to do for D3:** reconciling the two `jarvis_history.db` copies (see *Open, needs your call*).
+
+**Retracted:** an earlier pass recorded "the paper-scoped store is not stamped" as a D3 gap, from
+`data/jarvis_drawdown_state_paper.db` reading `uv=0` while its sibling read `uv=1`. **It is not a
+defect** — constructing a `DrawdownGuard` on a paper-scoped path stamps it `1` immediately. The file
+merely was not reopened after the stamping landed (mtime 03:42 vs 14:09). A store's on-disk
+`user_version` records when it was last opened, not whether the code stamps it.
 
 **D1 — the `origin` column: shipped.** `executed_trades` is at version 2 and every row now carries
 `broker|paper|synthetic|unknown`. Migration 2 adds the column and backfills from the only evidence

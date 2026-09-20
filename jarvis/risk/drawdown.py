@@ -25,10 +25,25 @@ from typing import Dict, Any, Optional, Callable
 from datetime import datetime, timezone
 
 from jarvis.config.paths import resolve_db_path
-from jarvis.data.schema_version import ensure_version
+from jarvis.data.schema_version import migrate
 
 # D3: 1 = `drawdown_state` as it exists today.
 SCHEMA_VERSION = 1
+
+
+def _migration_1(conn: sqlite3.Connection) -> None:
+    """Version 1 *is* the shape created by the CREATE TABLE above.
+
+    A pre-versioning file already has that shape, so there is nothing to add —
+    but it is recorded as a named step rather than left to `ensure_version`,
+    which stamped whatever number the code declared. A hand-bumped
+    SCHEMA_VERSION with no matching step now stops the migration and says so,
+    instead of labelling a file with a version whose shape nobody made.
+    """
+    return None
+
+
+MIGRATIONS = {1: _migration_1}
 
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
@@ -91,7 +106,7 @@ class DrawdownGuard:
                     )
                 ''')
                 # D3: record the shape of this file.
-                ensure_version(conn, SCHEMA_VERSION, "drawdown_state")
+                migrate(conn, "drawdown_state", SCHEMA_VERSION, MIGRATIONS)
         finally:
             conn.close()
 

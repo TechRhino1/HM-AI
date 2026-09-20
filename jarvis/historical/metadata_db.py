@@ -11,12 +11,27 @@ from typing import Dict, List, Any, Optional, Tuple
 from datetime import datetime, timezone
 import threading
 
-from jarvis.data.schema_version import ensure_version
+from jarvis.data.schema_version import migrate
 
 logger = logging.getLogger("JARVIS_HistoricalMetadata")
 
 # D3: 1 = the five tables as they exist today.
 SCHEMA_VERSION = 1
+
+
+def _migration_1(conn: sqlite3.Connection) -> None:
+    """Version 1 *is* the shape created by the CREATE TABLEs above.
+
+    A pre-versioning file already has that shape, so there is nothing to add —
+    but it is recorded as a named step rather than left to `ensure_version`,
+    which stamped whatever number the code declared. A hand-bumped
+    SCHEMA_VERSION with no matching step now stops the migration and says so,
+    instead of labelling a file with a version whose shape nobody made.
+    """
+    return None
+
+
+MIGRATIONS = {1: _migration_1}
 
 
 class MetadataDB:
@@ -132,7 +147,7 @@ class MetadataDB:
                     ON quality_audit_log (symbol, timeframe, created_at DESC);
                 """)
                 # D3: record the shape of this file.
-                ensure_version(conn, SCHEMA_VERSION, "metadata")
+                migrate(conn, "metadata", SCHEMA_VERSION, MIGRATIONS)
 
     def register_dataset(
         self,

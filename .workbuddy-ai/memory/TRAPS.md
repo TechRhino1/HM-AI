@@ -1482,10 +1482,15 @@ terminal, and `/api/diagnostics` honestly reports `MT5: RECONNECTING`, `DATA_FEE
   `sl > entry > tp`. A parametrised case-insensitivity test that reuses one pair across `BUY` and
   `SELL` gets "both barriers hit" → `None` for one of them. Carry per-side geometry in the params.
 
-* **A paper-scoped store can miss the version stamp its sibling has.** `data/jarvis_drawdown_state.db`
-  is `uv=1` but `data/jarvis_drawdown_state_paper.db` is `uv=0`. When auditing "every store stamps
-  itself", enumerate **every file including the `_paper` variants** — the mode-scoped ones are
-  created by a different code path and are easy to miss.
+* **A store's on-disk `user_version` reflects when it was LAST OPENED, not whether the code stamps
+  it.** `data/jarvis_drawdown_state_paper.db` read `uv=0` while its sibling read `uv=1`, which looks
+  exactly like "the mode-scoped store was missed by the stamping code". **It was not** — constructing
+  a `DrawdownGuard` on a paper-scoped path stamps it `1` on the spot; the on-disk file was simply last
+  written before the stamping landed (mtime 03:42 vs 14:09 for the live one). I recorded this as a
+  code gap from file state alone and had to retract it. **Auditing "is every store stamped?" by
+  reading files conflates "never reopened since the change" with "the code does not stamp it" — the
+  test is to open a fresh store through the real code path and check the version afterwards.** Still
+  enumerate the `_paper` variants, since they are separate files with separate lifetimes.
 
 * **`trade_records` is not in `jarvis_history.db`.** `data/jarvis_history.db` holds only
   `executed_trades`; the learning table lives in `data/jarvis_trade_memory.db`. Querying the wrong
@@ -1510,7 +1515,66 @@ terminal, and `/api/diagnostics` honestly reports `MT5: RECONNECTING`, `DATA_FEE
   OS temp dir and then deletes it, and once that directory holds more than **50** entries the guard
   refuses (`[safe-delete][SAFE_DELETE_BULK_CONFIRM_REQUIRED] {"count":54,"threshold":50}`) and the
   run exits 1. The garbage is not yours — it accumulates from every `tmp_path`-using test file
-  (`tests/test_drawdown_guard.py` contributes ~19 dirs per run). **Fix: pass
-  `--basetemp=.scratch/ptmp`**, which keeps pytest's temp root inside the project and skips the
-  rotate-to-garbage path entirely; verified `exit=0` with 0 safe-delete lines. **Never read a bare
-  `exit=1` as a test failure — check the junit XML `failures`/`errors` first.**
+  (`tests/test_drawdown_guard.py` contributes ~19 dirs per run). **Never read a bare `exit=1` as a
+  test failure — check the junit XML `failures`/`errors` first.**
+
+  **The `--basetemp` fix must be UNIQUE per run.** `--basetemp=.scratch/ptmp` gave `exit=0` once and
+  was recorded as the fix — then, two runs later, the SAME guard fired again with 34 setup errors:
+  pytest **removes** an existing basetemp at session start, so a fixed one simply accumulates inside
+  the project and re-trips once it passes 50 entries. Use `--basetemp=.scratch/ptmp-$TS`. A "verified
+  fix" that only moves the accumulation is not a fix — re-run it a second time before believing it.
+
+## Round 40r — traps added
+
+* **An unnamed positional `INSERT ... VALUES (?, … ×N)` pins the write to this version's exact
+  column count.** `record_trade` supplied 22 bare placeholders, so a 23-column file — exactly what a
+  file written by **newer** code looks like — failed with `table trade_records has 23 columns but 22
+  values were supplied`. The store could correctly decide to open a newer file and still be unable
+  to write to it. **Name the columns in the INSERT**: it then tolerates extra columns (they take
+  their defaults) and is immune to column reordering.
+
+* **An "add whatever is missing" sweep cannot refuse, and it runs even when the version check
+  refuses.** `if 'col' not in columns: ALTER TABLE ADD COLUMN` reads `PRAGMA table_info` and ignores
+  `user_version` completely. Handed a newer file that no longer carries a column, it **re-adds it**,
+  silently undoing the newer schema — while `ensure_version` logs "written by newer code" about a
+  change the sweep has already made. The two mechanisms disagree and the sweep wins, because it runs
+  first. Replacing it with a numbered `migrate()` step is what makes the refusal real.
+
+* **When most of a new test file survives the mutation, say what the fix actually bought.** Of 8
+  migration tests only **2** went red. The other 6 pass under both the sweep and `migrate()`, because
+  the sweep happens to be correct for them: it adds missing columns, is idempotent on re-open, and
+  refuses to stamp a number down. So the honest measure of the change is **the refusal** (and the
+  write path), not "8 tests of coverage". Count the red, name the survivors, and do not let a green
+  survivor inflate the claim.
+
+* **"Refusing to migrate is not refusing to operate" is worth asserting.** It is easy to make a
+  version guard so strict that the store becomes unusable for files it correctly decided to open, and
+  no unit test of the guard itself will notice. Assert both halves: the version is left alone **and**
+  a normal write still succeeds.
+
+---
+
+### 40s — When a change is invisible today, mutate the mistake it guards, not the code it replaced
+
+Moving `circuit_breaker` / `drawdown` / `metadata_db` from `ensure_version` to `migrate()` changed
+**nothing observable**: both stamp 1 on a fresh file, both refuse a newer one. A mutation plugin that
+simply reverts the call therefore turns **zero** tests red — and reporting "0 red" would have read as
+"the change is worthless" when the real answer is "the tests cannot see it yet".
+
+The change exists for a scenario that has not happened: `SCHEMA_VERSION` bumped to 2 with no step
+registered. So the mutation has to *create that scenario*. Two plugins, one run each:
+
+* `bump_store_version.py` — bump only. Fixed code: **12 red** (refuses).
+* `bump_store_version.py` + `revert_store_migration.py` — bump and revert. Old code: **3 red** (stamps).
+
+The 12-vs-3 gap is the evidence. Neither number alone means anything.
+
+**Rule: a structural change with no current behavioural difference cannot be mutation-proved by
+reverting it.** Identify the future failure it prevents, simulate *that*, and run the simulation
+against both the old and the new mechanism. Report the difference between the two runs, not the count
+from either.
+
+Corollary for the test suite: keep one test that pins the *contrast* by measurement — here
+`test_ensure_version_would_have_stamped_it` asserts the old helper really does stamp the unbumpable
+version. If that assertion ever fails, the new machinery has stopped buying anything and the change
+should be reverted rather than kept on inertia.

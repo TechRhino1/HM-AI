@@ -12,13 +12,31 @@ from typing import Dict, List, Any, Optional
 from datetime import datetime, timezone
 
 from jarvis.config.paths import resolve_db_path
-from jarvis.data.schema_version import ensure_version
+from jarvis.data.schema_version import add_columns, migrate
 
 logger = logging.getLogger("JARVIS_TradeMemory")
 
-# D3: 1 = `ml_features` + `triple_barrier_label`. Files written before this
-# existed are 0 and are treated as current.
+# D3: 1 = `ml_features` + `triple_barrier_label`. A file at 0 predates
+# versioning and is brought up by migration 1 below.
 SCHEMA_VERSION = 1
+
+
+def _migration_1(conn: sqlite3.Connection) -> None:
+    """Add the two columns the old "add whatever is missing" sweep added on EVERY open.
+
+    That sweep could express neither ordering, a backfill, nor a refusal, and it ran
+    against files from NEWER code too — so a future rename (say `mfe` -> `mfe_r`) would be
+    silently undone on the next open by re-adding the old column, while `ensure_version`
+    logged an error the sweep had already made meaningless. As a numbered step it runs at
+    most once, and the version is written immediately after it.
+    """
+    add_columns(conn, "trade_records", {
+        "ml_features": "TEXT",
+        "triple_barrier_label": "INTEGER DEFAULT 0",
+    })
+
+
+MIGRATIONS = {1: _migration_1}
 
 
 def derive_triple_barrier_label(entry, exit_price, sl, tp, trade_type) -> Optional[int]:
@@ -165,25 +183,32 @@ class TradeMemory:
                     ml_features TEXT
                 )
             """)
-            # Check if ml_features column exists (for backward compatibility if table exists)
-            cur.execute("PRAGMA table_info(trade_records)")
-            columns = [info[1] for info in cur.fetchall()]
-            if 'ml_features' not in columns:
-                cur.execute("ALTER TABLE trade_records ADD COLUMN ml_features TEXT")
-            if 'triple_barrier_label' not in columns:
-                cur.execute("ALTER TABLE trade_records ADD COLUMN triple_barrier_label INTEGER DEFAULT 0")
-
             self._conn.commit()
-            # D3: record the shape of this file. 1 = `ml_features` +
-            # `triple_barrier_label` (both added by the sweep above).
-            ensure_version(self._conn, SCHEMA_VERSION, "trade_records")
+            # D3: bring the file up to SCHEMA_VERSION one numbered step at a time.
+            # A brand-new file already has every column (the CREATE above) and
+            # `add_columns` skips what is present, so migration 1 is a no-op for it and
+            # does the real work for a legacy file. Unlike the sweep this replaced, it
+            # also REFUSES a file written by newer code instead of re-adding columns.
+            migrate(self._conn, "trade_records", SCHEMA_VERSION, MIGRATIONS)
+            self._conn.commit()
 
 
     def record_trade(self, trade_data: Dict[str, Any]):
         with self._lock:
             cur = self._conn.cursor()
+            # Named columns, NOT `VALUES` with 22 bare placeholders. A positional insert
+            # is pinned to this version's exact column count, so it fails outright against
+            # a file that has one more column than the code knows about — which is exactly
+            # what a file written by NEWER code looks like ("table trade_records has 23
+            # columns but 22 values were supplied"). Naming them keeps the write working
+            # when the file carries extra columns, and is immune to column reordering.
             cur.execute("""
-                INSERT OR REPLACE INTO trade_records VALUES (
+                INSERT OR REPLACE INTO trade_records (
+                    ticket, symbol, timestamp, trade_type, entry_price, exit_price,
+                    sl, tp, lots, pnl, is_win, regime, strategy, model_confidence,
+                    adversarial_penalty, expected_value, mfe, mae, reasoning,
+                    quality_gate, ml_features, triple_barrier_label
+                ) VALUES (
                     ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
                 )
             """, (
