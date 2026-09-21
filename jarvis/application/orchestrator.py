@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from typing import Dict, List, Any, Optional, Tuple
 
 from jarvis.application.state_manager import StateManager, GLOBAL_STATE
+from jarvis.application.radar_sort import radar_sort_key
 from jarvis.application.event_bus import EventBus, GLOBAL_EVENT_BUS
 from jarvis.market.data_feed import DataFeedEngine
 from jarvis.data.broker_symbols import terminal_live
@@ -1123,23 +1124,9 @@ class JarvisOrchestrator:
         radar_results = [cand.to_radar_item() for cand in ranked_candidates]
 
         if radar_results:
-            def _radar_sort_key(item):
-                act = item.get("action", "")
-                is_open = 0 if "CLOSED" in act else 1
-                if "READY" in act:
-                    conv = 3
-                elif "WAIT" in act:
-                    conv = 2
-                elif "NO TRADE" in act or "INVALID" in act:
-                    conv = 1
-                else:
-                    conv = 0
-                util = item.get("utility_score", 0.0) or 0.0
-                prob = item.get("win_prob", 0) or item.get("score", 0) or 0
-                ev = item.get("ev", 0) or 0
-                return (is_open, conv, util, prob, ev)
-
-            radar_results.sort(key=_radar_sort_key, reverse=True)
+            # A1: one canonical radar sort key, shared with server.py — see
+            # jarvis/application/radar_sort.py. (Used to be a drifted copy here.)
+            radar_results.sort(key=radar_sort_key, reverse=True)
             self.state_manager.update_radar(radar_results)
 
         return radar_results

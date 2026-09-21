@@ -34,8 +34,10 @@ ALSO PINNED, NOT CHANGED
 * **The two modes have different failure semantics.** `parallel=True` swallows an
   analyst exception into a fallback; `parallel=False` has no try/except at all
   and propagates it, so the same inputs either degrade or crash depending on a
-  constructor flag. `signal_scan` passes `parallel_analysts` through, so scan
-  results can differ by mode.
+  constructor flag. `signal_scan` no longer exposes the flag and always
+  constructs the cluster in its production (parallel) mode, so scans run the same
+  analyst path as live decisions — the divergence below is a property of the
+  cluster itself, not something the scan toggles.
 * **The timeout is per future, not per call.** `fut.result(timeout=...)` is
   awaited once per analyst in dict order, so a full stall costs
   `len(futures) * timeout_sec` (6 x 2.0s) plus the Devil's Advocate, not 2.0s.

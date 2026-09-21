@@ -120,7 +120,6 @@ class SignalScanner:
         spread_pips: Optional[float] = None,
         start_bar_idx: int = 60,
         min_history: int = 60,
-        parallel_analysts: bool = False,
         offline: bool = True,
     ):
         # ``spread_pips=None`` means "use the real per-bar spread from the data".
@@ -133,7 +132,20 @@ class SignalScanner:
 
         self.context_engine = MarketContextEngine()
         self.regime_classifier = MarketRegimeClassifier()
-        self.analyst_cluster = ParallelAnalystCluster(parallel=parallel_analysts)
+        # The analyst fan-out runs in the cluster's production mode
+        # (parallel=True) — the same path the live decision engine, the
+        # orchestrator and the backtest engine use. `parallel_analysts` used to be
+        # a toggle here, but it defaulted to False and no caller ever set it True,
+        # so the ThreadPoolExecutor branch was dead code for the scan; and because
+        # the cluster's two modes only differ in *failure* semantics (parallel
+        # swallows an analyst exception into a score-50 fallback; sequential
+        # propagates it), the flag was a latent landmine — flipping it would
+        # silently change which scan results survive. The scan already wraps the
+        # whole pipeline call in a try/except that skips a bad bar, so the cluster
+        # mode is moot for robustness. Running parallel keeps the scan faithful to
+        # production: its entire purpose is "the SAME production path", and a
+        # sequential cluster is a path production never takes.
+        self.analyst_cluster = ParallelAnalystCluster()
         self.decision_engine = DecisionEngine()
 
     # ── helpers ────────────────────────────────────────────────────────────

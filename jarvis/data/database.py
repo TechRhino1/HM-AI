@@ -499,7 +499,21 @@ class SQLiteTradeDB:
 
                 entry_p = float(entry_deal.price) if entry_deal else float(target_deal.price)
                 vol = float(target_deal.volume)
-                pnl = float(exit_deal.profit) if exit_deal else 0.0
+                # C8: NET realised P&L, matching the figure the state synchronizer
+                # publishes on `trade_closed` (state_synchronizer.py:73,
+                # `sum(d.profit + d.swap + d.commission ...)`). The closing
+                # deal's `profit` is GROSS — it excludes the commission and swap
+                # the broker books on BOTH the entry and the exit — so adding them
+                # here is what reconciles the two numbers. An opening deal's
+                # `profit` is 0, so commission+swap across entry and exit plus the
+                # exit's profit reproduces that per-position total for the common
+                # one-entry / one-exit case.
+                entry_comm = float(getattr(entry_deal, "commission", 0.0) or 0.0) if entry_deal else 0.0
+                entry_swap = float(getattr(entry_deal, "swap", 0.0) or 0.0) if entry_deal else 0.0
+                exit_comm = float(getattr(exit_deal, "commission", 0.0) or 0.0) if exit_deal else 0.0
+                exit_swap = float(getattr(exit_deal, "swap", 0.0) or 0.0) if exit_deal else 0.0
+                exit_profit = float(exit_deal.profit) if exit_deal else 0.0
+                pnl = exit_profit + entry_comm + entry_swap + exit_comm + exit_swap
                 target_time = exit_deal.time if exit_deal else target_deal.time
                 dt_str = datetime.fromtimestamp(
                     float(target_time) - broker_offset, timezone.utc

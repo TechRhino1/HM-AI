@@ -15,6 +15,7 @@ from urllib.parse import parse_qs, urlparse
 from typing import Any, Optional, Dict, Tuple
 
 from jarvis.application.state_manager import StateManager, GLOBAL_STATE
+from jarvis.application.radar_sort import radar_sort_key
 import threading
 import time
 from jarvis.market.data_feed import DataFeedEngine, first_untrusted_frame, first_unusable_frame
@@ -330,22 +331,9 @@ class JarvisRequestHandler(BaseHTTPRequestHandler):
                                 logger.error(f"Radar sweep error for {sym} ({t_style}): {e_sym}", exc_info=True)
 
                     if radar_results:
-                        def _radar_sort_key(item):
-                            act = item.get("action", "")
-                            is_open = 0 if "CLOSED" in act else 1
-                            if "READY" in act:
-                                conv = 3
-                            elif "WAIT" in act:
-                                conv = 2
-                            elif "NO TRADE" in act or "INVALID" in act:
-                                conv = 1
-                            else:
-                                conv = 0
-                            prob = item.get("win_prob", 0) or item.get("score", 0) or 0
-                            ev = item.get("ev", 0) or 0
-                            return (is_open, conv, prob, ev)
-
-                        radar_results.sort(key=_radar_sort_key, reverse=True)
+                        # A1: one canonical radar sort key, shared with
+                        # orchestrator.py — see jarvis/application/radar_sort.py.
+                        radar_results.sort(key=radar_sort_key, reverse=True)
                         cls.state_manager.update_radar(radar_results)
 
                 except Exception as e:
@@ -560,21 +548,9 @@ class JarvisRequestHandler(BaseHTTPRequestHandler):
                 style_filter = query.get("trade_style", query.get("style", [None]))[0]
                 opps = list(self.state_manager.radar_opportunities)
 
-                def _radar_sort_key(item):
-                    act = str(item.get("action", "") or item.get("status_label", ""))
-                    is_open = 0 if "CLOSED" in act else 1
-                    if "READY" in act:
-                        conv = 3
-                    elif "WAIT" in act:
-                        conv = 2
-                    elif "NO TRADE" in act or "INVALID" in act:
-                        conv = 1
-                    else:
-                        conv = 0
-                    prob = item.get("win_prob", 0) or item.get("score", 0) or 0
-                    ev = item.get("ev", 0) or 0
-                    return (is_open, conv, prob, ev)
-
+                # A1: one canonical radar sort key, shared with orchestrator.py —
+                # see jarvis/application/radar_sort.py. (Used to be a drifted copy
+                # here, the only one that also fell back to `status_label`.)
                 if style_filter and style_filter.strip().upper() not in ("ALL", "", "NONE"):
                     s_norm = style_filter.strip().upper()
                     if s_norm in ("DAY", "DAY_TRADING", "INTRADAY"):
@@ -587,7 +563,7 @@ class JarvisRequestHandler(BaseHTTPRequestHandler):
                         target_styles = {s_norm}
                     opps = [o for o in opps if str(o.get("trade_style", "")).upper() in target_styles]
 
-                opps.sort(key=_radar_sort_key, reverse=True)
+                opps.sort(key=radar_sort_key, reverse=True)
                 self._send_json({"opportunities": opps})
             elif path == "/api/history":
                 try:
