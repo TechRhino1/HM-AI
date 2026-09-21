@@ -71,8 +71,7 @@ const TEMPLATE_TREE = {
                  'chart', 'chart-tv', 'chart-hud', 'chart-tooltip', 'chart-overlay',
                  'pos-count', 'pos-total', 'pos-body', 'ticket-source', 'ticket-symbol',
                  'ticket-buy', 'ticket-sell', 'ticket-volume', 'ticket-price',
-                 'ticket-sl', 'ticket-tp', 'ticket-hint', 'pending-count',
-                 'pending-refresh', 'pending-body', 'reason-tier', 'reason-body',
+                 'ticket-sl', 'ticket-tp', 'ticket-hint', 'reason-tier', 'reason-body',
                  /* The context strip beside the ticket (item 5: Analyst and News
                     surfaced inside the trade page). It writes to its own
                     containers so no id is shared with the full panels. */
@@ -829,11 +828,6 @@ function fetchStub(url, opts) {
     body = INDIA_FII_PAYLOAD;
   } else if (url.indexOf('/api/india/option_chain') >= 0) {
     body = INDIA_OPTION_CHAIN_PAYLOAD;
-  } else if (url.indexOf('/api/pending_orders') >= 0) {
-    body = [{
-      ticket: 90001, symbol: 'XAUUSD', type: 2, volume: 0.20,
-      price: 98.5, sl: 96, tp: 104, comment: 'limit', time_setup: 1700000000
-    }];
   } else if (url.indexOf('/api/history') >= 0) {
     // Bare array, exactly as server.py sends it.
     body = HISTORY_ROWS;
@@ -1315,25 +1309,6 @@ function report() {
   const radarCount = registry.get('radar-count');
   ok('radar count reflects the row count', !!radarCount && radarCount.textContent === '2',
     radarCount ? radarCount.textContent : 'missing');
-
-  console.log('\npending orders');
-  const pend = registry.get('pending-body');
-  const pendHtml = pend ? pend.innerHTML : '';
-  /* MT5's ORDER_TYPE_* enum starts at BUY=0 / SELL=1, so the pending types begin
-     at 2: BUY_LIMIT. The fixture below is type 2 with comment 'limit', and the
-     backend's own place_pending_order maps "BUY_LIMIT" to the literal 2. An
-     earlier assertion here expected 'BUY STOP', which encoded an off-by-two in
-     the frontend's map rather than catching it — every live LIMIT was labelled
-     a STOP. Assert the exact label AND that the neighbouring type is absent. */
-  ok('numeric MT5 order type 2 renders as BUY LIMIT',
-    pendHtml.indexOf('BUY LIMIT') >= 0 && pendHtml.indexOf('BUY STOP') < 0,
-    pendHtml.replace(/\s+/g, ' ').slice(0, 200));
-  ok('pending order shows price, stop and target at symbol precision',
-    ['98.50', '96.00', '104.00'].every((t) => pendHtml.indexOf(t) >= 0),
-    pendHtml.replace(/\s+/g, ' ').slice(0, 240));
-  const pendCount = registry.get('pending-count');
-  ok('pending count reflects the row count', !!pendCount && pendCount.textContent === '1',
-    pendCount ? pendCount.textContent : 'missing');
 
   console.log('\nnews calendar');
   ok('opening the view requested the calendar',

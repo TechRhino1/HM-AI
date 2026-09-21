@@ -224,9 +224,20 @@
 }
 .tt-tab:hover { background: var(--hm-bg-hover); color: var(--hm-text-primary); }
 .tt-tab[aria-selected="true"] {
-  background: var(--hm-accent-subtle);
-  color: var(--hm-accent);
-  border-color: color-mix(in srgb, var(--hm-accent) 40%, transparent);
+  /* Stronger than the hover wash so the active tab is unmistakable: solid
+     accent background, inverted text, and a 2px accent bottom bar that the
+     hover state never carries. The bar keeps its position on a phone, where
+     the tab row is icon-on-top. */
+  background: var(--hm-accent);
+  color: var(--hm-text-inverse);
+  border-color: var(--hm-accent);
+  box-shadow: inset 0 -2px 0 0 var(--hm-accent);
+}
+.tt-tab[aria-selected="true"]:hover {
+  /* The active tab is still hoverable (keyboard, a11y), so the hover colour
+     must be visibly different from the at-rest active colour. */
+  background: color-mix(in srgb, var(--hm-accent) 88%, white 12%);
+  color: var(--hm-text-inverse);
 }
 .tt-tab:focus-visible {
   outline: 2px solid var(--hm-accent);
@@ -1773,17 +1784,51 @@
 .tt-panel--chart > .tt-chart__body { flex: 1 1 auto; min-height: 0; }
 .tt-panel--chart > .tt-panel__body--flush { flex: 0 0 auto; max-height: 34%; }
 
-/* Order ticket: the form takes what it needs, pending orders are capped, and
-   the reasoning fills whatever is left.
+/* Open positions: compact rows, right-aligned numeric columns, and an actions
+   column wide enough for a Close button without forcing the other columns to
+   wrap. The P&L cell uses the existing up/down/flat color tokens so the
+   positive/negative/neutral treatment matches the rest of the app. */
+.tt-panel__head--pos .tt-pos-total {
+  font-family: var(--tt-num-font);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--hm-text-sm);
+  font-weight: var(--hm-weight-semibold);
+  letter-spacing: 0;
+}
+.tt-table--positions tbody td { height: var(--tt-row-h); }
+.tt-table--positions .tt-pos-pnl { font-weight: var(--hm-weight-semibold); }
+.tt-table--positions th.tt-pos-actions-col,
+.tt-table--positions td.tt-pos-actions {
+  text-align: right;
+  padding-left: var(--hm-space-3);
+  white-space: nowrap;
+  width: 1%;
+}
+.tt-pos-actions { display: flex; justify-content: flex-end; gap: var(--hm-space-1); }
+.tt-btn--pos-close {
+  /* The row's primary action: the same compact small button the rest of the
+     app uses, but with a hairline border so it reads as a button on a row
+     hover and not as a label. */
+  border-color: var(--hm-border-strong);
+  color: var(--hm-text-primary);
+}
+.tt-btn--pos-close:hover {
+  background: var(--hm-bg-hover);
+  border-color: var(--hm-accent);
+  color: var(--hm-accent);
+}
 
-   The form is NOT negotiable. The panel stacks three regions - the order form,
-   the pending-orders table and the context strip - whose natural heights sum to
-   far more than the panel holds (526 + 144 + 668 against ~834px). Letting them
-   flex-compete squashed the FORM to 252px of its 526px, which cut the BUY/SELL
-   row in half and pushed the volume / stop-loss / take-profit fields entirely
-   out of sight: the primary action of the whole app, behind a 252px scroll box.
-   Each region now keeps its natural height and the PANEL scrolls as one column,
-   so the form is whole at rest and the context strip is a scroll below it. */
+/* Order ticket: the form takes what it needs and the reasoning fills whatever
+   is left.
+
+   The form is NOT negotiable. The panel stacks the order form and the context
+   strip, whose natural heights sum to far more than the panel holds. Letting
+   them flex-compete squashed the FORM to 252px of its 526px, which cut the
+   BUY/SELL row in half and pushed the volume / stop-loss / take-profit fields
+   entirely out of sight: the primary action of the whole app, behind a 252px
+   scroll box. Each region now keeps its natural height and the PANEL scrolls
+   as one column, so the form is whole at rest and the context strip is a
+   scroll below it. */
 .tt-panel--ticket { overflow-y: auto; }
 .tt-panel--ticket > .tt-panel__body { flex: 0 0 auto; }
 .tt-panel--ticket > .tt-panel__body--flush { flex: 0 0 auto; max-height: 32%; }

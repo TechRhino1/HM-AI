@@ -33,7 +33,6 @@
   var POLL = {
     telemetry: 3000,
     jobs: 4000,
-    pending: 15000,
     chart: 20000,
     analytics: 20000,
     news: 120000
@@ -76,8 +75,6 @@
     selection: null,
     radar: [],            // orchestrator's ranked candidates (telemetry)
     radarFilter: 'ALL',   // style filter for the scanner radar
-    pending: [],          // working orders from /api/pending_orders
-    editingTicket: null,  // ticket of the pending order loaded into the ticket
     chart: null,          // {host, chart, candles, volume, lines, tradeLines}
     chartCandles: [],     // bars currently drawn — source for level maths
     chartLevels: null,    // {r1,r2,s1,s2}; null when no swing pivot exists
@@ -788,117 +785,7 @@
     host.appendChild(frag);
   }
 
-  /* ── Pending orders ───────────────────────────────────────────────────── */
-  /* MT5 reports the order type as a numeric enum; rendering "2" in a column
-     headed Type tells the user nothing.
-
-     These are MT5's ORDER_TYPE_* codes and they start at BUY=0 / SELL=1, so
-     the pending types begin at 2. An earlier mapping here started the pending
-     types at 0, which labelled every live LIMIT as a STOP and vice versa. */
-  var PENDING_TYPES = {
-    0: 'BUY', 1: 'SELL',
-    2: 'BUY LIMIT', 3: 'SELL LIMIT',
-    4: 'BUY STOP', 5: 'SELL STOP',
-    6: 'BUY STOP LIMIT', 7: 'SELL STOP LIMIT'
-  };
-
-  /* Inverse of PENDING_TYPES, for turning a broker enum back into the value the
-     placement endpoint expects. Numeric 0/1 are market fills, not pendings. */
-  var PENDING_TO_NAME = {
-    2: 'BUY_LIMIT', 3: 'SELL_LIMIT', 4: 'BUY_STOP', 5: 'SELL_STOP'
-  };
-  var NAME_TO_PENDING = {
-    BUY_LIMIT: 2, SELL_LIMIT: 3, BUY_STOP: 4, SELL_STOP: 5
-  };
-
-  function pendingTypeName(t) {
-    var s = String(t === null || t === undefined ? '' : t);
-    if (/^\d+$/.test(s) && PENDING_TYPES[Number(s)]) return PENDING_TYPES[Number(s)];
-    return s || '—';
-  }
-
-  function loadPendingOrders() {
-    var body = $('pending-body');
-    apiGet('/api/pending_orders', TIMEOUT.normal).then(function (res) {
-      if (!res.ok) {
-        setText($('pending-count'), '0');
-        setState(body, 'stale', 'Pending orders unavailable',
-          String(res.error || ('HTTP ' + res.status)).slice(0, 120));
-        return;
-      }
-      // The route returns a bare array; tolerate a wrapped one as well.
-      var list = Array.isArray(res.data) ? res.data : ((res.data && res.data.orders) || []);
-      state.pending = list;
-      renderPendingOrders();
-    });
-  }
-
-  /* The stored type is a numeric MT5 enum on a live terminal and a plain string
-     in paper mode. Normalising here keeps the Edit button from offering to
-     modify an order the placement endpoint would reject. */
-  function pendingOrderName(o) {
-    var raw = o && o.type;
-    if (raw === null || raw === undefined || raw === '') return null;
-    var s = String(raw);
-    if (/^\d+$/.test(s)) {
-      var n = Number(s);
-      return PENDING_TO_NAME[n] || PENDING_TYPES[n] || null;
-    }
-    var upper = s.toUpperCase();
-    return NAME_TO_PENDING[upper] ? upper : null;
-  }
-
-  function renderPendingOrders() {
-    var body = $('pending-body');
-    var list = state.pending || [];
-    setText($('pending-count'), String(list.length));
-
-    if (!list.length) {
-      setState(body, 'empty', 'No working orders', null);
-      return;
-    }
-
-    body.removeAttribute('data-state');
-    body.innerHTML = list.map(function (o) {
-      var sym = o.symbol || '';
-      var ticket = o.ticket;
-      var editable = pendingOrderName(o);
-      return '<tr data-pending="' + esc(String(ticket)) + '">' +
-        '<td><span class="tt-symbol">' + esc(sym) + '</span></td>' +
-        '<td class="tt-muted">' + esc(pendingTypeName(o.type)) + '</td>' +
-        '<td class="tt-num">' + num(o.volume, 2) + '</td>' +
-        '<td class="tt-num">' + formatPrice(o.price, sym) + '</td>' +
-        '<td class="tt-num">' + (Number(o.sl) > 0 ? formatPrice(o.sl, sym) : '—') + '</td>' +
-        '<td class="tt-num">' + (Number(o.tp) > 0 ? formatPrice(o.tp, sym) : '—') + '</td>' +
-        '<td class="tt-row" style="gap:var(--hm-space-2)">' +
-          (editable
-            ? '<button class="tt-btn tt-btn--sm" data-pending-edit="' + esc(String(ticket)) + '">Edit</button>'
-            : '<span class="tt-muted">—</span>') +
-          '<button class="tt-btn tt-btn--sm" data-pending-cancel="' + esc(String(ticket)) + '">Cancel</button>' +
-        '</td>' +
-        '</tr>';
-    }).join('');
-
-    Array.prototype.forEach.call(body.querySelectorAll('[data-pending-edit]'), function (btn) {
-      btn.addEventListener('click', function () {
-        editPendingOrder(Number(btn.getAttribute('data-pending-edit')));
-      });
-    });
-    Array.prototype.forEach.call(body.querySelectorAll('[data-pending-cancel]'), function (btn) {
-      btn.addEventListener('click', function () {
-        cancelPendingOrder(Number(btn.getAttribute('data-pending-cancel')));
-      });
-    });
-  }
-
-  function findPending(ticket) {
-    var list = state.pending || [];
-    for (var i = 0; i < list.length; i++) {
-      if (Number(list[i].ticket) === Number(ticket)) return list[i];
-    }
-    return null;
-  }
-
+  
   /* Mirror the ticket's controls onto the selected order type. Market keeps the
      BUY/SELL pair; a pending type carries its own direction, so it gets one
      button, and the price field becomes required rather than optional. */
@@ -927,35 +814,7 @@
     }
 
     var place = $('ticket-place');
-    if (place) place.textContent = state.editingTicket ? 'Update order' : 'Place order';
-    var editCancel = $('ticket-edit-cancel');
-    if (editCancel) editCancel.hidden = !state.editingTicket;
-  }
-
-  function editPendingOrder(ticket) {
-    var order = findPending(ticket);
-    if (!order) { toast('That order is no longer open', 'warn'); return; }
-    var name = pendingOrderName(order);
-    if (!name) { toast('Only limit and stop orders can be modified here', 'warn'); return; }
-
-    state.editingTicket = Number(ticket);
-    if ($('ticket-symbol')) $('ticket-symbol').value = order.symbol || '';
-    if ($('ticket-type')) $('ticket-type').value = name;
-    if ($('ticket-volume')) $('ticket-volume').value = order.volume !== undefined ? order.volume : '';
-    if ($('ticket-price')) $('ticket-price').value = order.price || '';
-    if ($('ticket-sl')) $('ticket-sl').value = Number(order.sl) > 0 ? order.sl : '';
-    if ($('ticket-tp')) $('ticket-tp').value = Number(order.tp) > 0 ? order.tp : '';
-    syncTicketMode();
-    toast('Editing #' + ticket + ' — change any field, then Update order');
-  }
-
-  function exitPendingEdit() {
-    state.editingTicket = null;
-    if ($('ticket-type')) $('ticket-type').value = 'MARKET';
-    if ($('ticket-price')) $('ticket-price').value = '';
-    if ($('ticket-sl')) $('ticket-sl').value = '';
-    if ($('ticket-tp')) $('ticket-tp').value = '';
-    syncTicketMode();
+    if (place) place.textContent = 'Place order';
   }
 
   function submitPendingOrder() {
@@ -971,51 +830,16 @@
     var body = { symbol: sym, order_type: type, price: price, volume: vol };
     var slEl = $('ticket-sl');
     var tpEl = $('ticket-tp');
-    // Empty means "leave as it is" on an update and "none" on a new order, so
-    // only send a level that was actually typed.
+    // Empty means "none" on a new order, so only send a level that was actually typed.
     if (slEl && slEl.value !== '') body.sl = Number(slEl.value);
     if (tpEl && tpEl.value !== '') body.tp = Number(tpEl.value);
-
-    var editing = state.editingTicket;
-    if (editing) {
-      body.ticket = editing;
-      delete body.symbol;
-      delete body.order_type;
-      delete body.volume;
-      apiPost('/api/action/modify_pending_order', body, TIMEOUT.normal).then(function (res) {
-        if (res.ok && !actionRefused(res.data)) {
-          toast('Order #' + editing + ' updated');
-          exitPendingEdit();
-          loadPendingOrders();
-        } else {
-          toast(actionFailureMessage('Update failed: ', res), 'error');
-        }
-      });
-      return;
-    }
 
     apiPost('/api/action/place_pending_order', body, TIMEOUT.normal).then(function (res) {
       var data = res.data || {};
       if (res.ok && !actionRefused(data)) {
         toast(type.replace('_', ' ').toLowerCase() + ' ' + vol + ' ' + sym + ' @ ' + price + ' placed');
-        loadPendingOrders();
       } else {
         toast(actionFailureMessage('Order rejected: ', res), 'error');
-      }
-    });
-  }
-
-  function cancelPendingOrder(ticket) {
-    if (!ticket) return;
-    if (!window.confirm('Cancel working order #' + ticket + '?')) return;
-    apiPost('/api/action/cancel_pending_order', { ticket: ticket }, TIMEOUT.normal).then(function (res) {
-      var data = res.data || {};
-      if (res.ok && !actionRefused(data)) {
-        toast('Order #' + ticket + ' cancelled');
-        if (state.editingTicket === Number(ticket)) exitPendingEdit();
-        loadPendingOrders();
-      } else {
-        toast(actionFailureMessage('Cancel failed: ', res), 'error');
       }
     });
   }
@@ -1046,24 +870,56 @@
       var tr = document.createElement('tr');
       var side = String(p.type || p.side || '').toUpperCase();
       var dirCls = /BUY|LONG/.test(side) ? 'tt-dir--buy' : 'tt-dir--sell';
+      var ticket = p.ticket;
+      var sl = Number(p.sl);
+      var tp = Number(p.tp);
       tr.innerHTML =
         '<td><span class="tt-symbol">' + esc(p.symbol) + '</span></td>' +
         '<td><span class="tt-dir ' + dirCls + '">' + esc(side || '—') + '</span></td>' +
         '<td class="tt-num">' + num(p.volume, 2) + '</td>' +
         '<td class="tt-num">' + formatPrice(p.open_price, p.symbol) + '</td>' +
         '<td class="tt-num">' + formatPrice(p.current_price, p.symbol) + '</td>' +
-        '<td class="tt-num ' + signClass(profit) + '">' + (profit > 0 ? '+' : '') + num(profit, 2) + '</td>';
+        '<td class="tt-num">' + (isFinite(sl) && sl > 0 ? formatPrice(sl, p.symbol) : '<span class="tt-muted">—</span>') + '</td>' +
+        '<td class="tt-num">' + (isFinite(tp) && tp > 0 ? formatPrice(tp, p.symbol) : '<span class="tt-muted">—</span>') + '</td>' +
+        '<td class="tt-num tt-pos-pnl ' + signClass(profit) + '">' + (profit > 0 ? '+' : '') + num(profit, 2) + '</td>' +
+        '<td class="tt-pos-actions">' +
+          (ticket !== undefined && ticket !== null
+            ? '<button class="tt-btn tt-btn--sm tt-btn--pos-close" data-pos-close="' + esc(String(ticket)) + '" type="button">Close</button>'
+            : '<span class="tt-muted">—</span>') +
+        '</td>';
       frag.appendChild(tr);
     });
 
     body.appendChild(frag);
+    Array.prototype.forEach.call(body.querySelectorAll('[data-pos-close]'), function (btn) {
+      btn.addEventListener('click', function () {
+        closePosition(Number(btn.getAttribute('data-pos-close')));
+      });
+    });
     var tot = $('pos-total');
     setText(tot, (total > 0 ? '+' : '') + num(total, 2));
-    if (tot) tot.className = 'tt-num ' + signClass(total);
+    if (tot) tot.className = 'tt-num tt-pos-pnl ' + signClass(total);
 
     // Overlays follow the position list, not only the candle poll, so a fill or
     // a close redraws immediately instead of at the next chart refresh.
     refreshChartDecorations();
+  }
+
+  /* Close one open position by ticket. The server answers HTTP 200 with
+     `status` set for a broker refusal, so the HTTP code alone cannot decide the
+     outcome. The action endpoint and confirm-then-toast pattern are shared
+     with the classic terminal (terminal.js: closePosition). */
+  function closePosition(ticket) {
+    if (!ticket) return;
+    if (!window.confirm('Close position #' + ticket + '?')) return;
+    apiPost('/api/action/close_position', { ticket: ticket }, TIMEOUT.normal).then(function (res) {
+      var data = res.data || {};
+      if (res.ok && !actionRefused(data)) {
+        toast('Position #' + ticket + ' closed');
+      } else {
+        toast(actionFailureMessage('Close failed: ', res), 'error');
+      }
+    });
   }
 
   /* ── Reasoning ("why this trade") ─────────────────────────────────────── */
@@ -4411,7 +4267,6 @@
     tick(loadTelemetry, POLL.telemetry)();
     tick(function () { if (state.view === 'trade') loadChart(); }, POLL.chart)();
     tick(function () { if (state.view === 'analytics') loadReliability(); }, POLL.analytics)();
-    tick(loadPendingOrders, POLL.pending)();
     // The calendar is slow-moving; it only needs refetching every couple of
     // minutes, and the context strip re-renders from whatever is cached.
     tick(function () { loadNews(); }, POLL.news)();
@@ -4464,9 +4319,6 @@
         renderRadar();
       });
     }
-
-    var pendingRefresh = $('pending-refresh');
-    if (pendingRefresh) pendingRefresh.addEventListener('click', loadPendingOrders);
 
     // ── Chart source ──────────────────────────────────────────────────────
     var srcNative = $('chart-src-native');
@@ -4549,17 +4401,10 @@
 
     var orderType = $('ticket-type');
     if (orderType) {
-      orderType.addEventListener('change', function () {
-        // Switching away from the type being edited would silently post an
-        // update against the wrong order definition.
-        if (state.editingTicket) exitPendingEdit();
-        syncTicketMode();
-      });
+      orderType.addEventListener('change', syncTicketMode);
     }
     var place = $('ticket-place');
     if (place) place.addEventListener('click', submitPendingOrder);
-    var editCancel = $('ticket-edit-cancel');
-    if (editCancel) editCancel.addEventListener('click', exitPendingEdit);
     syncTicketMode();
 
     // History filters re-render locally; only a window change refetches.
@@ -4645,7 +4490,6 @@
       loadSelection();
       loadChart();
     });
-    loadPendingOrders();
     // Closed-trade history feeds the chart's exit markers, so it is loaded for
     // the trade view too, not only when the analytics tab is opened.
     loadHistory();

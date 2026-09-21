@@ -122,8 +122,7 @@ class TestDashboardElementIds(unittest.TestCase):
 
     def test_restored_panels_are_present(self):
         html = _read(os.path.join(TEMPLATE_DIR, "dashboard.html"))
-        for element_id in ("radar-body", "radar-count", "radar-filter",
-                           "pending-body", "pending-count"):
+        for element_id in ("radar-body", "radar-count", "radar-filter"):
             self.assertIn(f'id="{element_id}"', html, f"missing restored panel: {element_id}")
 
 

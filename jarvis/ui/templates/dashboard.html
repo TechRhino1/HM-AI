@@ -263,14 +263,14 @@
         </div>
       </div>
 
-      <div class="tt-panel__head">
+      <div class="tt-panel__head tt-panel__head--pos">
         <h2 class="tt-panel__title">Open positions</h2>
         <span class="tt-panel__count" id="pos-count">0</span>
         <span class="tt-panel__spacer"></span>
-        <span class="tt-num tt-muted" id="pos-total">—</span>
+        <span class="tt-pos-total"><span class="tt-num tt-muted" id="pos-total">—</span></span>
       </div>
       <div class="tt-panel__body tt-panel__body--flush">
-        <table class="tt-table">
+        <table class="tt-table tt-table--positions">
           <thead>
             <tr>
               <th scope="col">Symbol</th>
@@ -278,7 +278,10 @@
               <th scope="col" class="tt-num">Vol</th>
               <th scope="col" class="tt-num">Entry</th>
               <th scope="col" class="tt-num">Now</th>
+              <th scope="col" class="tt-num">SL</th>
+              <th scope="col" class="tt-num">TP</th>
               <th scope="col" class="tt-num">P&amp;L</th>
+              <th scope="col" class="tt-pos-actions-col">Actions</th>
             </tr>
           </thead>
           <tbody id="pos-body" data-state="loading"></tbody>
@@ -323,7 +326,6 @@
             </div>
             <div class="tt-row" id="ticket-pending-row" hidden>
               <button class="tt-btn tt-btn--primary tt-grow" id="ticket-place">Place order</button>
-              <button class="tt-btn tt-btn--sm" id="ticket-edit-cancel" hidden>Cancel edit</button>
             </div>
           </div>
 
@@ -357,31 +359,6 @@
             Sizing, stops and targets are prefilled from the selected setup when one exists.
           </p>
         </div>
-      </div>
-
-      <!-- Pending orders. Sourced from /api/pending_orders, which returns the
-           broker's own working orders rather than anything the UI infers. -->
-      <div class="tt-panel__head">
-        <h2 class="tt-panel__title">Pending orders</h2>
-        <span class="tt-panel__count" id="pending-count">0</span>
-        <span class="tt-panel__spacer"></span>
-        <button class="tt-btn tt-btn--sm" id="pending-refresh" title="Refresh pending orders">Refresh</button>
-      </div>
-      <div class="tt-panel__body tt-panel__body--flush">
-        <table class="tt-table">
-          <thead>
-            <tr>
-              <th scope="col">Symbol</th>
-              <th scope="col">Type</th>
-              <th scope="col" class="tt-num">Vol</th>
-              <th scope="col" class="tt-num">Price</th>
-              <th scope="col" class="tt-num">SL</th>
-              <th scope="col" class="tt-num">TP</th>
-              <th scope="col">Actions</th>
-            </tr>
-          </thead>
-          <tbody id="pending-body" data-state="loading"></tbody>
-        </table>
       </div>
 
       <!-- Context column. The analyst and news views stay available as their
