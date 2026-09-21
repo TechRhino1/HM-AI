@@ -1,0 +1,242 @@
+/* ============================================================================
+   Positions page — iOS-style design language
+   ----------------------------------------------------------------------------
+   Applies to /positions. System-like typography, rounded cards, native-feeling
+   controls, and safe-area handling for notched devices. The desktop layout
+   stays visually consistent with the mobile redesign: the same tokens, the
+   same radii, the same type ramp.
+   ========================================================================== */
+
+:root {
+  /* iOS system colours */
+  --ios-bg: #000000;
+  --ios-bg-grouped: #1c1c1e;
+  --ios-surface: #1c1c1e;
+  --ios-surface-2: #2c2c2e;
+  --ios-surface-3: #3a3a3c;
+  --ios-label: #ffffff;
+  --ios-label-2: #ebebf5;
+  --ios-label-3: rgba(235, 235, 245, 0.6);
+  --ios-label-4: rgba(235, 235, 245, 0.3);
+  --ios-separator: rgba(84, 84, 88, 0.65);
+  --ios-separator-thin: rgba(84, 84, 88, 0.35);
+  --ios-accent: #0a84ff;
+  --ios-accent-soft: rgba(10, 132, 255, 0.15);
+  --ios-bull: #30d158;
+  --ios-bear: #ff453a;
+  --ios-flat: #8e8e93;
+  --ios-warn: #ff9f0a;
+  --ios-overlay: rgba(0, 0, 0, 0.4);
+
+  /* iOS metrics */
+  --ios-radius-card: 14px;
+  --ios-radius-control: 10px;
+  --ios-radius-pill: 999px;
+  --ios-row-h: 44px;
+  --ios-touch: 44px;
+  --ios-nav-h: 44px;
+  --ios-tab-h: 49px;
+  --ios-title-h: 96px;
+
+  /* Safe areas (notch / home indicator) */
+  --ios-safe-top: env(safe-area-inset-top, 0px);
+  --ios-safe-bottom: env(safe-area-inset-bottom, 0px);
+  --ios-safe-left: env(safe-area-inset-left, 0px);
+  --ios-safe-right: env(safe-area-inset-right, 0px);
+}
+
+/* Light mode overrides (system appearance) */
+@media (prefers-color-scheme: light) {
+  :root {
+    --ios-bg: #f2f2f7;
+    --ios-bg-grouped: #ffffff;
+    --ios-surface: #ffffff;
+    --ios-surface-2: #f2f2f7;
+    --ios-surface-3: #e5e5ea;
+    --ios-label: #000000;
+    --ios-label-2: #1c1c1e;
+    --ios-label-3: rgba(60, 60, 67, 0.6);
+    --ios-label-4: rgba(60, 60, 67, 0.3);
+    --ios-separator: rgba(60, 60, 67, 0.29);
+    --ios-separator-thin: rgba(60, 60, 67, 0.18);
+    --ios-overlay: rgba(0, 0, 0, 0.15);
+  }
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--ios-bg);
+  color: var(--ios-label);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display",
+    "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-size: 17px;
+  line-height: 1.3;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  -webkit-text-size-adjust: 100%;
+  overflow-x: hidden;
+}
+
+body {
+  min-height: 100vh;
+  min-height: 100dvh;
+  padding-top: var(--ios-safe-top);
+  padding-bottom: calc(var(--ios-tab-h) + var(--ios-safe-bottom));
+}
+
+@media (min-width: 768px) {
+  body { padding-bottom: 0; }
+}
+
+/* Shell */
+.ios-shell { max-width: 1024px; margin: 0 auto; padding: 0 var(--ios-safe-left) 0 var(--ios-safe-right); }
+
+/* Nav bar (sticky, iOS-style) */
+.ios-nav {
+  position: sticky; top: 0; z-index: 100;
+  background: color-mix(in srgb, var(--ios-bg) 88%, transparent);
+  backdrop-filter: saturate(180%) blur(20px);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  border-bottom: 0.5px solid var(--ios-separator-thin);
+}
+.ios-nav__inner { display: flex; align-items: center; gap: 12px; height: var(--ios-nav-h); padding: 0 16px; }
+.ios-nav__title { font-size: 17px; font-weight: 600; letter-spacing: -0.01em; margin: 0; flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ios-nav__action { appearance: none; background: transparent; border: 0; color: var(--ios-accent); font: inherit; font-size: 17px; padding: 0; cursor: pointer; min-height: var(--ios-touch); display: inline-flex; align-items: center; }
+.ios-nav__action:hover { opacity: 0.7; }
+
+.ios-large-title { padding: 8px 16px 12px; }
+.ios-large-title h1 { font-size: 34px; font-weight: 700; letter-spacing: 0.004em; margin: 0; line-height: 1.1; }
+.ios-large-title__sub { margin-top: 2px; font-size: 13px; font-weight: 400; color: var(--ios-label-3); letter-spacing: 0.06em; text-transform: uppercase; }
+
+/* Segmented control */
+.ios-segmented { display: flex; background: var(--ios-surface-2); border-radius: var(--ios-radius-control); padding: 2px; margin: 12px 16px; }
+.ios-segmented__btn { flex: 1 1 0; appearance: none; background: transparent; border: 0; color: var(--ios-label); font: inherit; font-size: 13px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; padding: 6px 10px; border-radius: 8px; cursor: pointer; min-height: 32px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; white-space: nowrap; transition: background 160ms ease, color 160ms ease; }
+.ios-segmented__btn[aria-selected="true"] { background: var(--ios-surface); box-shadow: 0 1px 2px rgba(0,0,0,0.2); }
+.ios-segmented__count { font-size: 12px; font-weight: 600; background: var(--ios-surface-3); padding: 1px 7px; border-radius: var(--ios-radius-pill); min-width: 22px; text-align: center; }
+.ios-segmented__btn[aria-selected="true"] .ios-segmented__count { background: var(--ios-accent); color: #fff; }
+
+/* Action bar */
+.ios-action-bar { display: flex; align-items: center; gap: 12px; padding: 8px 16px 12px; flex-wrap: wrap; }
+.ios-action-bar__label { font-size: 13px; color: var(--ios-label-3); letter-spacing: 0.06em; text-transform: uppercase; margin-right: auto; }
+.ios-action-bar__total { font-variant-numeric: tabular-nums; font-size: 17px; font-weight: 600; }
+.is-up { color: var(--ios-bull); } .is-down { color: var(--ios-bear); } .is-flat { color: var(--ios-label); }
+.is-muted { color: var(--ios-label-3); }
+
+/* Buttons */
+.ios-btn { appearance: none; border: 0; font: inherit; font-size: 15px; font-weight: 600; letter-spacing: -0.01em; padding: 10px 16px; border-radius: var(--ios-radius-control); cursor: pointer; min-height: var(--ios-touch); display: inline-flex; align-items: center; justify-content: center; gap: 6px; transition: opacity 120ms ease, transform 80ms ease; white-space: nowrap; }
+.ios-btn:active { transform: scale(0.97); }
+.ios-btn:hover { opacity: 0.85; }
+.ios-btn--filled { background: var(--ios-accent); color: #fff; }
+.ios-btn--destructive { background: var(--ios-bear); color: #fff; }
+.ios-btn--plain { background: var(--ios-surface-2); color: var(--ios-accent); }
+.ios-btn--ghost { background: transparent; color: var(--ios-accent); padding: 8px 12px; min-height: 36px; }
+.ios-btn--small { font-size: 13px; padding: 6px 12px; min-height: 32px; border-radius: 8px; }
+
+/* Card / list */
+.ios-card { background: var(--ios-surface); border-radius: var(--ios-radius-card); margin: 0 16px 16px; overflow: hidden; }
+
+.ios-list-header { display: grid; grid-template-columns: 1.4fr 0.8fr 0.7fr 0.9fr 0.9fr 0.9fr 0.9fr 1fr 1.7fr; gap: 8px; padding: 10px 14px; font-size: 11px; font-weight: 600; color: var(--ios-label-3); letter-spacing: 0.06em; text-transform: uppercase; border-bottom: 0.5px solid var(--ios-separator-thin); }
+.ios-list-header > .num { text-align: right; }
+.ios-list-header > .actions { text-align: right; }
+
+.ios-row { display: grid; grid-template-columns: 1.4fr 0.8fr 0.7fr 0.9fr 0.9fr 0.9fr 0.9fr 1fr 1.7fr; gap: 8px; align-items: center; padding: 12px 14px; border-bottom: 0.5px solid var(--ios-separator-thin); font-size: 14px; }
+.ios-row:last-child { border-bottom: 0; }
+.ios-row .num { text-align: right; font-variant-numeric: tabular-nums; }
+.ios-row .actions { display: flex; gap: 6px; justify-content: flex-end; flex-wrap: wrap; }
+.ios-symbol { font-weight: 600; letter-spacing: -0.005em; }
+
+.ios-side { display: inline-flex; align-items: center; gap: 4px; font-weight: 600; font-size: 12px; letter-spacing: 0.04em; text-transform: uppercase; }
+.ios-side::before { content: ""; width: 0; height: 0; border-left: 4px solid transparent; border-right: 4px solid transparent; }
+.ios-side--buy { color: var(--ios-bull); }
+.ios-side--buy::before { border-bottom: 6px solid var(--ios-bull); }
+.ios-side--sell { color: var(--ios-bear); }
+.ios-side--sell::before { border-top: 6px solid var(--ios-bear); }
+
+/* Position card (mobile: each row is a stacked card) */
+.ios-pos-card { background: var(--ios-surface); border-radius: var(--ios-radius-card); margin: 0 16px 12px; padding: 14px 16px; border: 0.5px solid var(--ios-separator-thin); }
+.ios-pos-card__head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+.ios-pos-card__symbol { font-size: 17px; font-weight: 600; margin: 0; flex: 1 1 auto; }
+.ios-pos-card__pnl { font-size: 17px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.ios-pos-card__grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 16px; margin-bottom: 12px; }
+.ios-pos-card__cell { display: flex; flex-direction: column; gap: 2px; }
+.ios-pos-card__label { font-size: 11px; color: var(--ios-label-3); letter-spacing: 0.06em; text-transform: uppercase; }
+.ios-pos-card__value { font-size: 15px; font-variant-numeric: tabular-nums; }
+.ios-pos-card__actions { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+.ios-pos-card__actions .ios-btn { width: 100%; padding: 10px 6px; }
+
+/* Tab bar (phone only) */
+.ios-tabbar { position: fixed; left: 0; right: 0; bottom: 0; height: calc(var(--ios-tab-h) + var(--ios-safe-bottom)); padding-bottom: var(--ios-safe-bottom); background: color-mix(in srgb, var(--ios-bg-grouped) 88%, transparent); backdrop-filter: saturate(180%) blur(20px); -webkit-backdrop-filter: saturate(180%) blur(20px); border-top: 0.5px solid var(--ios-separator-thin); display: flex; z-index: 100; }
+.ios-tabbar__btn { flex: 1 1 0; appearance: none; background: transparent; border: 0; color: var(--ios-label-3); font: inherit; font-size: 10px; font-weight: 500; padding: 6px 4px 4px; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 2px; min-height: var(--ios-tab-h); justify-content: center; }
+.ios-tabbar__btn[aria-selected="true"] { color: var(--ios-accent); }
+.ios-tabbar__icon { width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; }
+.ios-tabbar__icon svg { width: 100%; height: 100%; fill: currentColor; }
+@media (min-width: 768px) { .ios-tabbar { display: none; } body { padding-bottom: 0; } }
+
+/* Modal sheet */
+.ios-modal { position: fixed; inset: 0; background: var(--ios-overlay); z-index: 200; display: none; align-items: flex-end; justify-content: center; }
+.ios-modal[data-open="true"] { display: flex; }
+.ios-modal__sheet { background: var(--ios-surface-2); width: 100%; max-width: 540px; border-radius: 14px 14px 0 0; padding: 16px; padding-bottom: calc(16px + var(--ios-safe-bottom)); animation: ios-sheet-up 220ms ease-out; }
+@media (min-width: 768px) {
+  .ios-modal { align-items: center; }
+  .ios-modal__sheet { border-radius: 14px; max-width: 480px; animation: ios-fade-in 180ms ease-out; }
+}
+@keyframes ios-sheet-up { from { transform: translateY(100%); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+@keyframes ios-fade-in { from { opacity: 0; transform: scale(0.96); } to { opacity: 1; transform: scale(1); } }
+.ios-modal__grabber { width: 36px; height: 5px; background: var(--ios-surface-3); border-radius: 3px; margin: 0 auto 12px; }
+.ios-modal__title { font-size: 17px; font-weight: 600; text-align: center; margin: 0 0 16px; }
+.ios-form-group { margin-bottom: 16px; }
+.ios-form-row { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px; background: var(--ios-surface); border-radius: var(--ios-radius-control); margin-bottom: 8px; gap: 12px; }
+.ios-form-row__label { font-size: 15px; color: var(--ios-label); flex: 0 0 auto; }
+.ios-input { appearance: none; background: var(--ios-surface-3); color: var(--ios-label); border: 0; font: inherit; font-size: 17px; padding: 10px 14px; border-radius: var(--ios-radius-control); width: 100%; text-align: right; min-height: 44px; font-variant-numeric: tabular-nums; }
+.ios-input:focus { outline: 2px solid var(--ios-accent); outline-offset: 1px; }
+.ios-input::placeholder { color: var(--ios-label-3); }
+.ios-switch { position: relative; width: 51px; height: 31px; appearance: none; background: var(--ios-surface-3); border-radius: var(--ios-radius-pill); cursor: pointer; flex: 0 0 auto; transition: background 160ms ease; }
+.ios-switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 27px; height: 27px; background: #fff; border-radius: 50%; transition: transform 160ms ease; box-shadow: 0 1px 2px rgba(0,0,0,0.3); }
+.ios-switch:checked { background: var(--ios-bull); }
+.ios-switch:checked::after { transform: translateX(20px); }
+.ios-modal__actions { display: grid; gap: 8px; margin-top: 8px; }
+.ios-modal__actions .ios-btn { width: 100%; }
+
+/* Toast */
+.ios-toast-host { position: fixed; left: 50%; bottom: calc(var(--ios-tab-h) + var(--ios-safe-bottom) + 16px); transform: translateX(-50%); z-index: 300; display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
+@media (min-width: 768px) { .ios-toast-host { bottom: 16px; } }
+.ios-toast { background: color-mix(in srgb, var(--ios-label-2) 92%, transparent); color: var(--ios-bg-grouped); padding: 10px 16px; border-radius: var(--ios-radius-control); font-size: 14px; font-weight: 500; box-shadow: 0 4px 16px rgba(0,0,0,0.25); animation: ios-toast-in 200ms ease-out; max-width: 320px; }
+.ios-toast--success { background: var(--ios-bull); color: #fff; }
+.ios-toast--error { background: var(--ios-bear); color: #fff; }
+.ios-toast--warn { background: var(--ios-warn); color: #1c1c1e; }
+@keyframes ios-toast-in { from { transform: translateY(8px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
+/* Responsive: phone shows stacked cards, tablet+ shows the row table */
+@media (max-width: 767.98px) {
+  .ios-list-header { display: none; }
+  .ios-row { display: none; }
+}
+@media (min-width: 768px) {
+  .ios-pos-card { display: none; }
+}
+
+@media (min-width: 1024px) {
+  .ios-shell { max-width: 1200px; }
+  .ios-list-header, .ios-row { grid-template-columns: 1.4fr 0.8fr 0.7fr 1fr 1fr 1fr 1fr 1.1fr 1.8fr; padding-left: 18px; padding-right: 18px; }
+  .ios-large-title h1 { font-size: 40px; }
+}
+
+/* Search field */
+.ios-search { appearance: none; background: var(--ios-surface-2); color: var(--ios-label); border: 0; font: inherit; font-size: 15px; padding: 8px 14px 8px 36px; border-radius: var(--ios-radius-control); width: 100%; min-height: 36px; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M11 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0zm-.5 4.7l3 3' fill='none' stroke='%238e8e93' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: 12px center; background-size: 16px 16px; }
+.ios-search::placeholder { color: var(--ios-label-3); }
+.ios-search:focus { outline: 2px solid var(--ios-accent); outline-offset: 1px; }
+
+/* Empty state */
+.ios-empty { text-align: center; padding: 60px 24px; color: var(--ios-label-3); font-size: 15px; }
+.ios-empty__title { font-size: 20px; font-weight: 600; color: var(--ios-label); margin: 0 0 6px; }
+
+/* Loading skeleton */
+.ios-skeleton { background: linear-gradient(90deg, var(--ios-surface-2) 0%, var(--ios-surface-3) 50%, var(--ios-surface-2) 100%); background-size: 200% 100%; animation: ios-skel 1.4s ease-in-out infinite; border-radius: 8px; height: 16px; }
+@keyframes ios-skel { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}

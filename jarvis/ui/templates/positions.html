@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark light">
+<title>Open Positions — HM Algo 2.0</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230a84ff'/%3E%3C/svg%3E">
+
+<!-- Bootstrap 5: responsive grid + breakpoints. The iOS design language lives in
+     positions.css; Bootstrap only carries the responsive scaffolding. -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
+
+<!-- Shared iOS-style design tokens + components. -->
+<link rel="stylesheet" href="/static/css/positions.css">
+</head>
+<body class="ios-app">
+
+<!-- ═══ Nav bar (sticky, iOS-style) ═══════════════════════════════════ -->
+<header class="ios-nav">
+  <div class="ios-nav__inner">
+    <span class="ios-nav__title" id="nav-title">OPEN POSITIONS</span>
+    <button class="ios-nav__action" id="search-toggle" aria-label="Search">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+    </button>
+  </div>
+</header>
+
+<main class="ios-shell">
+
+  <!-- ═══ Large title (iOS-style) ═════════════════════════════════════ -->
+  <div class="ios-large-title">
+    <h1>Positions</h1>
+    <div class="ios-large-title__sub">HM Algo 2.0 · Live Book</div>
+  </div>
+
+  <!-- ═══ Search (collapsed by default; toggled by the nav icon) ═══════ -->
+  <div class="container-fluid px-0" id="search-row" hidden>
+    <div class="px-3 pb-2">
+      <input type="search" class="ios-search" id="symbol-search" placeholder="Filter by symbol" aria-label="Filter positions by symbol">
+    </div>
+  </div>
+
+  <!-- ═══ Segmented control: OPEN / HISTORY / PENDING ═════════════════ -->
+  <div class="ios-segmented" role="tablist" aria-label="Position view">
+    <button class="ios-segmented__btn" role="tab" data-tab="open" aria-selected="true" aria-controls="positions-view">
+      Open
+      <span class="ios-segmented__count" id="count-open">3</span>
+    </button>
+    <button class="ios-segmented__btn" role="tab" data-tab="history" aria-selected="false" aria-controls="positions-view">
+      History
+      <span class="ios-segmented__count" id="count-history">474</span>
+    </button>
+    <button class="ios-segmented__btn" role="tab" data-tab="pending" aria-selected="false" aria-controls="positions-view">
+      Pending
+      <span class="ios-segmented__count" id="count-pending">0</span>
+    </button>
+  </div>
+
+  <!-- ═══ Action bar: FLATTEN ALL + total P&L ═════════════════════════ -->
+  <div class="ios-action-bar">
+    <span class="ios-action-bar__label" id="action-label">Open P&amp;L</span>
+    <span class="ios-action-bar__total is-down" id="total-pnl">-1.16</span>
+    <button class="ios-btn ios-btn--destructive ios-btn--small" id="flatten-all" type="button">
+      Flatten All
+    </button>
+  </div>
+
+  <!-- ═══ Positions view (id controls) ═══════════════════════════════ -->
+  <section id="positions-view" aria-live="polite">
+
+    <!-- Empty state -->
+    <div class="ios-empty" id="empty-state" hidden>
+      <div class="ios-empty__title">Nothing to show</div>
+      <div>No open positions yet.</div>
+    </div>
+
+    <!-- Phone: stacked position cards -->
+    <div id="position-cards" class="row g-0"></div>
+
+    <!-- Tablet / desktop: dense row table -->
+    <div class="ios-card">
+      <div class="ios-list-header" id="list-header">
+        <div>Symbol</div><div>Side</div><div class="num">Vol</div><div class="num">Entry</div>
+        <div class="num">Now</div><div class="num">SL</div><div class="num">TP</div>
+        <div class="num">P&amp;L</div><div class="actions">Actions</div>
+      </div>
+      <div id="position-rows"></div>
+    </div>
+
+  </section>
+
+</main>
+
+<!-- ═══ iOS-style tab bar (phone only) ═══════════════════════════════ -->
+<nav class="ios-tabbar" aria-label="Primary">
+  <button class="ios-tabbar__btn" data-tabbar-btn="open" aria-selected="true" type="button">
+    <span class="ios-tabbar__icon" aria-hidden="true">
+      <svg viewBox="0 0 24 24"><path d="M3 13h2v-2H3v2zm0 4h2v-2H3v2zm0-8h2V7H3v2zm4 4h14v-2H7v2zm0 4h14v-2H7v2zM7 7v2h14V7H7z"/></svg>
+    </span>
+    Open
+  </button>
+  <button class="ios-tabbar__btn" data-tabbar-btn="history" aria-selected="false" type="button">
+    <span class="ios-tabbar__icon" aria-hidden="true">
+      <svg viewBox="0 0 24 24"><path d="M13 3a9 9 0 0 0-9 9H1l3.89 3.89.07.14L9 12H6c0-3.87 3.13-7 7-7s7 3.13 7 7-3.13 7-7 7c-1.93 0-3.68-.79-4.94-2.06l-1.42 1.42A8.954 8.954 0 0 0 13 21a9 9 0 0 0 0-18zm-1 5v5l4.28 2.54.72-1.21-3.5-2.08V8H12z"/></svg>
+    </span>
+    History
+  </button>
+  <button class="ios-tabbar__btn" data-tabbar-btn="pending" aria-selected="false" type="button">
+    <span class="ios-tabbar__icon" aria-hidden="true">
+      <svg viewBox="0 0 24 24"><path d="M19 3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.11 0 2-.9 2-2V5c0-1.1-.89-2-2-2zm-9 11-4-4h2.5V7h3v3H14l-4 4z"/></svg>
+    </span>
+    Pending
+  </button>
+  <button class="ios-tabbar__btn" type="button" aria-label="Flatten">
+    <span class="ios-tabbar__icon" aria-hidden="true">
+      <svg viewBox="0 0 24 24"><path d="M3 13h2v-2H3v2zm0 4h2v-2H3v2zm0-8h2V7H3v2zm4 4h14v14H7V13zm4 4h6v-2h-6v2z"/></svg>
+    </span>
+    Flatten
+  </button>
+</nav>
+
+<!-- ═══ Modify action sheet (iOS-style) ══════════════════════════════ -->
+<div class="ios-modal" id="modify-sheet" role="dialog" aria-labelledby="modify-title" aria-modal="true">
+  <div class="ios-modal__sheet" role="document">
+    <div class="ios-modal__grabber" aria-hidden="true"></div>
+    <h2 class="ios-modal__title" id="modify-title">Modify Order</h2>
+    <p class="text-center is-muted mb-3" id="modify-symbol" style="font-size:13px;">—</p>
+
+    <div class="ios-form-group">
+      <div class="ios-form-row">
+        <label class="ios-form-row__label" for="modify-sl">Stop Loss</label>
+      </div>
+      <input class="ios-input" id="modify-sl" type="number" inputmode="decimal" step="0.00001" placeholder="0.00000">
+    </div>
+
+    <div class="ios-form-group">
+      <div class="ios-form-row">
+        <label class="ios-form-row__label" for="modify-tp">Take Profit</label>
+      </div>
+      <input class="ios-input" id="modify-tp" type="number" inputmode="decimal" step="0.00001" placeholder="0.00000">
+    </div>
+
+    <div class="ios-form-group">
+      <div class="ios-form-row">
+        <label class="ios-form-row__label" for="modify-trailing">Trailing stop</label>
+        <input type="checkbox" class="ios-switch" id="modify-trailing" aria-label="Enable trailing stop">
+      </div>
+      <div class="ios-form-row">
+        <label class="ios-form-row__label" for="modify-trail-pts">Trail (pips)</label>
+        <input class="ios-input" id="modify-trail-pts" type="number" inputmode="decimal" step="0.1" style="max-width:120px">
+      </div>
+    </div>
+
+    <div class="ios-modal__actions">
+      <button class="ios-btn ios-btn--filled" id="modify-save" type="button">Save Changes</button>
+      <button class="ios-btn ios-btn--plain" id="modify-cancel" type="button">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ Toast host ═══════════════════════════════════════════════════ -->
+<div class="ios-toast-host" id="toast-host" aria-live="polite"></div>
+
+<!-- Bootstrap JS bundle (collapse / modal utilities, if needed later) -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" defer></script>
+
+<!-- Page logic -->
+<script src="/static/js/positions.js" defer></script>
+
+<script>
+  /* Toggle the search row when the nav icon is tapped. Bootstrap's collapse
+     utility handles the show/hide animation; positions.css owns the visual. */
+  document.addEventListener('DOMContentLoaded', function () {
+    var btn = document.getElementById('search-toggle');
+    var row = document.getElementById('search-row');
+    if (!btn || !row) return;
+    btn.addEventListener('click', function () {
+      row.hidden = !row.hidden;
+      var inp = document.getElementById('symbol-search');
+      if (!row.hidden && inp) inp.focus();
+    });
+    /* Wire the Flatten tab-bar button to the same control */
+    var tabbarBtns = document.querySelectorAll('.ios-tabbar__btn');
+    Array.prototype.forEach.call(tabbarBtns, function (b, i) {
+      if (i === 3) {
+        b.addEventListener('click', function () {
+          var flatten = document.getElementById('flatten-all');
+          if (flatten) flatten.click();
+        });
+      }
+    });
+  });
+</script>
+</body>
+</html>

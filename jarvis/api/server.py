@@ -373,6 +373,7 @@ class JarvisRequestHandler(BaseHTTPRequestHandler):
                 "/stocks", "/stocks.html", "/screener",
                 "/india", "/india.html", "/india/stocks", "/nse", "/bse",
                 "/options", "/options.html", "/india/options", "/india-options", "/fno",
+                "/positions", "/positions.html",
                 "/api/telemetry_state", "/api/telemetry", "/api/candles", "/api/rates",
                 "/api/radar", "/api/market-status", "/api/news", "/api/history",
                 "/api/tunnel_info", "/api/diagnostics", "/api/pending_orders",
@@ -406,6 +407,8 @@ class JarvisRequestHandler(BaseHTTPRequestHandler):
                 self._serve_india_ui()
             elif path in ["/options", "/options.html", "/india/options", "/india-options", "/fno"]:
                 self._serve_options_ui()
+            elif path in ["/positions", "/positions.html"]:
+                self._serve_positions_ui()
             elif path.startswith("/static/"):
                 self._serve_static_file(path)
             elif path.startswith("/api/stocks/"):
@@ -1097,6 +1100,14 @@ class JarvisRequestHandler(BaseHTTPRequestHandler):
                             origin=("synthetic" if res.get("is_fallback")
                                     else ("paper" if self.mt5_client.mode == "paper"
                                           else "broker")),
+                            # D1 (completed): the mode is a separate question
+                            # from the price. A fallback price on a live client
+                            # is still a live trade.
+                            execution_mode=(
+                                str(getattr(self.mt5_client, "mode", "") or "").lower()
+                                if str(getattr(self.mt5_client, "mode", "") or "").lower()
+                                in ("live", "paper", "demo") else "unknown"
+                            ),
                         )
                     except Exception as ex:
                         logger.error(f"Error logging manual trade to DB: {ex}")
@@ -1247,6 +1258,12 @@ class JarvisRequestHandler(BaseHTTPRequestHandler):
 
     def _serve_options_ui(self):
         self._serve_template("india_options.html")
+
+    def _serve_positions_ui(self):
+        """iOS-style positions surface — Bootstrap-based responsive layout with
+        a full iOS design language for mobile and a consistent look at desktop.
+        Served at /positions for both /positions and /positions.html."""
+        self._serve_template("positions.html")
 
 class _NoReverseDNSHTTPServer(ThreadingHTTPServer):
     """`ThreadingHTTPServer` without the blocking reverse-DNS lookup on bind.
