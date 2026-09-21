@@ -366,6 +366,10 @@
       else panel.setAttribute('hidden', '');
     });
 
+    // iOS large title in the phone nav bar mirrors the active view.
+    var lt = $('ios-largetitle');
+    if (lt) lt.textContent = view.charAt(0).toUpperCase() + view.slice(1);
+
     if (view === 'analytics') { loadAnalytics(); }
     if (view === 'backtest') { loadBacktestMeta(); loadJobs(); }
     if (view === 'news') { loadNews(); }
@@ -4714,8 +4718,41 @@
     });
   }
 
+  /* The phone bottom tab bar is meant to be viewport-fixed (iOS convention),
+     but `.tt-rail` carries backdrop-filter, which makes it the containing block
+     for any position:fixed descendant. A fixed child of the rail therefore
+     resolves against the rail (top of the screen) instead of the viewport, so
+     the bar parks under the nav bar rather than at the bottom. To get a true
+     viewport-pinned bar we lift `.tt-tabs` out of the rail onto <body> on phone
+     widths (body has no containing-block-creating property), and return it to
+     the rail on desktop so the desktop layout — a tab strip inside the nav bar
+     — is never touched. */
+  function syncTabBarHost() {
+    var tabs = document.querySelector('.tt-tabs');
+    var rail = document.querySelector('.tt-rail');
+    var app = document.querySelector('.tt-app');
+    if (!tabs || !rail || !app) return;
+    var phone = window.matchMedia('(max-width: 767px)').matches;
+    if (phone) {
+      if (tabs.parentElement !== app) app.appendChild(tabs);
+    } else if (tabs.parentElement !== rail) {
+      var drop = rail.querySelector('.tt-dropdown');
+      if (drop) rail.insertBefore(tabs, drop);
+      else rail.appendChild(tabs);
+    }
+  }
+
   function boot() {
     bind();
+    // Reparent the tab bar for the current width and keep it correct across
+    // breakpoint changes (orientation flip, desktop↔phone resize).
+    syncTabBarHost();
+    if (window.matchMedia) {
+      var mq = window.matchMedia('(max-width: 767px)');
+      var onMq = function () { syncTabBarHost(); };
+      if (mq.addEventListener) mq.addEventListener('change', onMq);
+      else if (mq.addListener) mq.addListener(onMq);
+    }
     var clock = $('clock');
     var tickClock = function () {
       if (clock) clock.textContent = clockTime(new Date());

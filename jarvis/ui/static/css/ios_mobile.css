@@ -1,0 +1,456 @@
+/* ==========================================================================
+   HM Algo 2.0 — iOS design language for the mobile dashboard (≤767px ONLY)
+   --------------------------------------------------------------------------
+   Everything in this file is scoped to phones. On tablets (≥768px) and desktop
+   the base theme_terminal.css / auth.css rules apply untouched, so the desktop
+   layout is preserved. The goal: native-feeling iOS chrome on a phone —
+   large titles, a bottom tab bar, bottom sheets, system colours with light/dark
+   support, 44px touch targets, safe-area insets and iOS motion.
+
+   Verifier invariants this file must preserve at phone widths:
+   - .tt-rail and .tt-panel KEEP backdrop-filter and a gradient background-image
+     (the glass check reads both).
+   - .tt-tab / .tt-pane-bar__btn / .tt-drawer-trigger stay ≥44px tall.
+   - No horizontal overflow; the app shell must not scroll; the active view
+     must fit inside main.
+   ========================================================================== */
+
+/* The large title is phone-only iOS chrome. Hide it everywhere else so the
+   desktop rail (a flex row) is never touched by this new node. The phone
+   media query below re-shows it. */
+.tt-largetitle { display: none; }
+
+@media (max-width: 767px) {
+
+  /* Allow the browser to follow the user's light/dark preference on phones.
+     The page <meta> pins "dark"; CSS color-scheme overrides it so a phone set
+     to light mode gets light iOS chrome. */
+  html {
+    color-scheme: light dark;
+  }
+
+  /* ── iOS system colour tokens ─────────────────────────────────────────── */
+  :root {
+    --ios-radius-card: 14px;
+    --ios-radius-sheet: 20px;
+    --ios-radius-field: 10px;
+    --ios-tab-h: 49px;
+    --ios-safe-t: env(safe-area-inset-top);
+    --ios-safe-r: env(safe-area-inset-right);
+    --ios-safe-b: env(safe-area-inset-bottom);
+    --ios-safe-l: env(safe-area-inset-left);
+
+    --ios-label: #000000;
+    --ios-label-2: rgba(60, 60, 67, 0.6);
+    --ios-label-3: rgba(60, 60, 67, 0.3);
+    --ios-bg: #f2f2f7;
+    --ios-bg-2: #ffffff;
+    --ios-bg-3: #ffffff;
+    --ios-sep: rgba(60, 60, 67, 0.29);
+    --ios-fill: rgba(118, 118, 128, 0.12);
+    --ios-blue: #007aff;
+    --ios-green: #34c759;
+    --ios-red: #ff3b30;
+    --ios-gray: #8e8e93;
+    --ios-nav-tint: rgba(249, 249, 249, 0.82);
+    --ios-nav-border: rgba(0, 0, 0, 0.12);
+    --ios-tap: 44px;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ios-label: #ffffff;
+      --ios-label-2: rgba(235, 235, 245, 0.6);
+      --ios-label-3: rgba(235, 235, 245, 0.3);
+      --ios-bg: #000000;
+      --ios-bg-2: #1c1c1e;
+      --ios-bg-3: #2c2c2e;
+      --ios-sep: rgba(84, 84, 88, 0.65);
+      --ios-fill: rgba(118, 118, 128, 0.24);
+      --ios-blue: #0a84ff;
+      --ios-green: #30d158;
+      --ios-red: #ff453a;
+      --ios-gray: #98989d;
+      --ios-nav-tint: rgba(20, 20, 22, 0.82);
+      --ios-nav-border: rgba(255, 255, 255, 0.16);
+      --ios-tap: 44px;
+    }
+  }
+
+  /* iOS system font + spacing baseline. */
+  .tt-app {
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro",
+      "Helvetica Neue", Helvetica, Arial, sans-serif;
+    background: var(--ios-bg);
+    color: var(--ios-label);
+    -webkit-tap-highlight-color: transparent;
+    -webkit-text-size-adjust: 100%;
+  }
+  .tt-app *, .tt-app *::before, .tt-app *::after {
+    -webkit-font-smoothing: subpixel-antialiased;
+  }
+
+  /* Defensive: never let a wide table or panel push the page sideways. */
+  html, body { overflow-x: hidden; }
+  .tt-app { overflow-x: hidden; }
+
+  /* ── Rail → iOS navigation bar (large title) ──────────────────────────── */
+  .tt-rail {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas:
+      "drawer brand session"
+      "account account account"
+      "title title title";
+    align-items: center;
+    row-gap: 4px;
+    padding: max(6px, var(--ios-safe-t)) 12px 6px;
+    background-image: var(--hm-glass-sheen),
+      linear-gradient(to bottom, var(--ios-nav-tint), var(--ios-nav-tint));
+    backdrop-filter: saturate(180%) blur(20px);
+    -webkit-backdrop-filter: saturate(180%) blur(20px);
+    border-bottom: 0.5px solid var(--ios-nav-border);
+    position: sticky;
+    top: 0;
+    z-index: 40;
+  }
+  .tt-brand__text { font-weight: 600; font-size: 17px; letter-spacing: -0.2px; }
+  .tt-session { font-size: 13px; color: var(--ios-label-2); }
+
+  /* The login/auth status in the secondary rail group is redundant with the
+     drawer's auth mount, so hide it from the bar; the drawer keeps login. */
+  .tt-rail__group--secondary { display: none; }
+
+  /* iOS large title. */
+  .tt-largetitle {
+    display: block;
+    grid-area: title;
+    font-size: 30px;
+    font-weight: 700;
+    letter-spacing: -0.4px;
+    color: var(--ios-label);
+    padding: 2px 2px 4px;
+    line-height: 1.1;
+  }
+
+  /* The desktop tab strip becomes the fixed iOS bottom tab bar. */
+  .tt-tabs {
+    order: initial;
+    flex: none;
+    margin: 0;
+    padding: 0;
+    grid-area: auto;
+    scroll-snap-type: none;
+    -webkit-mask-image: none;
+    mask-image: none;
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: calc(var(--ios-tab-h) + var(--ios-safe-b));
+    display: flex;
+    background-image: var(--hm-glass-sheen),
+      linear-gradient(to bottom, var(--ios-nav-tint), var(--ios-nav-tint));
+    backdrop-filter: saturate(180%) blur(20px);
+    -webkit-backdrop-filter: saturate(180%) blur(20px);
+    border-top: 0.5px solid var(--ios-nav-border);
+    padding-bottom: var(--ios-safe-b);
+    z-index: 40;
+  }
+  .tt-tab {
+    flex: 1 1 0;
+    min-width: 0;
+    min-height: var(--ios-tab-h);
+    flex-direction: column;
+    justify-content: center;
+    gap: 2px;
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 0;
+    color: var(--ios-label-2);
+    border-radius: 0;
+    background: transparent;
+    border: none;
+    padding: 4px 2px;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .tt-tab::before { font-size: 20px; line-height: 1; opacity: 0.85; }
+  .tt-tab[aria-selected="true"] { color: var(--ios-blue); }
+  .tt-tab[aria-selected="true"]::before { opacity: 1; }
+
+  /* Clear the fixed bar so the last panel is never hidden behind it. */
+  .tt-main {
+    padding: 10px 12px calc(var(--ios-tab-h) + var(--ios-safe-b) + 12px);
+    gap: 12px;
+    background: var(--ios-bg);
+  }
+
+  /* The desktop status footer would sit behind the fixed tab bar; drop it on
+     phones (its figures already live in the swipeable account strip). */
+  .tt-status { display: none; }
+
+  /* Panels: iOS grouped-card look, keep the glass treatment the verifier reads. */
+  .tt-panel {
+    background-image: var(--hm-glass-sheen),
+      linear-gradient(180deg, var(--ios-bg-2), var(--ios-bg-2));
+    border: 0.5px solid var(--ios-sep);
+    border-radius: var(--ios-radius-card);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+    overflow: hidden;
+  }
+  .tt-panel__head, .tt-panel__head--pos {
+    background: transparent;
+    border-bottom: 0.5px solid var(--ios-sep);
+    padding: 12px 14px;
+  }
+  .tt-panel__title { font-size: 17px; font-weight: 600; color: var(--ios-label); }
+  .tt-panel__body { padding: 8px 14px 14px; }
+
+  /* ── Pane bar (Watchlist/Chart/Ticket) → segmented iOS control ─────────── */
+  .tt-pane-bar {
+    display: flex;
+    gap: 4px;
+    background: var(--ios-fill);
+    border-radius: 9px;
+    padding: 2px;
+  }
+  .tt-pane-bar__btn {
+    flex: 1 1 0;
+    min-height: var(--ios-tap);
+    border: none;
+    border-radius: 7px;
+    background: transparent;
+    color: var(--ios-label);
+    font-size: 13px;
+    font-weight: 500;
+  }
+  .tt-pane-bar__btn[aria-selected="true"] {
+    background: var(--ios-bg-2);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+    font-weight: 600;
+  }
+
+  /* ── Drawer → iOS bottom sheet ─────────────────────────────────────────── */
+  .tt-drawer-trigger { backdrop-filter: none; -webkit-backdrop-filter: none; }
+  .tt-drawer {
+    display: flex;
+    top: auto;
+    left: 0; right: 0; bottom: 0;
+    width: auto;
+    max-height: 85vh;
+    border-radius: var(--ios-radius-sheet) var(--ios-radius-sheet) 0 0;
+    border: 0.5px solid var(--ios-sep);
+    border-bottom: none;
+    background-image: var(--hm-glass-sheen),
+      linear-gradient(180deg, var(--ios-bg-2), var(--ios-bg-2));
+    backdrop-filter: saturate(180%) blur(20px);
+    -webkit-backdrop-filter: saturate(180%) blur(20px);
+    transform: translateY(100%);
+    visibility: hidden;
+    pointer-events: none;
+    transition: transform 0.38s cubic-bezier(0.32, 0.72, 0, 1),
+                visibility 0s linear 0.38s;
+    padding-bottom: var(--ios-safe-b);
+    box-shadow: 0 -8px 40px rgba(0, 0, 0, 0.3);
+  }
+  .tt-drawer:not([hidden]) {
+    transform: translateY(0);
+    visibility: visible;
+    pointer-events: auto;
+    transition: transform 0.38s cubic-bezier(0.32, 0.72, 0, 1),
+                visibility 0s;
+  }
+  /* Beat the global .tt-app [hidden]{display:none!important} so the closed sheet
+     stays in the layout (off-screen) and can slide back down instead of
+     vanishing. */
+  .tt-app .tt-drawer[hidden] { display: flex !important; }
+  /* Grabber handle, native sheet signal. */
+  .tt-drawer::before {
+    content: "";
+    position: absolute;
+    top: 7px; left: 50%;
+    width: 36px; height: 5px;
+    margin-left: -18px;
+    border-radius: 3px;
+    background: var(--ios-label-3);
+  }
+  .tt-drawer__head { padding-top: 22px; }
+  .tt-drawer__item {
+    min-height: var(--ios-tap);
+    border-radius: 10px;
+    font-size: 17px;
+    background: transparent;
+    color: var(--ios-label);
+  }
+  .tt-drawer__item[aria-selected="true"] { color: var(--ios-blue); }
+  .tt-drawer__auth .auth-login-btn,
+  .tt-drawer__auth .auth-logout-btn { min-height: var(--ios-tap); font-size: 14px; }
+
+  .tt-drawer-scrim {
+    background: rgba(0, 0, 0, 0.4);
+    backdrop-filter: blur(2px);
+    -webkit-backdrop-filter: blur(2px);
+    transition: opacity 0.3s ease;
+  }
+
+  /* ── Auth modal → iOS bottom sheet ────────────────────────────────────── */
+  .universal-auth-overlay {
+    align-items: flex-end;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.4);
+    padding: 0;
+  }
+  .universal-auth-overlay { display: flex; }
+  .universal-auth-card {
+    max-width: 100%;
+    width: 100%;
+    border-radius: var(--ios-radius-sheet) var(--ios-radius-sheet) 0 0;
+    border: none;
+    background-image: var(--hm-glass-sheen),
+      linear-gradient(180deg, var(--ios-bg-2), var(--ios-bg-2));
+    box-shadow: 0 -8px 40px rgba(0, 0, 0, 0.3);
+    padding: 26px 20px calc(20px + var(--ios-safe-b));
+    text-align: left;
+    transform: translateY(100%);
+    transition: transform 0.38s cubic-bezier(0.32, 0.72, 0, 1);
+  }
+  .universal-auth-overlay[style*="display: flex"] .universal-auth-card,
+  .universal-auth-overlay:not([style*="display: none"]) .universal-auth-card {
+    transform: translateY(0);
+  }
+  .universal-auth-card::before {
+    content: "";
+    position: absolute;
+    top: 7px; left: 50%;
+    width: 36px; height: 5px;
+    margin-left: -18px;
+    border-radius: 3px;
+    background: var(--ios-label-3);
+  }
+  .auth-card-top-icon { display: none; }
+  .auth-card-title {
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: -0.3px;
+    text-align: left;
+    margin: 16px 0 2px;
+    color: var(--ios-label);
+    text-transform: none;
+  }
+  .auth-card-subtitle {
+    font-size: 13px;
+    color: var(--ios-label-2);
+    text-transform: none;
+    letter-spacing: 0;
+    margin: 0 0 18px;
+  }
+  .auth-close-btn {
+    top: 14px; right: 16px;
+    color: var(--ios-label-2);
+    width: var(--ios-tap); height: var(--ios-tap);
+    border-radius: 50%;
+  }
+  /* Grouped iOS field list. */
+  .auth-form-group { margin-bottom: 0; }
+  .auth-input-lbl {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--ios-label-2);
+    text-transform: none;
+    letter-spacing: 0;
+    margin: 14px 0 6px;
+  }
+  .auth-input-wrapper {
+    background: var(--ios-fill);
+    border-radius: var(--ios-radius-field);
+    padding-right: 4px;
+  }
+  .auth-input-field {
+    background: transparent;
+    border: none;
+    border-radius: var(--ios-radius-field);
+    padding: 12px 38px 12px 14px;
+    font-size: 17px;
+    font-family: inherit;
+    color: var(--ios-label);
+    min-height: var(--ios-tap);
+  }
+  .auth-input-field:focus {
+    outline: none;
+    box-shadow: 0 0 0 2px var(--ios-blue);
+    background: var(--ios-fill);
+  }
+  .auth-pwd-toggle {
+    right: 12px;
+    width: var(--ios-tap); height: var(--ios-tap);
+    color: var(--ios-label-2);
+    font-size: 17px;
+  }
+  .auth-error-alert {
+    background: rgba(255, 59, 48, 0.12);
+    border: 0.5px solid rgba(255, 59, 48, 0.4);
+    color: var(--ios-red);
+    padding: 10px 14px;
+    border-radius: 10px;
+    font-size: 13px;
+    margin: 14px 0 0;
+  }
+  .auth-submit-btn {
+    width: 100%;
+    background: var(--ios-blue);
+    color: #ffffff;
+    border: none;
+    border-radius: 12px;
+    padding: 14px;
+    font-size: 17px;
+    font-weight: 600;
+    letter-spacing: 0;
+    text-transform: none;
+    min-height: var(--ios-tap);
+    margin-top: 18px;
+  }
+  .auth-submit-btn:disabled {
+    opacity: 0.55;
+  }
+  .auth-submit-btn:not(:disabled):active { background: var(--ios-blue); transform: scale(0.99); }
+
+  /* ── Form controls elsewhere: 44px targets, rounded, readable ─────────── */
+  .tt-field input, .tt-field select, .tt-field button,
+  .ticket-source, .ticket-symbol,
+  .tt-ticket input, .tt-ticket select, .tt-ticket button {
+    min-height: var(--ios-tap);
+    font-size: 16px; /* >=16px prevents iOS zoom-on-focus */
+    border-radius: var(--ios-radius-field);
+  }
+
+  /* Tables: keep on a single horizontal scroll rail, never overflow the page. */
+  .tt-table--positions,
+  .tt-table {
+    width: 100%;
+    font-size: 14px;
+  }
+  .tt-panel__body--flush { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+  /* Buttons that are tap targets get the iOS treatment. */
+  .tt-btn { min-height: var(--ios-tap); border-radius: 10px; font-size: 15px; font-weight: 600; }
+  .tt-btn--sm { min-height: var(--ios-tap); }
+
+  /* Native-feeling view transition. */
+  .tt-view[data-active="true"] {
+    animation: iosViewIn 0.32s cubic-bezier(0.32, 0.72, 0, 1);
+  }
+  @keyframes iosViewIn {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  /* Pull the drawer/auth sheets above everything; keep sheet curve on reduce. */
+  @media (prefers-reduced-motion: reduce) {
+    .tt-drawer, .universal-auth-card, .tt-view[data-active="true"] { transition: none; animation: none; }
+  }
+}
+
+/* Very narrow handsets: keep labels legible. */
+@media (max-width: 380px) {
+  .tt-largetitle { font-size: 26px; }
+  .tt-tab { font-size: 9px; }
+}

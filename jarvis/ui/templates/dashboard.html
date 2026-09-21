@@ -11,6 +11,9 @@
 <link rel="stylesheet" href="/static/css/hm_ui.css">
 <link rel="stylesheet" href="/static/css/theme_terminal.css">
 <link rel="stylesheet" href="/static/css/auth.css">
+<!-- iOS design language for phones only. Loaded last so its @media (max-width:767px)
+     rules win over the base themes without touching the desktop layout (≥768px). -->
+<link rel="stylesheet" href="/static/css/ios_mobile.css">
 
 <!--
   DYNAMIC-DATA CONTRACT
@@ -155,6 +158,10 @@
     <span class="tt-num tt-muted" id="clock" style="text-align:left">—</span>
     <span id="auth-header-widget"></span>
   </div>
+
+  <!-- iOS large title. The tab strip is a fixed bottom bar on phones, so the
+       active view's name lives here as the large title under the nav bar. -->
+  <div class="tt-largetitle" id="ios-largetitle">Trade</div>
 </header>
 
 <!-- ═══ Pane bar (phone only) ══════════════════════════════════════════ -->
