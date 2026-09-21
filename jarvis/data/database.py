@@ -22,11 +22,42 @@ from jarvis.data.schema_version import add_columns, migrate
 # rather than being guessed at.
 ORIGINS = ("broker", "paper", "synthetic", "unknown")
 
+#: The execution mode the row was produced under. Kept SEPARATE from
+#: :data:`ORIGINS` on purpose: `origin` answers "where did the fill price come
+#: from", `execution_mode` answers "was this real money". They are not the same
+#: question and one cannot be derived from the other --
+#: `_price_origin()` returns `synthetic` both for a paper fill with no quote and
+#: for a LIVE fill whose client could not reach the terminal, so "synthetic"
+#: rows are a mix of real money and simulated, with nothing in the row to tell
+#: them apart. That is the gap D1 was filed for, and `origin` alone cannot close
+#: it.
+#:
+#: "unknown" is stored, never guessed: rows written before this column existed
+#: carry no evidence of the mode they were produced under.
+EXECUTION_MODES = ("live", "paper", "demo", "unknown")
+
 #: How long a read path will reuse the last broker sync before paying for
 #: another one. A `/api/history` read used to re-read 30 days of deals every
 #: time; on the live server that parked request threads inside the terminal
 #: attach and timed the endpoint out.
 _MT5_SYNC_MIN_INTERVAL_SEC = 30.0
+
+
+def _mode_filter(execution_mode):
+    """Normalise a mode filter to the values that can exist — `[]` if none can.
+
+    Same contract as :func:`_origin_filter`: a caller asking for
+    `execution_mode="real"` has made a typo, and answering with the whole table
+    — paper fills included — looks exactly like a filter that worked.
+    """
+    if isinstance(execution_mode, str):
+        wanted = [execution_mode]
+    else:
+        try:
+            wanted = list(execution_mode)
+        except TypeError:
+            return []
+    return [m for m in wanted if m in EXECUTION_MODES]
 
 
 def _origin_filter(origin):
@@ -73,7 +104,12 @@ def _empty_pnl():
 #   1 — every column the old sweep used to add, plus `position_id` (D2)
 #   2 — `origin`, so a row says where its price came from (D1)
 #   3 — an index on `origin`, so it can be QUERIED (see _migration_3)
-SCHEMA_VERSION = 3
+#   4 — `execution_mode`, so a row says whether it was real money (see
+#       _migration_4). D1's original fix gave every row an `origin`, but `origin`
+#       is price provenance, and its own docstring says so: "A microsecond
+#       timestamp only tells us the ENGINE wrote it, not whether that engine was
+#       trading real money or paper". The mode was still nowhere in the row.
+SCHEMA_VERSION = 4
 
 
 def _migration_1(conn) -> None:
@@ -167,7 +203,38 @@ def _migration_3(conn) -> None:
     )
 
 
-MIGRATIONS = {1: _migration_1, 2: _migration_2, 3: _migration_3}
+def _migration_4(conn) -> None:
+    """D1 (completed): record the execution mode the row was produced under.
+
+    `origin` was the first half of this finding and it cannot finish it. It
+    classifies the FILL PRICE, and `synthetic` covers two different worlds: a
+    paper fill with no quote, and a live fill whose client had lost the
+    terminal. Both are "the price is a stand-in"; only one of them is real
+    money. Measured on data/jarvis_history.db, the two live questions a row has
+    to answer —
+
+        was this real money?          (execution_mode)
+        can I trust the price?        (origin)
+
+    — were being answered by one column, so the second was silently standing in
+    for the first.
+
+    Nothing in a historical row carries the mode, and the two are not
+    recoverable from each other, so the backfill is `unknown` for every existing
+    row. Guessing `live` would put 269 rows of unverifiable history behind the
+    exact filter this column exists to enable — a filter that looks like
+    evidence and isn't. New rows always carry a real value.
+    """
+    add_columns(conn, "executed_trades", {"execution_mode": "TEXT"})
+    conn.execute("UPDATE executed_trades SET execution_mode = 'unknown' WHERE execution_mode IS NULL")
+    add_columns(conn, "executed_trades", {"execution_mode": "TEXT"})
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_executed_trades_mode_ts "
+        "ON executed_trades(execution_mode, timestamp)"
+    )
+
+
+MIGRATIONS = {1: _migration_1, 2: _migration_2, 3: _migration_3, 4: _migration_4}
 
 # Executor tags, matched as TOKENS. The old `"ai" in comment_lower` substring test
 # also matched "trailing", "pair", "main", "wait" and "chair", so a manual trade
@@ -301,7 +368,8 @@ class SQLiteTradeDB:
         threats_json: str = "[]",
         features_json: str = "{}",
         position_id: Optional[int] = None,
-        origin: Optional[str] = None
+        origin: Optional[str] = None,
+        execution_mode: Optional[str] = None
     ):
         """Journal an entry.
 
@@ -310,27 +378,33 @@ class SQLiteTradeDB:
         different numbers — pass both, or the row can never be closed (D2).
 
         `origin` is where the price came from: `broker`, `paper` or `synthetic`.
-        Anything else — including None — is recorded as `unknown` rather than
-        guessed, so a statistic that filters on it can never silently include
-        rows of unknown provenance.
+        `execution_mode` is whether it was real money: `live`, `paper` or
+        `demo`. **They are different questions** — a live fill whose client had
+        lost the terminal is `origin='synthetic'` but `execution_mode='live'`,
+        which is precisely the row that used to be unclassifiable. Pass both.
+
+        Anything not in the respective tuple — including None — is recorded as
+        `unknown` rather than guessed, so a statistic that filters on either can
+        never silently include rows of unknown provenance.
         """
         # ORIGINS is a tuple, not a mapping. A `.get()` here raised
         # AttributeError on EVERY call — and `log_trade` swallows its
         # exceptions into a log line, so the symptom was not a crash but a
         # journal that silently stopped recording trades at all.
         origin = origin if origin in ORIGINS else "unknown"
+        execution_mode = execution_mode if execution_mode in EXECUTION_MODES else "unknown"
         conn = self._get_conn()
         try:
             conn.execute('''
                 INSERT INTO executed_trades (
-                    ticket, position_id, origin, symbol, action, entry_price, sl, tp, volume, timestamp,
+                    ticket, position_id, origin, execution_mode, symbol, action, entry_price, sl, tp, volume, timestamp,
                     ai_score, regime, expected_value, executor, session_name,
                     is_prime_session, adx, plus_di, minus_di, spread_pips,
                     mtf_alignment, threats_json, features_json
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
-                ticket, position_id, origin, symbol, action, entry, sl, tp, volume,
+                ticket, position_id, origin, execution_mode, symbol, action, entry, sl, tp, volume,
                 datetime.now(timezone.utc).isoformat(),
                 score, regime, ev, executor, session_name, int(is_prime_session),
                 adx, plus_di, minus_di, spread_pips, mtf_alignment, threats_json, features_json
@@ -496,10 +570,16 @@ class SQLiteTradeDB:
                     # "forecast" for engine-logged ones, which is why
                     # `self_learning` could not tell them apart. NULL is honest:
                     # no forecast was made.
+                    # `execution_mode='live'`: these rows are reconstructed from
+                    # `history_deals_get`, so they are real money by
+                    # construction — a deal the broker actually booked — whether
+                    # or not the engine that is reading them is currently
+                    # trading paper. This is the one place the mode is a fact
+                    # rather than something we were told.
                     conn.execute('''
-                        INSERT INTO executed_trades (ticket, position_id, origin, symbol, action, entry_price, sl, tp, volume, timestamp, ai_score, regime, expected_value, realized_pnl, executor, closed_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ''', (pid, pid, "broker", clean_sym, side, entry_p, sl_val, tp_val, vol, dt_str, None, regime_str, None, pnl, exec_label,
+                        INSERT INTO executed_trades (ticket, position_id, origin, execution_mode, symbol, action, entry_price, sl, tp, volume, timestamp, ai_score, regime, expected_value, realized_pnl, executor, closed_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (pid, pid, "broker", "live", clean_sym, side, entry_p, sl_val, tp_val, vol, dt_str, None, regime_str, None, pnl, exec_label,
                           dt_str if exit_deal else None))
                 else:
                     # Update realized PnL, executor, and close timestamp for completed positions.
@@ -540,7 +620,7 @@ class SQLiteTradeDB:
         except Exception as e:
             logger.error(f"Failed to sync MT5 history: {e}")
 
-    def fetch_recent_trades(self, limit=100, days=None, origin=None):
+    def fetch_recent_trades(self, limit=100, days=None, origin=None, execution_mode=None):
         """Most recent journal rows, newest first.
 
         `days` narrows the window. It defaults to None — no window — so the
@@ -560,11 +640,18 @@ class SQLiteTradeDB:
         to *display*.
 
         `origin` keeps rows whose price came from the given origin(s) — pass one
-        string, or a collection to allow several. It is what makes D1 usable:
-        "broker" is the only origin that is real money. The filter is validated
-        against :data:`ORIGINS` and an unknown value selects nothing rather than
+        string, or a collection to allow several. It is validated against
+        :data:`ORIGINS` and an unknown value selects nothing rather than
         silently widening to everything, because a caller asking for
         `origin="real"` must not be handed the full table and believe it filtered.
+
+        `execution_mode` keeps rows produced under the given mode(s): `live`,
+        `paper`, `demo`, `unknown`. Use THIS one to separate real money from
+        simulated — `origin` cannot do it, because `synthetic` covers a paper
+        fill with no quote and a live fill whose client had lost the terminal
+        alike. A caller that wants "real money, trustworthy price" asks for
+        `execution_mode="live"` AND `origin="broker"`, which is only the same
+        set by coincidence today and by no means guaranteed to stay that way.
         """
         self.sync_mt5_history(days=30, limit=limit)
         conn = self._get_conn()
@@ -587,6 +674,14 @@ class SQLiteTradeDB:
                     return []
                 clauses.append(f"origin IN ({','.join('?' * len(wanted))})")
                 params.extend(wanted)
+            if execution_mode is not None:
+                wanted_modes = _mode_filter(execution_mode)
+                if not wanted_modes:
+                    # Same contract: asking for a mode that cannot exist returns
+                    # nothing, not everything.
+                    return []
+                clauses.append(f"execution_mode IN ({','.join('?' * len(wanted_modes))})")
+                params.extend(wanted_modes)
 
             where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
             params.append(limit)

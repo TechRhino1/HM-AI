@@ -36,6 +36,19 @@ class ExecutionEngine:
             return "broker" if getattr(self.mt5_client, "is_connected", True) else "synthetic"
         return "unknown"
 
+    def _execution_mode(self, res: Dict[str, Any] = None) -> str:
+        """The execution mode this fill was produced under (D1, completed).
+
+        Deliberately NOT derived from :meth:`_price_origin`. A live client that
+        has lost the terminal takes the same branch as paper inside
+        `send_market_order`, so its price is a stand-in — but the order was
+        still routed to a real account, and the row has to say so. Conflating
+        "the price is a stand-in" with "this was simulated money" is what left
+        paper and live fills indistinguishable in the first place.
+        """
+        mode = str(getattr(self.mt5_client, "mode", "") or "").lower()
+        return mode if mode in ("live", "paper", "demo") else "unknown"
+
     def execute_decision(self, decision: DecisionObject, lots: float) -> Dict[str, Any]:
         """Dispatches authorized decision to MT5 or Paper Simulator."""
         if not decision.execution_authorized or lots <= 0:
@@ -194,6 +207,12 @@ class ExecutionEngine:
                     # D1: say where the fill price came from, so a statistic over
                     # this table can separate real money from simulated.
                     origin=self._price_origin(res),
+                    # D1 (completed): and say whether it WAS real money. These
+                    # are different questions -- a live fill whose client had
+                    # lost the terminal is origin='synthetic' but
+                    # execution_mode='live', and that row used to be
+                    # unclassifiable.
+                    execution_mode=self._execution_mode(res),
                 )
             except Exception as e:
                 logger.error(f"Failed to log trade to DB: {e}")
