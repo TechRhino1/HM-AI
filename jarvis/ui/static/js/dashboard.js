@@ -75,6 +75,8 @@
     selection: null,
     radar: [],            // orchestrator's ranked candidates (telemetry)
     radarFilter: 'ALL',   // style filter for the scanner radar
+    posTab: 'open',       // active tab in the Open positions panel: open | history | pending
+    posPending: [],       // working orders fetched from /api/pending_orders for the panel's PENDING tab
     chart: null,          // {host, chart, candles, volume, lines, tradeLines}
     chartCandles: [],     // bars currently drawn — source for level maths
     chartLevels: null,    // {r1,r2,s1,s2}; null when no swing pivot exists
@@ -844,11 +846,15 @@
     });
   }
 
-  /* ── Positions ────────────────────────────────────────────────────────── */
+  /* ── Positions panel ────────────────────────────────────────────────── */
+  /* Renders the OPEN tab: live positions from state.positions. The History
+     and Pending tabs reuse pos-body as their render target and live in
+     renderHistoryInPosPanel / renderPendingInPosPanel below; setPosTab
+     dispatches between the three and rewrites thead columns per tab. */
   function renderPositions() {
     var body = $('pos-body');
     var positions = state.positions || [];
-    setText($('pos-count'), String(positions.length));
+    setText($('pos-tab-count-open'), String(positions.length));
 
     if (!positions.length) {
       setState(body, 'empty', 'No open positions', null);
@@ -903,6 +909,179 @@
     // Overlays follow the position list, not only the candle poll, so a fill or
     // a close redraws immediately instead of at the next chart refresh.
     refreshChartDecorations();
+  }
+
+  /* HISTORY tab: closed trades from state.history (loaded by loadHistory). The
+     same fields renderHistory (the dedicated history panel) uses, trimmed to
+     what fits the positions table: symbol, side, volume, entry, exit, P&L,
+     closed time. Open trades carry a (open) tag rather than a fake exit. */
+  function renderHistoryInPosPanel() {
+    var body = $('pos-body');
+    var rows = state.history || [];
+    setText($('pos-tab-count-history'), String(rows.length));
+
+    if (!rows.length) {
+      if (state.historyLoading) {
+        setState(body, 'loading', 'Loading closed trades…', null);
+      } else {
+        setState(body, 'empty', 'No closed trades', 'The History tab fills up as positions close.');
+      }
+      return;
+    }
+
+    body.removeAttribute('data-state');
+    body.innerHTML = rows.map(function (t) {
+      var sym = t.symbol || '';
+      var side = String(t.action || t.type || t.side || '').toUpperCase();
+      var dirCls = /BUY|LONG/.test(side) ? 'tt-dir--buy' : 'tt-dir--sell';
+      var pnl = historyPnl(t);
+      var entry = Number(t.entry_price);
+      var exit = Number(t.exit_price);
+      var stamp = t.closed_at || t.exit_time || t.timestamp;
+      var closed = !!(t.closed_at || t.exit_time);
+      var when = stamp ? String(stamp).replace('T', ' ').replace(/\.\d+.*$/, '').slice(0, 16) : '—';
+      return '<tr>' +
+        '<td><span class="tt-symbol">' + esc(sym) + '</span></td>' +
+        '<td><span class="tt-dir ' + dirCls + '">' + esc(side || '—') + '</span></td>' +
+        '<td class="tt-num">' + num(t.volume, 2) + '</td>' +
+        '<td class="tt-num">' + (isFinite(entry) && entry > 0 ? formatPrice(entry, sym) : '—') + '</td>' +
+        '<td class="tt-num">' + (closed && isFinite(exit) && exit > 0 ? formatPrice(exit, sym) : '<span class="tt-muted">—</span>') + '</td>' +
+        '<td class="tt-num tt-pos-pnl ' + (pnl === null ? 'tt-muted' : signClass(pnl)) + '">' +
+          (pnl === null ? '—' : (pnl > 0 ? '+' : '') + num(pnl, 2)) + '</td>' +
+        '<td class="tt-muted">' + esc(when) + (closed ? '' : ' <span class="tt-muted">(open)</span>') + '</td>' +
+        '<td class="tt-pos-actions tt-muted" aria-hidden="true">—</td>' +
+        '</tr>';
+    }).join('');
+  }
+
+  /* PENDING tab: working orders from /api/pending_orders (loaded by
+     loadPendingForTab). Each row gets a Cancel button that hits the existing
+     /api/action/cancel_pending_order endpoint. */
+  function renderPendingInPosPanel() {
+    var body = $('pos-body');
+    var list = state.posPending || [];
+    setText($('pos-tab-count-pending'), String(list.length));
+
+    if (!list.length) {
+      setState(body, 'empty', 'No working orders', 'Place a limit or stop from the ticket and it shows up here.');
+      return;
+    }
+
+    body.removeAttribute('data-state');
+    body.innerHTML = list.map(function (o) {
+      var sym = o.symbol || '';
+      var t = o.type;
+      var typeStr = pendingTypeNameLocal(t);
+      var dirCls = /BUY/i.test(typeStr) ? 'tt-dir--buy' : (/SELL/i.test(typeStr) ? 'tt-dir--sell' : '');
+      var ticket = o.ticket;
+      var sl = Number(o.sl);
+      var tp = Number(o.tp);
+      return '<tr>' +
+        '<td><span class="tt-symbol">' + esc(sym) + '</span></td>' +
+        '<td><span class="tt-dir ' + dirCls + '">' + esc(typeStr) + '</span></td>' +
+        '<td class="tt-num">' + num(o.volume, 2) + '</td>' +
+        '<td class="tt-num">' + formatPrice(o.price, sym) + '</td>' +
+        '<td class="tt-num">' + (isFinite(sl) && sl > 0 ? formatPrice(sl, sym) : '<span class="tt-muted">—</span>') + '</td>' +
+        '<td class="tt-num">' + (isFinite(tp) && tp > 0 ? formatPrice(tp, sym) : '<span class="tt-muted">—</span>') + '</td>' +
+        '<td class="tt-muted">' + esc(pendingAge(o)) + '</td>' +
+        '<td class="tt-pos-actions">' +
+          (ticket !== undefined && ticket !== null
+            ? '<button class="tt-btn tt-btn--sm tt-btn--pos-close" data-pos-cancel="' + esc(String(ticket)) + '" type="button">Cancel</button>'
+            : '<span class="tt-muted">—</span>') +
+        '</td>' +
+        '</tr>';
+    }).join('');
+
+    Array.prototype.forEach.call(body.querySelectorAll('[data-pos-cancel]'), function (btn) {
+      btn.addEventListener('click', function () {
+        cancelPendingFromPanel(Number(btn.getAttribute('data-pos-cancel')));
+      });
+    });
+  }
+
+  /* MT5 reports the order type as a numeric enum; the label the trader sees
+     is the same lookup the removed list used so the two views agree. */
+  function pendingTypeNameLocal(t) {
+    var map = { 2: 'BUY LIMIT', 3: 'SELL LIMIT', 4: 'BUY STOP', 5: 'SELL STOP' };
+    var n = Number(t);
+    if (map[n]) return map[n];
+    var s = String(t == null ? '' : t).toUpperCase();
+    return s || '—';
+  }
+
+  function pendingAge(o) {
+    if (!o.time_setup) return '—';
+    var ms = Date.now() - Number(o.time_setup) * 1000;
+    if (!isFinite(ms) || ms < 0) return '—';
+    var m = Math.floor(ms / 60000);
+    if (m < 60) return m + 'm';
+    var h = Math.floor(m / 60);
+    if (h < 24) return h + 'h ' + (m % 60) + 'm';
+    var d = Math.floor(h / 24);
+    return d + 'd ' + (h % 24) + 'h';
+  }
+
+  /* Cancel a working order from the PENDING tab. The endpoint and confirm
+     pattern are shared with the classic terminal. */
+  function cancelPendingFromPanel(ticket) {
+    if (!ticket) return;
+    if (!window.confirm('Cancel working order #' + ticket + '?')) return;
+    apiPost('/api/action/cancel_pending_order', { ticket: ticket }, TIMEOUT.normal).then(function (res) {
+      var data = res.data || {};
+      if (res.ok && !actionRefused(data)) {
+        toast('Order #' + ticket + ' cancelled');
+        loadPendingForTab();
+      } else {
+        toast(actionFailureMessage('Cancel failed: ', res), 'error');
+      }
+    });
+  }
+
+  /* Fetch the working orders list. Kept separate from loadHistory so a tab
+     switch never blocks on a slow /api/history call. */
+  function loadPendingForTab() {
+    apiGet('/api/pending_orders', TIMEOUT.normal).then(function (res) {
+      if (!res || !res.ok) { state.posPending = []; renderPendingInPosPanel(); return; }
+      var list = Array.isArray(res.data) ? res.data : ((res.data && res.data.orders) || []);
+      state.posPending = list;
+      renderPendingInPosPanel();
+    });
+  }
+
+  /* Tab dispatcher: rewrites thead columns per tab, shows / hides the total
+     and Flatten all (OPEN-only), marks the active tab, and re-renders. */
+  function setPosTab(name) {
+    state.posTab = name;
+    var headCols = {
+      open:    '<th>Symbol</th><th>Side</th><th class="tt-num">Vol</th><th class="tt-num">Entry</th>' +
+               '<th class="tt-num">Now</th><th class="tt-num">SL</th><th class="tt-num">TP</th>' +
+               '<th class="tt-num">P&amp;L</th><th class="tt-pos-actions-col">Actions</th>',
+      history: '<th>Symbol</th><th>Side</th><th class="tt-num">Vol</th><th class="tt-num">Entry</th>' +
+               '<th class="tt-num">Exit</th><th class="tt-num">P&amp;L</th>' +
+               '<th>Closed</th><th class="tt-pos-actions-col">Actions</th>',
+      pending: '<th>Symbol</th><th>Type</th><th class="tt-num">Vol</th><th class="tt-num">Price</th>' +
+               '<th class="tt-num">SL</th><th class="tt-num">TP</th>' +
+               '<th>Age</th><th class="tt-pos-actions-col">Actions</th>'
+    };
+    var thead = $('pos-thead');
+    if (thead) thead.innerHTML = '<tr>' + headCols[name] + '</tr>';
+
+    Array.prototype.forEach.call(document.querySelectorAll('[data-pos-tab]'), function (b) {
+      b.setAttribute('aria-selected', b.getAttribute('data-pos-tab') === name ? 'true' : 'false');
+    });
+
+    /* OPEN-only controls: the total P&L is a live-book metric and Flatten all
+       closes down the live book. Hide on History / Pending so the panel header
+       never advertises a control that doesn't apply to the active view. */
+    var showOpenOnly = name === 'open';
+    var tot = $('pos-total');
+    if (tot) tot.parentNode.style.display = showOpenOnly ? '' : 'none';
+    var flatten = $('flatten-all');
+    if (flatten) flatten.hidden = !showOpenOnly;
+
+    if (name === 'open') renderPositions();
+    else if (name === 'history') renderHistoryInPosPanel();
+    else if (name === 'pending') renderPendingInPosPanel();
   }
 
   /* Close one open position by ticket. The server answers HTTP 200 with
@@ -3346,7 +3525,16 @@
 
       renderAccount();
       renderWatchlist();
-      renderPositions();
+      /* The positions panel is now tabbed (OPEN / HISTORY / PENDING). Each
+         telemetry refresh must re-render the active tab rather than the OPEN
+         body unconditionally — otherwise a trader on PENDING sees their list
+         overwritten by "No open positions" every few seconds. The OPEN count
+         badge is kept fresh even when another tab is active so the segmented
+         control's tally matches the live book. */
+      setText($('pos-tab-count-open'), String((state.positions || []).length));
+      if (state.posTab === 'open') renderPositions();
+      else if (state.posTab === 'history') renderHistoryInPosPanel();
+      else if (state.posTab === 'pending') renderPendingInPosPanel();
       renderReasoning();
       renderRadar();
       renderStatus();
@@ -3447,6 +3635,11 @@
       var rows = Array.isArray(res.data) ? res.data : ((res.data && (res.data.trades || res.data.history)) || []);
       state.history = rows;
       renderHistory();
+      // The History tab on the positions panel reads the same list. Refresh it
+      // here so a trader who flipped to History before /api/history resolved
+      // sees the rows appear the moment they land, instead of a stale empty
+      // state that then jumps to the table.
+      renderHistoryInPosPanel();
       // Closed-trade exit markers live on the price chart, so the chart has to
       // be repainted once history arrives — not only when the tab is open.
       refreshChartDecorations();
@@ -4311,6 +4504,54 @@
     var refresh = $('watch-refresh');
     if (refresh) refresh.addEventListener('click', function () { loadTelemetry(); loadSelection(); });
 
+    /* Open positions panel — tab bar (OPEN / HISTORY / PENDING). Each tab
+       rewrites thead columns and renders into the same pos-body, with OPEN-only
+       controls (total P&L, Flatten all) hidden on the other two tabs. */
+    Array.prototype.forEach.call(document.querySelectorAll('[data-pos-tab]'), function (btn) {
+      btn.addEventListener('click', function () {
+        var name = btn.getAttribute('data-pos-tab');
+        setPosTab(name);
+        /* Refresh the working orders on every switch to PENDING. The list is
+           also warmed once on boot so the badge is right before the first
+           switch, but orders come and go, so the tab re-reads on arrival.
+           (An `!state.posPending` guard here would never fire: the array is
+           initialised to [], which is truthy.) */
+        if (name === 'pending') loadPendingForTab();
+      });
+    });
+
+    var flattenBtn = $('flatten-all');
+    if (flattenBtn) {
+      flattenBtn.addEventListener('click', function () {
+        var open = state.positions || [];
+        if (!open.length) { toast('Nothing to flatten', 'warn'); return; }
+        if (!window.confirm('Close all ' + open.length + ' open positions?')) return;
+        /* Fan out a close per position. Each one already goes through the same
+           /api/action/close_position path the per-row Close button uses, so a
+           broker refusal on any one position is reported on its own toast and
+           the others still proceed. */
+        /* Only positions carrying a ticket can be closed, so the summary is
+           counted against the attempted set — otherwise a ticket-less row
+           would leave the total one short and the toast would never fire. */
+        var targets = open.filter(function (p) {
+          return p.ticket !== undefined && p.ticket !== null;
+        });
+        if (!targets.length) { toast('Nothing to flatten', 'warn'); return; }
+        var done = 0, failed = 0;
+        targets.forEach(function (p) {
+          apiPost('/api/action/close_position', { ticket: p.ticket }, TIMEOUT.normal).then(function (res) {
+            var data = res.data || {};
+            if (res.ok && !actionRefused(data)) done++; else failed++;
+            if (done + failed === targets.length) {
+              if (failed) toast(failed + ' of ' + targets.length + ' failed to close', 'error');
+              else toast('All positions flattened', 'success');
+              loadTelemetry();
+            }
+          });
+        });
+      });
+    }
+
     var radarFilter = $('radar-filter');
     if (radarFilter) {
       radarFilter.value = state.radarFilter;
@@ -4493,6 +4734,14 @@
     // Closed-trade history feeds the chart's exit markers, so it is loaded for
     // the trade view too, not only when the analytics tab is opened.
     loadHistory();
+
+    // The positions panel is tabbed (OPEN / HISTORY / PENDING). Select OPEN on
+    // boot so the thead, the active pill and the OPEN-only controls are in a
+    // known state, and warm the pending list so the first switch to PENDING
+    // shows a count immediately instead of an empty state that then fills in.
+    setPosTab('open');
+    loadPendingForTab();
+
     copilotSay('bot', 'I can read your open book, the closed-trade journal and the '
       + "engine's own decision record. Try <b>“what positions do I have open?”</b> "
       + 'or <b>“how is my ' + esc(state.symbol || 'symbol') + ' doing?”</b>');

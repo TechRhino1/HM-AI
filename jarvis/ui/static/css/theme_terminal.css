@@ -1805,6 +1805,78 @@
   width: 1%;
 }
 .tt-pos-actions { display: flex; justify-content: flex-end; gap: var(--hm-space-1); }
+
+/* Positions tab bar — OPEN / HISTORY / PENDING. Lives in the panel head
+   beside the total and Flatten all button. The active tab is unmistakable:
+   solid accent fill plus inverted text, matching the nav bar's active state
+   so a tab the user has selected reads as the same affordance anywhere it
+   appears. The count badge flips to a solid accent pill when its tab is
+   active so the number is legible on either background. */
+.tt-pos-tabs {
+  display: flex;
+  gap: var(--hm-space-1);
+  align-items: center;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.tt-pos-tab {
+  appearance: none;
+  background: transparent;
+  border: 1px solid var(--hm-border);
+  color: var(--hm-text-secondary);
+  font: inherit;
+  font-size: var(--hm-text-xs);
+  font-weight: var(--hm-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: var(--hm-tracking-caps);
+  padding: var(--hm-space-1) var(--hm-space-3);
+  border-radius: var(--hm-radius-pill);
+  cursor: pointer;
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--hm-space-2);
+  white-space: nowrap;
+  transition: background var(--hm-dur-fast) var(--hm-ease),
+              color var(--hm-dur-fast) var(--hm-ease),
+              border-color var(--hm-dur-fast) var(--hm-ease);
+}
+.tt-pos-tab:hover {
+  background: var(--hm-bg-hover);
+  color: var(--hm-text-primary);
+  border-color: var(--hm-border-strong);
+}
+.tt-pos-tab[aria-selected="true"] {
+  background: var(--hm-accent);
+  color: var(--hm-text-inverse);
+  border-color: var(--hm-accent);
+}
+.tt-pos-tab[aria-selected="true"]:hover {
+  /* Keyboard / a11y hover on an already-active tab must still read as active. */
+  background: color-mix(in srgb, var(--hm-accent) 88%, white 12%);
+  color: var(--hm-text-inverse);
+}
+.tt-pos-tab:focus-visible {
+  outline: 2px solid var(--hm-accent);
+  outline-offset: 2px;
+}
+.tt-pos-tab__count {
+  font-family: var(--tt-num-font);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--hm-text-2xs);
+  font-weight: var(--hm-weight-semibold);
+  padding: 1px 6px;
+  border-radius: var(--hm-radius-pill);
+  background: var(--hm-bg-base);
+  color: var(--hm-text-primary);
+  min-width: 22px;
+  text-align: center;
+  letter-spacing: 0;
+}
+.tt-pos-tab[aria-selected="true"] .tt-pos-tab__count {
+  background: color-mix(in srgb, var(--hm-text-inverse) 22%, transparent);
+  color: var(--hm-text-inverse);
+}
 .tt-btn--pos-close {
   /* The row's primary action: the same compact small button the rest of the
      app uses, but with a hairline border so it reads as a button on a row

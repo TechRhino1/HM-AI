@@ -264,14 +264,25 @@
       </div>
 
       <div class="tt-panel__head tt-panel__head--pos">
-        <h2 class="tt-panel__title">Open positions</h2>
-        <span class="tt-panel__count" id="pos-count">0</span>
+        <h2 class="tt-panel__title">Positions</h2>
+        <div class="tt-pos-tabs" role="tablist" aria-label="Positions view">
+          <button class="tt-pos-tab" role="tab" data-pos-tab="open" aria-selected="true" aria-controls="pos-table">
+            Open <span class="tt-pos-tab__count" id="pos-tab-count-open">0</span>
+          </button>
+          <button class="tt-pos-tab" role="tab" data-pos-tab="history" aria-selected="false" aria-controls="pos-table">
+            History <span class="tt-pos-tab__count" id="pos-tab-count-history">0</span>
+          </button>
+          <button class="tt-pos-tab" role="tab" data-pos-tab="pending" aria-selected="false" aria-controls="pos-table">
+            Pending <span class="tt-pos-tab__count" id="pos-tab-count-pending">0</span>
+          </button>
+        </div>
         <span class="tt-panel__spacer"></span>
         <span class="tt-pos-total"><span class="tt-num tt-muted" id="pos-total">—</span></span>
+        <button class="tt-btn tt-btn--danger tt-btn--sm" id="flatten-all">Flatten all</button>
       </div>
       <div class="tt-panel__body tt-panel__body--flush">
-        <table class="tt-table tt-table--positions">
-          <thead>
+        <table class="tt-table tt-table--positions" id="pos-table">
+          <thead id="pos-thead">
             <tr>
               <th scope="col">Symbol</th>
               <th scope="col">Side</th>

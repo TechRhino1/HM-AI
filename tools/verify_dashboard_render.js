@@ -69,7 +69,12 @@ const TEMPLATE_TREE = {
                  'radar-body', 'chart-title', 'chart-live-price', 'chart-legend',
                  'chart-src-native', 'chart-src-tv', 'chart-levels', 'chart-timeframe',
                  'chart', 'chart-tv', 'chart-hud', 'chart-tooltip', 'chart-overlay',
-                 'pos-count', 'pos-total', 'pos-body', 'ticket-source', 'ticket-symbol',
+                 /* The panel head is tabbed (OPEN / HISTORY / PENDING); the
+                    count now lives inside each tab rather than beside the
+                    title, so the old `pos-count` badge no longer exists. */
+                 'pos-table', 'pos-thead', 'pos-tab-count-open',
+                 'pos-tab-count-history', 'pos-tab-count-pending', 'flatten-all',
+                 'pos-total', 'pos-body', 'ticket-source', 'ticket-symbol',
                  'ticket-buy', 'ticket-sell', 'ticket-volume', 'ticket-price',
                  'ticket-sl', 'ticket-tp', 'ticket-hint', 'reason-tier', 'reason-body',
                  /* The context strip beside the ticket (item 5: Analyst and News
@@ -2045,6 +2050,32 @@ function report() {
     .filter((id) => !templateIds.has(id) && !prelinked.has(id));
   ok('every id the controller queries exists in dashboard.html',
     missing.length === 0, missing.length ? 'missing: ' + missing.join(', ') : '');
+
+  /* Positions panel — tab bar. The tab dispatcher lives in dashboard.js and
+     rewrites thead columns per tab; structural coverage here makes the harness
+     fail fast if the panel regresses to a single-view list. Real-browser
+     click coverage lives in .scratch/pos_tabs_check.js (puppeteer). */
+  const jsSrc = fs.readFileSync(JS, 'utf8');
+  const tabBar =
+    html.indexOf('data-pos-tab="open"') >= 0 &&
+    html.indexOf('data-pos-tab="history"') >= 0 &&
+    html.indexOf('data-pos-tab="pending"') >= 0 &&
+    html.indexOf('id="pos-table"') >= 0 &&
+    html.indexOf('id="pos-thead"') >= 0 &&
+    html.indexOf('id="flatten-all"') >= 0;
+  ok('positions panel carries a three-tab bar (Open/History/Pending)',
+    tabBar, tabBar ? null : 'tab buttons or table ids missing in dashboard.html');
+  ok('dashboard.js wires all three tab renderers',
+    /function setPosTab\s*\(/.test(jsSrc) &&
+    /function renderHistoryInPosPanel\s*\(/.test(jsSrc) &&
+    /function renderPendingInPosPanel\s*\(/.test(jsSrc) &&
+    /function loadPendingForTab\s*\(/.test(jsSrc),
+    'expected setPosTab / renderHistoryInPosPanel / renderPendingInPosPanel / loadPendingForTab');
+  ok('dashboard.js boot() initialises the tab and warms pending',
+    /setPosTab\(['"]open['"]\)/.test(jsSrc) &&
+    jsSrc.indexOf('setPosTab(\'open\');') !== -1 &&
+    /loadPendingForTab\(\)/.test(jsSrc),
+    'boot() must call setPosTab(\'open\') and loadPendingForTab()');
 
   console.log('\nendpoints');
   ok('candles requested with the tf parameter',
