@@ -65,28 +65,37 @@
   <nav class="tt-tabs" role="tablist" aria-label="Primary views">
     <button class="tt-tab" role="tab" data-view-btn="trade"
             aria-selected="true" aria-controls="view-trade">
-      <svg class="tt-tab__ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <svg class="tt-tab__ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"
+           fill="none" stroke="currentColor" stroke-width="1.8"
+           stroke-linecap="round" stroke-linejoin="round">
         <path d="M4 4v15h16"/><path d="M8 19v-5"/><path d="M12 19V9"/><path d="M16 19v-7"/>
       </svg>
       <span class="tt-tab__label">Trade</span>
     </button>
     <button class="tt-tab" role="tab" data-view-btn="news"
             aria-selected="false" aria-controls="view-news">
-      <svg class="tt-tab__ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-        <rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 9h7"/><path d="M7 13h7"/>
+      <svg class="tt-tab__ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"
+           fill="none" stroke="currentColor" stroke-width="1.8"
+           stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3" y="5" width="18" height="14" rx="2"/>
+        <path d="M7 9h10"/><path d="M7 13h10"/><path d="M16 8l2 2-2 2"/>
       </svg>
       <span class="tt-tab__label">News</span>
     </button>
     <button class="tt-tab" role="tab" data-view-btn="analyst"
             aria-selected="false" aria-controls="view-analyst">
-      <svg class="tt-tab__ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <svg class="tt-tab__ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"
+           fill="none" stroke="currentColor" stroke-width="1.8"
+           stroke-linecap="round" stroke-linejoin="round">
         <circle cx="11" cy="11" r="6"/><path d="M20 20l-4.4-4.4"/>
       </svg>
       <span class="tt-tab__label">Analyst</span>
     </button>
     <button class="tt-tab" role="tab" data-view-btn="markets"
             aria-selected="false" aria-controls="view-markets">
-      <svg class="tt-tab__ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <svg class="tt-tab__ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"
+           fill="none" stroke="currentColor" stroke-width="1.8"
+           stroke-linecap="round" stroke-linejoin="round">
         <circle cx="12" cy="12" r="8"/><path d="M4 12h16"/>
         <path d="M12 4c2.6 2.6 2.6 12.8 0 16"/><path d="M12 4c-2.6 2.6-2.6 12.8 0 16"/>
       </svg>
@@ -94,14 +103,18 @@
     </button>
     <button class="tt-tab" role="tab" data-view-btn="analytics"
             aria-selected="false" aria-controls="view-analytics">
-      <svg class="tt-tab__ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <svg class="tt-tab__ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"
+           fill="none" stroke="currentColor" stroke-width="1.8"
+           stroke-linecap="round" stroke-linejoin="round">
         <path d="M3 20h18"/><path d="M7 20v-6"/><path d="M12 20V8"/><path d="M17 20v-9"/>
       </svg>
       <span class="tt-tab__label">Analytics</span>
     </button>
     <button class="tt-tab" role="tab" data-view-btn="backtest"
             aria-selected="false" aria-controls="view-backtest">
-      <svg class="tt-tab__ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <svg class="tt-tab__ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"
+           fill="none" stroke="currentColor" stroke-width="1.8"
+           stroke-linecap="round" stroke-linejoin="round">
         <circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/>
       </svg>
       <span class="tt-tab__label">Backtest</span>
@@ -206,6 +219,43 @@
   <button class="tt-pane-bar__btn" data-pane-btn="chart" aria-selected="false">Chart</button>
   <button class="tt-pane-bar__btn" data-pane-btn="ticket" aria-selected="false">Ticket</button>
 </nav>
+
+<!-- ═══ Quick actions + primary CTA (phone only) ═══════════════════════
+     The primary trading action lives where the thumb naturally falls:
+     bottom-right, above the tab bar. Tapping switches to the Ticket pane,
+     which already exists — no business logic added. The Refresh and
+     Flatten All buttons mirror the desktop actions but stay visible so the
+     user does not have to drill into a panel to find them. -->
+<div class="tt-qbar" aria-label="Quick actions">
+  <button class="tt-qbar__btn" id="qbar-refresh" data-action="refresh-watch"
+          title="Refresh watchlist" aria-label="Refresh watchlist">
+    <svg class="tt-qbar__ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"
+         fill="none" stroke="currentColor" stroke-width="1.9"
+         stroke-linecap="round" stroke-linejoin="round">
+      <path d="M4 12a8 8 0 0 1 14-5.3L20 5"/><path d="M20 5v5h-5"/>
+      <path d="M20 12a8 8 0 0 1-14 5.3L4 19"/><path d="M4 19v-5h5"/>
+    </svg>
+    <span>Refresh</span>
+  </button>
+  <button class="tt-qbar__btn" id="qbar-flatten" data-action="flatten-all"
+          title="Flatten all open positions" aria-label="Flatten all positions">
+    <svg class="tt-qbar__ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"
+         fill="none" stroke="currentColor" stroke-width="1.9"
+         stroke-linecap="round" stroke-linejoin="round">
+      <path d="M4 7h16"/><path d="M7 12h10"/><path d="M9 17l-2-5"/><path d="M15 17l2-5"/>
+    </svg>
+    <span>Flatten</span>
+  </button>
+  <button class="tt-qbar__btn tt-qbar__btn--primary" data-action="quick-trade"
+          data-pane="ticket" title="New order" aria-label="New order">
+    <svg class="tt-qbar__ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"
+         fill="none" stroke="currentColor" stroke-width="2.2"
+         stroke-linecap="round" stroke-linejoin="round">
+      <path d="M12 5v14"/><path d="M5 12h14"/>
+    </svg>
+    <span>New order</span>
+  </button>
+</div>
 
 <!-- ═══ Main ═══════════════════════════════════════════════════════════ -->
 <main class="tt-main" id="main">

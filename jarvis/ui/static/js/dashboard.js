@@ -4565,6 +4565,27 @@
       });
     }
 
+    /* Phone quick-action bar (.tt-qbar). Each button delegates to an existing
+       control — Refresh and Flatten click their own buttons so all existing
+       confirmation, telemetry refresh and broker-refusal handling stay in one
+       place. New Order switches the pane via `data-pane`, which already wires
+       through `setPane`. Nothing here duplicates business logic. */
+    Array.prototype.forEach.call(document.querySelectorAll('.tt-qbar__btn[data-action]'), function (btn) {
+      btn.addEventListener('click', function () {
+        var action = btn.getAttribute('data-action');
+        if (action === 'refresh-watch') {
+          var w = $('watch-refresh');
+          if (w) w.click();
+        } else if (action === 'flatten-all') {
+          var f = $('flatten-all');
+          if (f) f.click();
+        } else if (action === 'quick-trade') {
+          var pane = btn.getAttribute('data-pane');
+          if (pane && typeof setPane === 'function') setPane(pane);
+        }
+      });
+    });
+
     // ── Chart source ──────────────────────────────────────────────────────
     var srcNative = $('chart-src-native');
     if (srcNative) srcNative.addEventListener('click', function () { setChartSource('native'); });

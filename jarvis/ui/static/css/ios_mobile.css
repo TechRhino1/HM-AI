@@ -40,6 +40,11 @@
    layout the user asked to leave unchanged. */
 .tt-tab__ico { display: none; }
 
+/* The quick-action bar is a phone affordance. Hidden at every width by
+   default, overridden only on phones (max-width: 599px). At >= 600px the
+   sidebar gives tablet users a one-tap path to the ticket pane. */
+.tt-qbar { display: none; }
+
 @media (max-width: 1024px) {
   html {
     /* Honour the OS appearance even though the page <meta> pins "dark". */
@@ -306,6 +311,18 @@
     color: var(--ios-label);
   }
 
+  /* Account strip overflow. On a 390px phone the four metrics + the account
+     identity button are wider than the screen — the strip scrolls, which the
+     user could not otherwise tell from a static layout. A right-edge fade
+     gradient surfaces the affordance without dimming the content the user
+     can already see. */
+  .tt-rail__group#account-strip {
+    -webkit-mask-image: linear-gradient(
+      to right, #000 0, #000 calc(100% - 24px), transparent 100%);
+            mask-image: linear-gradient(
+      to right, #000 0, #000 calc(100% - 24px), transparent 100%);
+  }
+
   /* Large title (UINavigationBar convention). */
   .tt-largetitle {
     grid-area: title;
@@ -367,11 +384,12 @@
     white-space: nowrap;
   }
 
-  /* Content clears the tab bar; the status footer is redundant chrome. */
+  /* Content clears the tab bar AND the quick-action bar above it; the status
+     footer is redundant chrome. */
   .tt-main {
     grid-area: main;
     padding: var(--ios-sp-3) var(--ios-sp-4)
-             calc(var(--ios-tab-h) + var(--ios-safe-b) + var(--ios-sp-4));
+             calc(var(--ios-tab-h) + var(--ios-safe-b) + 64px + var(--ios-sp-3));
     overflow-x: hidden;
   }
   .tt-status { display: none; }
@@ -383,6 +401,17 @@
      inside it. Nothing scrolls, nothing errors, nothing is logged: the list is
      simply not there. Two 44pt rows is the floor that keeps a body legible. */
   .tt-panel__body { min-height: 96px; }
+
+  /* When several sub-heads share one panel (Watchlist / AI selection / Scanner
+     radar inside `.tt-panel--watchlist`), the heads need a clear divider so
+     the sections do not bleed into one another. The first head keeps the base
+     border-top so the panel has an outer frame; every following head gets a
+     subtle inset border + a touch of margin so the eye reads "new section". */
+  .tt-panel .tt-panel__head + .tt-panel__head {
+    margin-top: var(--ios-sp-2);
+    border-top: 0.5px solid var(--ios-sep);
+    padding-top: calc(var(--ios-sp-3) + 2px);
+  }
 
   /* Pane selector as a segmented control. */
   .tt-pane-bar {
@@ -405,6 +434,63 @@
     background: var(--ios-card);
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
   }
+
+  /* ── Quick-action bar (.tt-qbar) ──────────────────────────────────────
+     A second fixed strip above the tab bar, holding the primary trading
+     actions where the thumb naturally lands. Each button delegates to an
+     existing control (watch-refresh / flatten-all / [data-pane-btn=ticket]),
+     so the actions are the same as the panel buttons — only the entry
+     points are new. Liquid-glass background matches the tab bar so the two
+     read as one continuous toolbar with the primary CTA on the right. */
+  .tt-qbar {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: calc(var(--ios-tab-h) + var(--ios-safe-b));
+    z-index: 41;
+    display: flex;
+    align-items: stretch;
+    gap: var(--ios-sp-2);
+    padding: var(--ios-sp-2) var(--ios-sp-4)
+             calc(var(--ios-sp-2) + var(--ios-sp-1));
+    background-image: var(--hm-glass-sheen),
+      linear-gradient(180deg, var(--ios-bg-2), var(--ios-bg-2));
+    backdrop-filter: saturate(180%) blur(20px);
+    border-top: 0.5px solid var(--ios-sep);
+  }
+  .tt-qbar__btn {
+    flex: 1 1 0;
+    min-width: 0;
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 0 var(--ios-sp-3);
+    border: 0;
+    border-radius: var(--ios-r-btn);
+    background: var(--ios-fill);
+    color: var(--ios-label);
+    font-family: inherit;
+    font-size: var(--ios-fs-foot);
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .tt-qbar__btn:active { background: rgba(120, 120, 128, 0.22); }
+  .tt-qbar__ico {
+    width: 18px;
+    height: 18px;
+    flex: 0 0 auto;
+  }
+  .tt-qbar__btn--primary {
+    flex: 0 0 auto;
+    min-width: 132px;
+    background: var(--ios-blue);
+    color: #fff;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18),
+                0 4px 14px rgba(0, 122, 255, 0.32);
+  }
+  .tt-qbar__btn--primary:active { background: #0062cc; }
 
   /* ── Sheets (iOS modal presentation) ──────────────────────────────── */
   .tt-drawer {
@@ -599,6 +685,10 @@
   /* The pane switcher is a phone affordance: on tablet every pane is visible
      at once, so it is redundant chrome. */
   .tt-pane-bar { display: none; }
+  /* Quick-action bar is also a phone affordance. The sidebar already gives
+     tablet users a one-tap path to the ticket pane, the deselect Mark has the
+     Flatten control, and Refresh lives on the watchlist header. */
+  .tt-qbar { display: none; }
 
   /* Split view: all three Trade panes are on screen at once. Belt-and-braces
      against any future single-pane rule that matches [data-pane] without a
