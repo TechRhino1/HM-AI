@@ -74,6 +74,10 @@ data/metadata/
 data/*.db
 data/*.db-shm
 data/*.db-wal
+# Timestamped snapshots taken before a repair (tools/repair_forecast_column.py).
+# These are binary and local-only; `data/*.db` above does not match them because
+# the suffix is appended, not replaced.
+data/*.db.bak-*
 
 # Derived signal-scan cache (regenerate with tools/scan_signals.py)
 data/signals/

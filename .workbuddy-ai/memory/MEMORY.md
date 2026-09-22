@@ -51,6 +51,9 @@ bulk-delete guard (exit 1, all green). A *fixed* basetemp is worse: pytest remov
 * **A frontend reading a key the server never sends renders the empty state on success** (3×).
 * **A refused order is answered with HTTP 200** — decide from the body's `status`, never `res.ok`.
   Broker sends `reason`.
+* **Back up `jarvis_history.db` with `sqlite3.Connection.backup()`, never `cp`.** It is WAL-mode and a
+  live dashboard server keeps it open and WRITES to it via `sync_mt5_history`, so a plain copy can be
+  torn. `tools/repair_forecast_column.py` is read-only until `--apply`.
 * **`executed_trades.timestamp` is not the entry time** — `database.py:287` overwrites it with the
   EXIT time; **neither column is safe**. Run `tools/audit_trades.py`. **Shared defect? grep the other
   front end.**
