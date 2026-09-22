@@ -4764,6 +4764,63 @@
     }
   }
 
+  /* ── Mobile card layout for data tables ────────────────────────────────
+     A 10-column trade journal is unreadable on a phone: the columns cannot
+     fit, the row scrolls sideways, and a bare value like "0.8" means nothing
+     without its column header. On narrow screens CSS restyles each <tr> as a
+     CARD instead — one record per block, primary field first.
+
+     CSS cannot read the <th> text, so the header has to travel with the cell.
+     This copies each column's <th> label onto its <td> as `data-label`, which
+     the card CSS renders with `content: attr(data-label)`. Purely
+     presentational: no data is read, written, or reordered, and no business
+     logic is touched. `data-primary` marks the first cell so the card can
+     promote it to a header.
+
+     Rows are rendered (and re-rendered) by many functions, so rather than
+     instrument every renderer we observe each table and re-stamp whenever its
+     rows change. Observing `childList` only means the setAttribute calls below
+     cannot retrigger the observer. */
+  function labelTable(table) {
+    if (!table) return;
+    var headRow = table.querySelector('thead tr');
+    if (!headRow) return;
+    var heads = headRow.querySelectorAll('th');
+    var labels = [];
+    for (var i = 0; i < heads.length; i++) {
+      labels.push(String(heads[i].textContent || '').trim());
+    }
+    if (!labels.length) return;
+
+    var rows = table.querySelectorAll('tbody tr');
+    for (var r = 0; r < rows.length; r++) {
+      var cells = rows[r].querySelectorAll('td');
+      for (var c = 0; c < cells.length; c++) {
+        var td = cells[c];
+        var lbl = labels[c];
+        if (lbl && td.getAttribute('data-label') !== lbl) {
+          td.setAttribute('data-label', lbl);
+        }
+        if (c === 0 && !td.hasAttribute('data-primary')) {
+          td.setAttribute('data-primary', 'true');
+        }
+      }
+    }
+  }
+
+  function enhanceTables() {
+    var tables = document.querySelectorAll('table');
+    Array.prototype.forEach.call(tables, function (t) {
+      labelTable(t);
+      if (t.getAttribute('data-hm-cards')) return;
+      t.setAttribute('data-hm-cards', 'true');
+      if (typeof MutationObserver === 'function') {
+        var mo = new MutationObserver(function () { labelTable(t); });
+        mo.observe(t, { childList: true, subtree: true });
+      }
+    });
+  }
+
   function boot() {
     bind();
     // Reparent the tab bar for the current width and keep it correct across
@@ -4775,6 +4832,11 @@
       if (mq.addEventListener) mq.addEventListener('change', onMq);
       else if (mq.addListener) mq.addListener(onMq);
     }
+    // Stamp column labels onto every table cell so the mobile card layout can
+    // show what each value means. Tables rendered later are covered by the
+    // per-table MutationObserver set up here.
+    enhanceTables();
+
     var clock = $('clock');
     var tickClock = function () {
       if (clock) clock.textContent = clockTime(new Date());

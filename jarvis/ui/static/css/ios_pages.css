@@ -1,0 +1,443 @@
+/*
+  HM Algo 2.0 — iOS liquid-glass layer for the market & console surfaces.
+
+  Loaded LAST on stocks.html, india.html, india_options.html and console.html,
+  after the page sheet, auth.css and hm_ui.css. Every rule lives inside a media
+  query, so the desktop layout (>= 1025px) is byte-identical to before.
+
+  Why this file exists
+  --------------------
+  hm_ui.css already unified the HUD and the mobile tab bar, but the page sheets
+  fight it with `!important` on the SAME properties (stocks.css pins
+  `.nav-links-wrapper { display: flex !important }` and `.stocks-hud
+  { flex-direction: column !important }`), so several "unified" rules never
+  actually applied. The result on a phone was:
+
+    - the Options tab bar (5 tabs) clipped its own labels: each tab is 74px
+      wide but "Option Chain" needs 85px, and `.mob-tab-btn` is `nowrap` with
+      visible overflow, so the labels painted over their neighbours;
+    - the auth widget was 28px tall (`min-height: 28px` in auth.css), well
+      under the 44px touch target;
+    - the brand text hard-cut mid-word (overflow: hidden, no ellipsis);
+    - the console view tabs were 32px tall;
+    - a few flex rows clipped their own content (.buy-now-comp, the console
+      account strip).
+
+  Everything below is scoped to `max-width: 1024px`. The `!important` flags are
+  deliberate and limited to properties a page sheet already pins with
+  `!important` — without them the rule loses the cascade and the bug returns.
+
+  Structure
+  ---------
+    1. Tokens
+    2. Liquid-glass surfaces (header, tab bar, cards, sheets)
+    3. Header: brand, nav pills, auth widget, search
+    4. Bottom tab bar: labels that never overlap
+    5. Tap targets
+    6. Clipping fixes
+    7. Motion
+    8. Accessibility
+*/
+
+/* ═══ 1. Tokens ═══════════════════════════════════════════════════════ */
+
+@media (max-width: 1024px) {
+  :root {
+    /* These four pages are dark-themed (their <meta> pins color-scheme dark),
+       so the iOS palette is the dark one unconditionally — mixing in the light
+       palette would fight the page sheets rather than sit on top of them. */
+    --pg-glass: rgba(17, 24, 39, 0.62);
+    --pg-glass-2: rgba(26, 35, 53, 0.52);
+    --pg-glass-hi: rgba(255, 255, 255, 0.06);
+    --pg-sep: rgba(255, 255, 255, 0.10);
+    --pg-sep-strong: rgba(255, 255, 255, 0.16);
+    --pg-label: #f3f6fb;
+    --pg-label-2: rgba(226, 232, 240, 0.64);
+    --pg-blue: #0a84ff;
+    --pg-green: #30d158;
+    --pg-red: #ff453a;
+
+    --pg-r-card: 16px;
+    --pg-r-ctl: 12px;
+    --pg-r-pill: 980px;
+
+    --pg-blur: saturate(180%) blur(22px);
+    --pg-blur-light: saturate(160%) blur(14px);
+
+    /* iOS spring curve — the one Apple uses for sheet/button motion. */
+    --pg-ease: cubic-bezier(0.32, 0.72, 0, 1);
+    --pg-dur: 0.34s;
+    --pg-dur-fast: 0.18s;
+
+    --pg-tap: 44px;
+    --pg-safe-b: env(safe-area-inset-bottom, 0px);
+    --pg-safe-t: env(safe-area-inset-top, 0px);
+    --pg-safe-l: env(safe-area-inset-left, 0px);
+    --pg-safe-r: env(safe-area-inset-right, 0px);
+  }
+
+  /* ═══ 2. Liquid-glass surfaces ═════════════════════════════════════ */
+
+  /* Layered depth: a translucent base, a blur, a hairline top highlight and a
+     soft drop shadow. The highlight is what reads as "glass" rather than
+     "translucent panel" — it is the light catching the top edge. */
+  .stocks-hud,
+  .india-hud,
+  .opt-hud,
+  .cx-topbar {
+    background: var(--pg-glass) !important;
+    -webkit-backdrop-filter: var(--pg-blur) !important;
+    backdrop-filter: var(--pg-blur) !important;
+    border-bottom: 0.5px solid var(--pg-sep-strong) !important;
+    box-shadow:
+      inset 0 0.5px 0 var(--pg-glass-hi),
+      0 6px 22px rgba(0, 0, 0, 0.34) !important;
+  }
+
+  .mobile-nav-bar {
+    background: var(--pg-glass) !important;
+    -webkit-backdrop-filter: var(--pg-blur) !important;
+    backdrop-filter: var(--pg-blur) !important;
+    border-top: 0.5px solid var(--pg-sep-strong) !important;
+    box-shadow:
+      inset 0 0.5px 0 var(--pg-glass-hi),
+      0 -6px 22px rgba(0, 0, 0, 0.34) !important;
+    padding-bottom: max(6px, var(--pg-safe-b)) !important;
+  }
+
+  /* Cards and panels get the same treatment so the whole surface reads as one
+     material. Kept as a list rather than `[class*="card"]` so a future class
+     cannot silently pull an unrelated element into the glass layer. */
+  .pane-card,
+  .calc-pane-card,
+  .chart-pane-card,
+  .fii-card,
+  .filter-panel-card,
+  .chain-card,
+  .payoff-card,
+  .dossier-card,
+  .dossier-chart-card,
+  .trade-plan-card,
+  .screener-table-card,
+  .sector-heatmap-panel,
+  .news-sentiment-card,
+  .multi-tf-matrix-card,
+  .cx-card,
+  .cx-sheet,
+  .cx-palette__panel,
+  .modal-card,
+  .modal-card-wide {
+    background: var(--pg-glass-2) !important;
+    -webkit-backdrop-filter: var(--pg-blur-light) !important;
+    backdrop-filter: var(--pg-blur-light) !important;
+    border: 0.5px solid var(--pg-sep) !important;
+    border-radius: var(--pg-r-card) !important;
+    box-shadow:
+      inset 0 0.5px 0 var(--pg-glass-hi),
+      0 1px 2px rgba(0, 0, 0, 0.28),
+      0 10px 30px rgba(0, 0, 0, 0.30) !important;
+  }
+
+  /* ═══ 3. Header ════════════════════════════════════════════════════ */
+
+  /* The brand must be allowed to shrink, and it must truncate with an ellipsis
+     rather than hard-cutting mid-word. `min-width: 0` is what lets a flex child
+     shrink below its content at all. */
+  .brand-wrapper {
+    min-width: 0 !important;
+  }
+  .brand-text {
+    min-width: 0 !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+  }
+  /* The trailing descriptor ("• Options & Derivatives Terminal") is a 40-char
+     text node that cannot shrink and cannot be hidden by CSS while it stays a
+     bare text node, so it was hard-cutting mid-word and colliding with the auth
+     pill. It is now wrapped, and on a phone it is dropped: the page's own
+     heading already names the desk, so the descriptor is pure repetition in the
+     one row where space is scarcest. `color: inherit` keeps it out of the
+     `.brand-text span` accent rule. */
+  /* hm_ui.css drops EVERY span inside the brand at <= 600px to "keep the mark,
+     drop the version suffix", which also swallowed the product name and left
+     the header reading just "HM". Restore the name; only the descriptor goes. */
+  .brand-text > span:not(.brand-text__desc) {
+    display: inline !important;
+  }
+  @media (max-width: 640px) {
+    .brand-text .brand-text__desc {
+      display: none !important;
+    }
+  }
+
+  /* Market nav pills: a momentum-scroll row, iOS style. */
+  .nav-links-wrapper {
+    gap: 6px !important;
+    padding: 2px 0 !important;
+    -webkit-overflow-scrolling: touch;
+    scroll-snap-type: x proximity;
+  }
+  .btn-nav-switch {
+    flex: 0 0 auto !important;
+    min-height: var(--pg-tap) !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    padding: 0 14px !important;
+    border-radius: var(--pg-r-pill) !important;
+    border: 0.5px solid var(--pg-sep) !important;
+    background: var(--pg-glass-2) !important;
+    -webkit-backdrop-filter: var(--pg-blur-light) !important;
+    backdrop-filter: var(--pg-blur-light) !important;
+    font-size: 0.75rem !important;
+    scroll-snap-align: start;
+    transition: transform var(--pg-dur-fast) var(--pg-ease),
+                background var(--pg-dur-fast) var(--pg-ease),
+                border-color var(--pg-dur-fast) var(--pg-ease);
+  }
+  .btn-nav-switch:active {
+    transform: scale(0.96);
+  }
+  .btn-nav-switch.btn-nav-active,
+  .btn-nav-switch[aria-current="page"] {
+    background: rgba(10, 132, 255, 0.18) !important;
+    border-color: rgba(10, 132, 255, 0.55) !important;
+    color: #ffffff !important;
+  }
+
+  /* Auth widget. auth.css pins `min-height: 28px` on the logout button and
+     gives the user pill no floor at all (measured 23px). Both are raised to the
+     44px touch target and restyled as iOS capsules. */
+  .auth-header-widget {
+    gap: 6px !important;
+    flex-shrink: 0;
+  }
+  .auth-user-pill,
+  .auth-logout-btn,
+  .auth-login-btn {
+    min-height: var(--pg-tap) !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    padding: 0 12px !important;
+    border-radius: var(--pg-r-pill) !important;
+    font-size: 0.6875rem !important;
+    background: var(--pg-glass-2) !important;
+    -webkit-backdrop-filter: var(--pg-blur-light) !important;
+    backdrop-filter: var(--pg-blur-light) !important;
+    border: 0.5px solid var(--pg-sep-strong) !important;
+    transition: transform var(--pg-dur-fast) var(--pg-ease),
+                background var(--pg-dur-fast) var(--pg-ease);
+  }
+  .auth-user-pill:active,
+  .auth-logout-btn:active,
+  .auth-login-btn:active {
+    transform: scale(0.96);
+  }
+  .auth-logout-btn {
+    background: rgba(255, 69, 58, 0.16) !important;
+    border-color: rgba(255, 69, 58, 0.45) !important;
+    color: #ff8a80 !important;
+  }
+
+  /* Search field — a 44px glass capsule with a 16px input so iOS Safari does
+     not zoom the viewport on focus. */
+  .search-container,
+  .search-container input,
+  .search-box {
+    min-height: var(--pg-tap) !important;
+  }
+  .search-container input,
+  .search-box input {
+    font-size: 16px !important;
+  }
+
+  /* ═══ 4. Bottom tab bar ════════════════════════════════════════════ */
+
+  /* The five-tab Options bar gives each tab 74px but "Option Chain" needs 85px.
+     `nowrap` + visible overflow painted the labels over their neighbours. The
+     fix is to let a long label wrap onto a second line and clamp it, so no
+     label can ever leave its own tab. */
+  .mob-tab-btn {
+    white-space: normal !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    line-height: 1.12 !important;
+    font-size: 0.625rem !important;
+    letter-spacing: 0.02em !important;
+    padding: 4px 6px !important;
+    gap: 1px !important;
+    transition: transform var(--pg-dur-fast) var(--pg-ease),
+                background var(--pg-dur-fast) var(--pg-ease),
+                color var(--pg-dur-fast) var(--pg-ease);
+  }
+  .mob-tab-btn:active {
+    transform: scale(0.94);
+  }
+  /* An active tab gets the iOS accent, not a bottom rule: a filled capsule
+     reads as "selected" at a glance on a translucent bar. */
+  .mob-tab-btn.active,
+  .mob-tab-btn[aria-selected="true"] {
+    background: rgba(10, 132, 255, 0.20) !important;
+    border-color: rgba(10, 132, 255, 0.45) !important;
+    color: #ffffff !important;
+    box-shadow: inset 0 0.5px 0 var(--pg-glass-hi) !important;
+  }
+
+  /* Console view tabs measured 32px — under the touch target. */
+  .cx-viewtab,
+  .cx-panelbar__btn {
+    min-height: var(--pg-tap) !important;
+  }
+
+  /* ═══ 5. Tap targets ═══════════════════════════════════════════════ */
+
+  /* Any control that is a primary tap surface gets a 44px floor. Scoped by
+     selector rather than a blanket `button { min-height: 44px }`, which would
+     distort inline icon buttons and the dense table action cells. */
+  .btn-buy-now-cta,
+  .und-pill,
+  .cx-iconbtn,
+  .cx-desk,
+  .hm-btn,
+  .btn-close-panel,
+  .btn-refresh,
+  .filter-chip,
+  .tab-btn {
+    min-height: var(--pg-tap) !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    transition: transform var(--pg-dur-fast) var(--pg-ease),
+                background var(--pg-dur-fast) var(--pg-ease);
+  }
+  .btn-buy-now-cta:active,
+  .und-pill:active,
+  .cx-iconbtn:active,
+  .hm-btn:active {
+    transform: scale(0.97);
+  }
+
+  /* ═══ 6. Clipping fixes ════════════════════════════════════════════ */
+
+  /* A flex row whose children cannot shrink clips its own content (measured:
+     .buy-now-comp 219px of content inside a 150px box). `min-width: 0` on the
+     row lets it shrink so its children can wrap instead of being cut off. The
+     console account strip is different: its items are `flex-shrink: 0` and the
+     ROW scrolls, so `min-width: 0` must NOT reach the items — doing so let them
+     shrink below their own value and the numbers overlapped the next label. */
+  .buy-now-comp,
+  .buy-now-comp > *,
+  .cx-account {
+    min-width: 0 !important;
+  }
+  .buy-now-comp {
+    flex-wrap: wrap !important;
+    overflow-wrap: anywhere;
+  }
+  /* The console account strip is a momentum-scroll row, not a clip box, and
+     its items keep their intrinsic width so no value can overlap its neighbour. */
+  .cx-account {
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  .cx-account::-webkit-scrollbar { display: none; }
+  .cx-account__item {
+    min-width: max-content !important;
+    flex-shrink: 0 !important;
+  }
+
+  /* Any dense table on a narrow screen: let the wrapper scroll rather than
+     silently cutting a column. */
+  .screener-table-card,
+  .cx-card__body {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* ═══ 7. Motion ════════════════════════════════════════════════════ */
+
+  /* A single entry animation for content cards — iOS "rise in". Applied with a
+     short stagger so a grid settles rather than appearing all at once. */
+  @keyframes pg-rise {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: none; }
+  }
+  .pane-card,
+  .dossier-card,
+  .trade-plan-card,
+  .chain-card,
+  .payoff-card,
+  .cx-card {
+    animation: pg-rise var(--pg-dur) var(--pg-ease) both;
+  }
+  /* The stagger is capped at 6 steps so a long list never feels slow. */
+  .pane-card:nth-child(2), .dossier-card:nth-child(2),
+  .trade-plan-card:nth-child(2), .cx-card:nth-child(2) { animation-delay: 0.03s; }
+  .pane-card:nth-child(3), .dossier-card:nth-child(3),
+  .trade-plan-card:nth-child(3), .cx-card:nth-child(3) { animation-delay: 0.06s; }
+  .pane-card:nth-child(4), .dossier-card:nth-child(4),
+  .trade-plan-card:nth-child(4), .cx-card:nth-child(4) { animation-delay: 0.09s; }
+  .pane-card:nth-child(5), .dossier-card:nth-child(5),
+  .trade-plan-card:nth-child(5), .cx-card:nth-child(5) { animation-delay: 0.12s; }
+  .pane-card:nth-child(n+6), .dossier-card:nth-child(n+6),
+  .trade-plan-card:nth-child(n+6), .cx-card:nth-child(n+6) { animation-delay: 0.15s; }
+
+  /* Focus ring: iOS uses a soft outer glow, not a hard outline. */
+  .stocks-hud a:focus-visible,
+  .india-hud a:focus-visible,
+  .opt-hud a:focus-visible,
+  .cx-topbar a:focus-visible,
+  .mobile-nav-bar button:focus-visible,
+  .auth-header-widget button:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.55);
+    border-radius: var(--pg-r-ctl);
+  }
+
+  /* ═══ 8. Accessibility ═════════════════════════════════════════════ */
+
+  @media (prefers-reduced-motion: reduce) {
+    .pane-card,
+    .dossier-card,
+    .trade-plan-card,
+    .chain-card,
+    .payoff-card,
+    .cx-card {
+      animation: none !important;
+    }
+    .btn-nav-switch:active,
+    .auth-user-pill:active,
+    .auth-logout-btn:active,
+    .mob-tab-btn:active,
+    .hm-btn:active {
+      transform: none !important;
+    }
+  }
+
+  /* Glass is a legibility risk for low-vision users: with `more contrast` the
+     blur is dropped and the surfaces become opaque so text always sits on a
+     solid ground. */
+  @media (prefers-contrast: more) {
+    .stocks-hud,
+    .india-hud,
+    .opt-hud,
+    .cx-topbar,
+    .mobile-nav-bar {
+      background: #0b1220 !important;
+      -webkit-backdrop-filter: none !important;
+      backdrop-filter: none !important;
+    }
+    .pane-card,
+    .dossier-card,
+    .trade-plan-card,
+    .chain-card,
+    .payoff-card,
+    .cx-card,
+    .screener-table-card,
+    .sector-heatmap-panel {
+      background: #111a2b !important;
+      -webkit-backdrop-filter: none !important;
+      backdrop-filter: none !important;
+    }
+  }
+}

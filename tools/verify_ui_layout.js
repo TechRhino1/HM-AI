@@ -89,6 +89,11 @@ const TAP_SELECTORS = [
   '.tt-tab', '.tt-pane-bar__btn', '.mob-tab-btn',
   '.market-nav-item', '.tt-nav-trigger', '.btn-nav-switch',
   '.tt-drawer-trigger', '.tt-drawer__item',
+  /* Market / console surfaces. These were previously unmeasured, which is how
+     a 28px Logout button and a 26px underlying pill shipped. */
+  '.auth-logout-btn', '.auth-login-btn', '.auth-user-pill',
+  '.btn-buy-now-cta', '.und-pill', '.cx-iconbtn', '.cx-viewtab',
+  '.cx-panelbar__btn', '.mobile-nav-bar button',
 ];
 
 /* Surfaces that must carry the liquid-glass treatment. */
@@ -302,6 +307,55 @@ async function main() {
             }
           }
 
+          // ---- Silent clipping, page-wide -------------------------------------
+          // The block above is scoped to the dashboard's active `.tt-view`. The
+          // market and console pages have no `.tt-view`, so their clipped
+          // content was never measured — a 219px `.buy-now-comp` inside a 150px
+          // box on /stocks passed every run. This is the same rule applied to
+          // the whole document, with the same three exclusions (ellipsis,
+          // sr-only, lightweight-charts).
+          out.clipAll = [];
+          for (const el of document.body.querySelectorAll('*')) {
+            const cs = getComputedStyle(el);
+            if (cs.textOverflow === 'ellipsis') continue;
+            // Visually-hidden text is 1x1 BY DESIGN, so its "overflow" is the
+            // whole point. Three naming conventions exist in this repo.
+            if (el.closest('.tt-sr-only, .sr-only, .cx-visually-hidden')) continue;
+            if (el.closest('#chart, #chart-tv')) continue;
+            if (/^(INPUT|SELECT|TEXTAREA)$/.test(el.tagName)) continue;
+            // A horizontal clip only counts if the element cannot scroll to the
+            // content itself (overflow auto/scroll is a working scroll box).
+            if (el.clientWidth > 0 && el.scrollWidth > el.clientWidth + 2 &&
+                (cs.overflowX === 'hidden' || cs.overflowX === 'clip')) {
+              out.clipAll.push({
+                tag: el.tagName.toLowerCase(),
+                id: el.id || '',
+                cls: String(el.className || '').slice(0, 40),
+                kind: 'h',
+                scroll: el.scrollWidth,
+                client: el.clientWidth,
+                need: el.clientWidth,
+              });
+              continue;
+            }
+            const oy = cs.overflowY;
+            if (el.clientHeight > 0 && el.scrollHeight > el.clientHeight + 2 &&
+                (oy === 'hidden' || oy === 'clip')) {
+              const need = tallestControl(el);
+              if (need > 0 && el.clientHeight < need - 1) {
+                out.clipAll.push({
+                  tag: el.tagName.toLowerCase(),
+                  id: el.id || '',
+                  cls: String(el.className || '').slice(0, 40),
+                  kind: 'v',
+                  scroll: el.scrollHeight,
+                  client: el.clientHeight,
+                  need,
+                });
+              }
+            }
+          }
+
           return out;
         }, TAP_SELECTORS, GLASS_SELECTORS);
 
@@ -344,6 +398,17 @@ async function main() {
               ? `${c.tag}${c.id ? '#' + c.id : ''} squashed to ${c.client}px, ` +
                 `needs ${c.need}px (content ${c.scroll}px)`
               : `${c.tag}${c.id ? '#' + c.id : ''} ${c.scroll}>${c.client}`).join(', '));
+        }
+
+        // 5. Page-wide silent clipping (every page).
+        {
+          const clips = probe.clipAll || [];
+          ok(`${label}: nothing clipped out of its own box`, clips.length === 0,
+            clips.slice(0, 3).map(c => c.kind === 'v'
+              ? `${c.tag}${c.id ? '#' + c.id : ''}${c.cls ? '.' + c.cls.split(' ')[0] : ''} ` +
+                `squashed to ${c.client}px, needs ${c.need}px`
+              : `${c.tag}${c.id ? '#' + c.id : ''}${c.cls ? '.' + c.cls.split(' ')[0] : ''} ` +
+                `${c.scroll}>${c.client}`).join(', '));
         }
 
         if (SHOTS_DIR) {

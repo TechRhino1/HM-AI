@@ -472,7 +472,11 @@ header.terminal-hud {
     letter-spacing: -0.01em;
     white-space: nowrap;
 }
-.brand-text span {
+/* Only the product NAME is accented. The `:not()` guard keeps the rule from
+   colouring a trailing descriptor ("• Stock Intelligence"), which is a sibling
+   span in the market-page headers. On the dashboard `.brand-text` holds only
+   the name span, so `:not()` matches it and the rendering is unchanged. */
+.brand-text span:not(.brand-text__desc) {
     color: var(--hm-accent);
 }
 

@@ -1240,15 +1240,20 @@
 
   /* Every other view stacks its panels and scrolls as ONE column. Each panel
      sizes to its own content, which is the correct phone behaviour: a table of
-     twenty rows should scroll the page, not sit inside a 200px letterbox. */
+     twenty rows should scroll the page, not sit inside a 200px letterbox.
+
+     Block flow (NOT grid) on purpose: with `display: grid` and
+     `grid-auto-rows: minmax(0, auto)` a panel that is also a flex column got
+     shrunk by the grid to a fraction of the view (152px out of 463px) and
+     its overflow:hidden head chopped off most of the calendar's content.
+     Letting the view be a plain block container makes every panel render at its
+     natural content height and the view scrolls the whole stack. */
   #view-news.tt-view[data-active="true"],
   #view-analyst.tt-view[data-active="true"],
   #view-markets.tt-view[data-active="true"],
   #view-analytics.tt-view[data-active="true"],
   #view-backtest.tt-view[data-active="true"] {
-    grid-template-columns: minmax(0, 1fr);
-    grid-auto-rows: minmax(0, auto);
-    align-content: start;
+    display: block;
     overflow-y: auto;
     overscroll-behavior: contain;
     -webkit-overflow-scrolling: touch;

@@ -162,6 +162,19 @@
     border-radius: var(--ios-r-btn);
   }
 
+  /* The shared auth widget (auth.css) floors the Logout button at 28px and
+     gives the user pill no floor at all, so on a phone both are under the
+     44pt touch target. Raised here for every surface that loads the widget,
+     including this dashboard's drawer. */
+  .auth-user-pill,
+  .auth-logout-btn,
+  .auth-login-btn {
+    min-height: var(--ios-tap);
+    display: inline-flex;
+    align-items: center;
+    border-radius: var(--ios-r-btn);
+  }
+
   /* Segmented control (UISegmentedControl).
      The 44pt rule below grows these buttons, and a segmented control lives
      inside a panel HEAD whose width it does not control — at tablet width the
@@ -241,6 +254,159 @@
   a:focus-visible {
     outline: 3px solid var(--ios-blue);
     outline-offset: 2px;
+  }
+
+  /* ═══ Data tables → stacked cards ═══════════════════════════════════════
+     A trade journal is 10 columns wide and a watchlist is 6. Neither fits a
+     phone: the row scrolls sideways (or the panel clips it), the numbers sit
+     in a letterbox, and a bare value like "0.8" carries no meaning without
+     the column header it belongs to. Tables are also a desktop idiom — they
+     reward scanning many records on a wide screen, which is exactly what a
+     phone does not have.
+
+     Below 1025px each <tr> becomes one CARD: one record per block, the
+     primary field promoted to a header, every other field a labelled
+     key/value row. No horizontal scrolling at any width, values keep their
+     column name (dashboard.js copies the <th> text onto each <td> as
+     `data-label`), and the whole card is a single tap target that opens the
+     existing detail view. The table layout is untouched at >= 1025px. */
+  .tt-table,
+  .tt-table > tbody,
+  .tt-table > tbody > tr,
+  .tt-table > tbody > tr > td {
+    display: block;
+    width: auto;
+  }
+  /* The table fills the panel body and never wider; without `min-width: 0`
+     a wide descendant (the card grid below) would inflate it past the
+     panel. */
+  .tt-table { min-width: 0; max-width: 100%; }
+  /* The header row is gone visually but survives for screen readers: the
+     per-cell `data-label` is what the eye reads, and `aria` still gets the
+     real table semantics from the markup. */
+  .tt-table > thead { display: none; }
+
+  .tt-table > tbody > tr {
+    position: relative;
+    margin: 0 var(--ios-sp-2) var(--ios-sp-2);
+    padding: var(--ios-sp-3);
+    border-radius: var(--ios-r-card);
+    border: 0.5px solid var(--ios-sep);
+    background: var(--ios-fill);
+    /* Fields flow in a responsive grid rather than one full-width line each.
+       A 10-column journal stacked one field per line produced a 250px card
+       that could never fit the panel's scroll box on a phone; two columns
+       halve the height and keep every line short enough to read. */
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    column-gap: var(--ios-sp-4);
+    row-gap: 2px;
+    /* The grid's intrinsic min-width is the sum of its track minimums (2 x
+       140 = 280px). Setting `min-width: 0` lets the card itself shrink
+       inside a narrower panel. */
+    min-width: 0;
+  }
+  /* A clickable row is a button-sized target, not a 20px line of text. */
+  .tt-table > tbody > tr[data-clickable="true"] { min-height: var(--ios-tap); }
+  .tt-table > tbody > tr[aria-selected="true"] {
+    border-color: var(--ios-blue);
+    background: rgba(0, 122, 255, 0.10);
+  }
+
+  /* Key / value row: label left, value right, both on one line. */
+  .tt-table > tbody > tr > td {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--ios-sp-3);
+    padding: 2px 0;
+    border: 0;
+    text-align: left;
+    font-size: var(--ios-fs-foot);
+    /* Grid items default to `min-width: min-content`, so a single long word
+       ("Fed Chair Powell Speaks") in a cell can blow the whole card past the
+       panel width. `min-width: 0` lets the cell shrink below its content and
+       `overflow-wrap: anywhere` breaks the word at the edge. Without these
+       the cards scroll horizontally inside the panel even though there is no
+       horizontal scrollbar to grab. */
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+  .tt-table > tbody > tr > td::before {
+    content: attr(data-label);
+    flex: 0 0 auto;
+    font-size: var(--ios-fs-caption);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--ios-label-2);
+  }
+  .tt-table > tbody > tr > td > * {
+    text-align: right;
+    /* Flex children default to `min-width: min-content`, so a single long
+       word inside a span prevents the cell from shrinking and wraps onto a
+       new grid track (or blows past the panel). `min-width: 0` lets the
+       child shrink and `overflow-wrap` actually does its job. */
+    min-width: 0;
+  }
+
+  /* Primary field: the card's title. Largest text in the block, no repeated
+     label, separated from the detail rows by a hairline. */
+  .tt-table > tbody > tr > td[data-primary="true"] {
+    grid-column: 1 / -1;
+    padding: 0 0 var(--ios-sp-2);
+    margin-bottom: var(--ios-sp-2);
+    border-bottom: 0.5px solid var(--ios-sep);
+  }
+  .tt-table > tbody > tr > td[data-primary="true"]::before { content: none; }
+  .tt-table > tbody > tr > td[data-primary="true"] .tt-symbol,
+  .tt-table > tbody > tr > td[data-primary="true"] {
+    font-size: var(--ios-fs-head);
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    color: var(--ios-label);
+  }
+  /* Actions keep full-width flow so a Close button stays thumb-sized. */
+  .tt-table > tbody > tr > td .tt-btn,
+  .tt-table > tbody > tr > td button {
+    min-height: 36px;
+    padding: 0 var(--ios-sp-3);
+  }
+  /* Numbers should not wrap mid-value. */
+  .tt-table > tbody > tr > td .tt-num { white-space: nowrap; }
+
+  /* The economic-calendar row carries two values in the event cell (event name
+     + currency pairs) and a `white-space: nowrap` time/countdown cell. In a
+     multi-column grid those become a horizontal squeeze: the two spans in the
+     event cell fight for one flex row and the nowrap time/countdown text
+     blows past the track. A stacked single-column card reads better on a
+     phone — each labelled field on its own line, and the event cell stacks
+     name above pairs instead of side-by-side. */
+  .tt-news > tbody > tr {
+    display: block;
+    grid-template-columns: none;
+  }
+  /* The event cell bypasses the generic label-left / value-right flex layout:
+     it holds two stacked spans and the long event string needs the full card
+     width to wrap cleanly. The label sits as a small caption above. */
+  .tt-news > tbody > tr > td.tt-news__event {
+    display: block;
+    padding: 2px 0;
+  }
+  .tt-news > tbody > tr > td.tt-news__event::before {
+    display: block;
+    margin-bottom: 2px;
+  }
+  .tt-news > tbody > tr > td.tt-news__event > * {
+    display: block;
+    width: 100%;
+    min-width: 0;
+  }
+  /* Allow the time and countdown strings to wrap if the card is narrow; on
+     desktop the `nowrap` rule keeps a timestamp tidy in a wide cell. */
+  .tt-news > tbody > tr > td.tt-news__when,
+  .tt-news > tbody > tr > td.tt-news__cd {
+    white-space: normal;
   }
 }
 
@@ -394,13 +560,33 @@
   }
   .tt-status { display: none; }
 
-  /* A panel body must be able to show at least two rows of its own content.
-     The view's rows are sized from the shell on a phone and a body is a flex
-     child carrying `min-height: 0`, so a tall head (the news filter toolbar is
-     ~132px) can squeeze the list down to 24px — less than the 37px control
-     inside it. Nothing scrolls, nothing errors, nothing is logged: the list is
-     simply not there. Two 44pt rows is the floor that keeps a body legible. */
-  .tt-panel__body { min-height: 96px; }
+  /* On a phone the shell has only one pane visible at a time: the trade view
+     keeps three panels that swap in and out of a 1fr grid cell, while the
+     other views (news, analyst, markets, analytics, backtest) become a single
+     scrollable column. The two cases need DIFFERENT body sizing:
+
+     - Trade panes must fill the cell. A body that collapses to 0 leaves a
+       loading chart or ticket as a blank rectangle (the bug that introduced
+       the 96px floor in the first place). `min-height: 96px` keeps an empty
+       body legible — two 44pt rows is the smallest thing that is still
+       visibly content.
+
+     - The single-column views scroll the WHOLE view, so each body must
+       render at its natural content height instead of being squeezed into a
+       96px letterbox. `flex: 0 0 auto` stops the flex idiom from collapsing
+       the body below its content; `overflow: auto` (the desktop default)
+       stays in place as a safety net for any residual overflow inside a
+       panel. Without this the news calendar shrank to 96px of a 5367px list
+       and the verifier correctly complained that a 250-px card could never
+       be seen in full inside an overflowing 152-px box. */
+  #view-trade .tt-panel__body { min-height: 96px; }
+  #view-news .tt-panel__body,
+  #view-analyst .tt-panel__body,
+  #view-markets .tt-panel__body,
+  #view-analytics .tt-panel__body,
+  #view-backtest .tt-panel__body {
+    flex: 0 0 auto;
+  }
 
   /* When several sub-heads share one panel (Watchlist / AI selection / Scanner
      radar inside `.tt-panel--watchlist`), the heads need a clear divider so
