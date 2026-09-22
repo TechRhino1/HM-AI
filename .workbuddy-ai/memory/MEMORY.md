@@ -96,6 +96,24 @@ bulk-delete guard (exit 1, all green). A *fixed* basetemp is worse: pytest remov
   *data* path does, so `account_info()` answered with the live account (762.51 vs a simulated 10,000).
   **Check the mode before the call** — keep the reconnect first, it rewrites `mode`.
 
+## UI / mobile
+
+* **Only `dashboard.html` loads `ios_mobile.css`.** `/` and `/dashboard` both serve it (not
+  `index.html` — that is `/classic`), so `/` *looks* fixed while `/stocks /india /options /console` run
+  their own page sheets + `ios_pages.css`. Check which sheet a page loads before believing a fix
+  landed. `hm_ui.css` is the shared token/unification layer.
+* **`@media (max-width: 1024px)` only *should* mean desktop is untouched — prove it.** At 1440px,
+  snapshot `getComputedStyle` for every element, `sheet.disabled = true`, snapshot again, diff. One
+  page load, so live data cannot pollute it. `.scratch/prove_desktop.js`. This is how a `<span>` wrap
+  was caught recolouring the brand at every width (`hm_ui.css:475` `.brand-text span { color: accent }`
+  — fix at the source with `:not()`, never by patching colour back in the new sheet).
+* **A page sheet's `!important` beats `hm_ui.css`'s specificity**, so several "unified" mobile rules
+  never applied (`stocks.css` pins `.nav-links-wrapper { display: flex !important }`).
+* **Visually-hidden text has 3 class names here** — `.tt-sr-only`, `.sr-only`, `.cx-visually-hidden`.
+  A clip scan must exclude all three or 1×1 sr-only text is reported as clipped on every page.
+* **`tools/verify_ui_layout.js` listed the market pages but only ran 3 checks on them** (tap/clip were
+  dashboard-gated). Now 285/285. A page in `PAGES` is not a page that is measured.
+
 ## Signal quality — **the entry signal has no measured edge.**
 
 Loses money on real MT5 data; 3/20 beat always-long vs 5 by chance; **DSR > 0.95 met by 0/20** (94,937
