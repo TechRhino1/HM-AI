@@ -128,7 +128,7 @@
         /* The markup is rendered into #auth-header-widget AND into every
            [data-auth-mount]. Two mounts exist because the dashboard's rail copy
            sits in .tt-rail__group--secondary, which theme_terminal.css hides at
-           <=767px; a child cannot escape an ancestor's display:none, so the
+           <=599px; a child cannot escape an ancestor's display:none, so the
            dashboard had no login/logout on a phone at all. Rendering one string
            into both keeps them from ever disagreeing. */
         authMarkup: function (user) {

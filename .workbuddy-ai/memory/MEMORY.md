@@ -22,14 +22,20 @@ and paid-for rules only; detail lives elsewhere.
 
 ## Running the platform
 
-`HM_start.py [paper|live]` — **real MT5 data; `paper` = simulated fills**. **The account is DEMO**
-(`trade_mode == 0`) despite LIVE mode — **read `trade_mode`, never the server name**. **Don't leave the
-platform alive only as a session background task** — use `HM_dashboard.bat`. Routes: **`TRAPS.md`**.
+`HM_start.py [paper|live]` — **real MT5 data; `paper` = simulated fills**; **default is `live`**
+(`HM_start.py:360`; `paper|test|sim|demo|backtest` switch). **The account is DEMO** (`trade_mode == 0`)
+despite LIVE mode — **read `trade_mode`, never the server name** (telemetry returns `trade_mode: None`).
+**Session background tasks are killed at end of turn**, so launch detached — `Start-Process -FilePath
+<managed python.exe> -ArgumentList HM_start.py` (PowerShell-from-bash **and** `cmd.exe`-from-PowerShell
+are both blocked). `HM_dashboard.bat` is dashboard-only (no engine/MT5/tunnel). Routes: **`TRAPS.md`**.
 
 ## Baselines
 
-**pytest 2980 passed / 0 failed / 20 deselected** — green, not tolerated. Parse `--junit-xml`: the
-harness truncates pytest's stdout, so `-rf` never prints.
+**pytest ~3002 passed / 2 failed / 20 deselected** — green is the goal. The 2 failures in
+`tests/test_execution_mode_is_recorded.py::TestTheModeCanBeFiltered` (`test_a_possible_filter_still_queries`,
+`test_mode_and_origin_compose`) are **pre-existing temp-DB isolation issues** (real broker ticket numbers
+leak through `SQLiteTradeDB` temp fixtures). Not caused by recent UI / P1 commits. Parse `--junit-xml`:
+the harness truncates pytest's stdout, so `-rf` never prints.
 
 **Run the suite with `env -u HTTP_PROXY -u HTTPS_PROXY -u http_proxy -u https_proxy NO_PROXY='*'` and
 a unique `--basetemp=.scratch/ptmp-$TS`** — a proxy hangs localhost HTTP; >50 temp entries trips the

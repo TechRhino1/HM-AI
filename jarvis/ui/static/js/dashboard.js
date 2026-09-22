@@ -4725,14 +4725,15 @@
      the bar parks under the nav bar rather than at the bottom. To get a true
      viewport-pinned bar we lift `.tt-tabs` out of the rail onto <body> on phone
      widths (body has no containing-block-creating property), and return it to
-     the rail on desktop so the desktop layout — a tab strip inside the nav bar
-     — is never touched. */
+     the rail on tablet and desktop. On tablet the same element is the sidebar's
+     nav list, so it must stay inside the rail — 600-1024px is the one case
+     where the tabs are visible AND must not be reparented. */
   function syncTabBarHost() {
     var tabs = document.querySelector('.tt-tabs');
     var rail = document.querySelector('.tt-rail');
     var app = document.querySelector('.tt-app');
     if (!tabs || !rail || !app) return;
-    var phone = window.matchMedia('(max-width: 767px)').matches;
+    var phone = window.matchMedia('(max-width: 599px)').matches;
     if (phone) {
       if (tabs.parentElement !== app) app.appendChild(tabs);
     } else if (tabs.parentElement !== rail) {
@@ -4748,7 +4749,7 @@
     // breakpoint changes (orientation flip, desktop↔phone resize).
     syncTabBarHost();
     if (window.matchMedia) {
-      var mq = window.matchMedia('(max-width: 767px)');
+      var mq = window.matchMedia('(max-width: 599px)');
       var onMq = function () { syncTabBarHost(); };
       if (mq.addEventListener) mq.addEventListener('change', onMq);
       else if (mq.addListener) mq.addListener(onMq);

@@ -11,8 +11,8 @@
 <link rel="stylesheet" href="/static/css/hm_ui.css">
 <link rel="stylesheet" href="/static/css/theme_terminal.css">
 <link rel="stylesheet" href="/static/css/auth.css">
-<!-- iOS design language for phones only. Loaded last so its @media (max-width:767px)
-     rules win over the base themes without touching the desktop layout (≥768px). -->
+<!-- iOS design language for phones (≤599px) and tablets (600-1024px). Loaded
+     last so its media rules win over the base themes; ≥1025px is untouched. -->
 <link rel="stylesheet" href="/static/css/ios_mobile.css">
 
 <!--
@@ -57,19 +57,55 @@
     <span id="session-label">—</span>
   </div>
 
+  <!-- Primary destinations. One DOM node serves both breakpoints: a bottom tab
+       bar on phones and a vertical nav list in the tablet sidebar. Each item
+       carries an SF Symbols-style monochrome icon plus a text label, so the
+       control is never icon-only (VoiceOver reads the label, and the meaning
+       does not depend on recognising a glyph). -->
   <nav class="tt-tabs" role="tablist" aria-label="Primary views">
     <button class="tt-tab" role="tab" data-view-btn="trade"
-            aria-selected="true" aria-controls="view-trade">Trade</button>
+            aria-selected="true" aria-controls="view-trade">
+      <svg class="tt-tab__ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <path d="M4 4v15h16"/><path d="M8 19v-5"/><path d="M12 19V9"/><path d="M16 19v-7"/>
+      </svg>
+      <span class="tt-tab__label">Trade</span>
+    </button>
     <button class="tt-tab" role="tab" data-view-btn="news"
-            aria-selected="false" aria-controls="view-news">News</button>
+            aria-selected="false" aria-controls="view-news">
+      <svg class="tt-tab__ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 9h7"/><path d="M7 13h7"/>
+      </svg>
+      <span class="tt-tab__label">News</span>
+    </button>
     <button class="tt-tab" role="tab" data-view-btn="analyst"
-            aria-selected="false" aria-controls="view-analyst">Analyst</button>
+            aria-selected="false" aria-controls="view-analyst">
+      <svg class="tt-tab__ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <circle cx="11" cy="11" r="6"/><path d="M20 20l-4.4-4.4"/>
+      </svg>
+      <span class="tt-tab__label">Analyst</span>
+    </button>
     <button class="tt-tab" role="tab" data-view-btn="markets"
-            aria-selected="false" aria-controls="view-markets">Markets</button>
+            aria-selected="false" aria-controls="view-markets">
+      <svg class="tt-tab__ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <circle cx="12" cy="12" r="8"/><path d="M4 12h16"/>
+        <path d="M12 4c2.6 2.6 2.6 12.8 0 16"/><path d="M12 4c-2.6 2.6-2.6 12.8 0 16"/>
+      </svg>
+      <span class="tt-tab__label">Markets</span>
+    </button>
     <button class="tt-tab" role="tab" data-view-btn="analytics"
-            aria-selected="false" aria-controls="view-analytics">Analytics</button>
+            aria-selected="false" aria-controls="view-analytics">
+      <svg class="tt-tab__ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <path d="M3 20h18"/><path d="M7 20v-6"/><path d="M12 20V8"/><path d="M17 20v-9"/>
+      </svg>
+      <span class="tt-tab__label">Analytics</span>
+    </button>
     <button class="tt-tab" role="tab" data-view-btn="backtest"
-            aria-selected="false" aria-controls="view-backtest">Backtest</button>
+            aria-selected="false" aria-controls="view-backtest">
+      <svg class="tt-tab__ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/>
+      </svg>
+      <span class="tt-tab__label">Backtest</span>
+    </button>
   </nav>
 
   <!-- Cross-page navigation. The four market pages carry these as a visible
@@ -923,8 +959,11 @@
   </div>
 
   <nav class="tt-drawer__body">
-    <p class="tt-drawer__section" id="drawer-sec-views">Views</p>
-    <div class="tt-drawer__group" role="group" aria-labelledby="drawer-sec-views">
+    <!-- Redundant on phones: the bottom tab bar already reaches every view in
+         one tap, so this duplicate list is dropped there by ios_mobile.css.
+         Nothing is deleted — the same destinations stay in the tab bar. -->
+    <p class="tt-drawer__section tt-drawer__only-views" id="drawer-sec-views">Views</p>
+    <div class="tt-drawer__group tt-drawer__only-views" role="group" aria-labelledby="drawer-sec-views">
       <button type="button" class="tt-drawer__item" data-view-btn="trade" aria-selected="true"><span class="tt-drawer__ico" aria-hidden="true">⇅</span>Trade</button>
       <button type="button" class="tt-drawer__item" data-view-btn="news"><span class="tt-drawer__ico" aria-hidden="true">▤</span>News</button>
       <button type="button" class="tt-drawer__item" data-view-btn="analyst"><span class="tt-drawer__ico" aria-hidden="true">◎</span>Analyst</button>

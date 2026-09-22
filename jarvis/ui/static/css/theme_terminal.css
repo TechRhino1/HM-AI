@@ -1224,8 +1224,11 @@
   }
 }
 
-/* Phone: one pane at a time, chosen by the pane bar. */
-@media (max-width: 767px) {
+/* Phone: one pane at a time, chosen by the pane bar.
+   The breakpoint is 599px, not 767px: 600-1024px is the TABLET range, which
+   gets a sidebar and a split view from ios_mobile.css. Anything that used to
+   claim "phone" up to 767px would otherwise fight the tablet layout. */
+@media (max-width: 599px) {
   .tt-app { grid-template-rows: auto auto 1fr auto; grid-template-areas: "rail" "panebar" "main" "status"; }
 
   /* Trade keeps the fill behaviour: one pane at a time and the chart needs the
@@ -2179,7 +2182,7 @@
   display: none;
 }
 
-@media (max-width: 767px) {
+@media (max-width: 599px) {
   /* Rail becomes a wrapping app bar. Safe-area padding keeps it clear of the
      status bar / notch on a real device. */
   .tt-rail {
@@ -2287,7 +2290,7 @@
    - the spacer, whose only job was to push the desktop groups apart.
    The account/auth controls that the secondary group hides are re-provided in
    the drawer via [data-auth-mount] -- see .tt-drawer__auth below. */
-@media (max-width: 767px) {
+@media (max-width: 599px) {
   .tt-rail {
     display: grid;
     grid-template-columns: auto minmax(0, 1fr) auto;
@@ -2555,7 +2558,9 @@ body[data-view="trade"] p.tt-drawer__only-trade { display: block; }
    flag to keep in sync with the dropdown controller's `openDropdown`. */
 body:has(.tt-drawer:not([hidden])) .tt-drawer-scrim { display: block; }
 
-@media (max-width: 767px) {
+/* The hamburger leads the phone nav bar. Tablets get a persistent sidebar
+   instead, so the trigger only exists below 600px. */
+@media (max-width: 599px) {
   .tt-drawer-trigger { display: inline-flex; order: 0; }
 }
 
