@@ -31,11 +31,8 @@ are both blocked). `HM_dashboard.bat` is dashboard-only (no engine/MT5/tunnel). 
 
 ## Baselines
 
-**pytest ~3002 passed / 2 failed / 20 deselected** — green is the goal. The 2 failures in
-`tests/test_execution_mode_is_recorded.py::TestTheModeCanBeFiltered` (`test_a_possible_filter_still_queries`,
-`test_mode_and_origin_compose`) are **pre-existing temp-DB isolation issues** (real broker ticket numbers
-leak through `SQLiteTradeDB` temp fixtures). Not caused by recent UI / P1 commits. Parse `--junit-xml`:
-the harness truncates pytest's stdout, so `-rf` never prints.
+**pytest ~3004 passed / 0 failed / 20 deselected** — green, not tolerated. Parse `--junit-xml`: the
+harness truncates pytest's stdout, so `-rf` never prints.
 
 **Run the suite with `env -u HTTP_PROXY -u HTTPS_PROXY -u http_proxy -u https_proxy NO_PROXY='*'` and
 a unique `--basetemp=.scratch/ptmp-$TS`** — a proxy hangs localhost HTTP; >50 temp entries trips the
@@ -73,6 +70,11 @@ bulk-delete guard (exit 1, all green). A *fixed* basetemp is worse: pytest remov
   `None` coerces to +1R. AI6.
 * **Hermeticity needs both ends.** Stateful components load eagerly in `__init__`;
   `SelfLearningEngine` re-reads the journal at *call* time. Wrap both. AI8.
+* **`fetch_recent_trades` calls `sync_mt5_history` on every read.** Any test that
+  builds a `SQLiteTradeDB(db_path=tmp_path/"x.db")` and reads will receive real
+  broker deals whenever the terminal is running. Fix at the fixture boundary
+  with `monkeypatch.setattr(d, "sync_mt5_history", lambda *a, **kw: None)`, not
+  by guarding production — guarding on path broke 4 tests that need sync.
 * **A test hardcoding a version number goes vacuous when it moves** — derive "newer". AI10.
 * **No production caller makes a fallback branch the most dangerous code in the file** — AI9's
   `WalkForwardEngine` certified a run that validated nothing as `1.0`/passed. **An OR of criteria must
