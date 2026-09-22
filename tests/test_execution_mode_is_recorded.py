@@ -45,8 +45,18 @@ from jarvis.data.database import (
 
 
 @pytest.fixture
-def db(tmp_path):
-    return SQLiteTradeDB(db_path=str(tmp_path / "hist.db"))
+def db(tmp_path, monkeypatch):
+    # `fetch_recent_trades` calls `sync_mt5_history` on every read, and that
+    # INSERTs real MT5 deals into whatever DB it is given. With the broker
+    # terminal running (as it is on the dev box), a fixture that builds a
+    # temp SQLiteTradeDB would receive real broker tickets like 940451636 next
+    # to its own ticket=1 row, and the "filter returns 1 row" asserts in this
+    # file would all fail. This file does not test sync semantics, so stub the
+    # sync out for the fixture — tests that DO want to exercise sync build
+    # their own fixture and call `sync_mt5_history` explicitly.
+    d = SQLiteTradeDB(db_path=str(tmp_path / "hist.db"))
+    monkeypatch.setattr(d, "sync_mt5_history", lambda *a, **kw: None)
+    return d
 
 
 def _one(db, **kw):
