@@ -72,13 +72,17 @@ const VIEWPORTS = [
 
 /* Dashboard tabs are separate layouts, not just separate data - each has its
    own grid-template-columns, so each can overflow independently. */
+/* `hud` names the page's own chrome bar. The market/console pages have no
+   .tt-app shell, so GLASS_SELECTORS below never matched them and their glass
+   was asserted nowhere - the four pages most recently given the treatment were
+   the four pages whose treatment was unmeasured. */
 const PAGES = [
   { name: 'dashboard', url: '/dashboard', views: ['trade', 'news', 'analyst', 'markets', 'analytics', 'backtest'] },
   { name: 'forex', url: '/' },
-  { name: 'stocks', url: '/stocks' },
-  { name: 'india', url: '/india' },
-  { name: 'options', url: '/options' },
-  { name: 'console', url: '/console' },
+  { name: 'stocks', url: '/stocks', hud: '.stocks-hud' },
+  { name: 'india', url: '/india', hud: '.india-hud' },
+  { name: 'options', url: '/options', hud: '.opt-hud' },
+  { name: 'console', url: '/console', hud: '.cx-topbar' },
 ];
 
 /* Controls WCAG 2.5.5 applies to: the primary way in and out of every view.
@@ -174,14 +178,35 @@ async function main() {
           }
         }
 
-        const probe = await page.evaluate((tapSel, glassSel) => {
+        const probe = await page.evaluate((tapSel, glassSel, hudSel) => {
           const de = document.documentElement;
           const out = {
             scrollW: de.scrollWidth,
             clientW: de.clientWidth,
             tap: [],
             glass: [],
+            hud: null,
           };
+
+          /* The page's own chrome bar. Measured independently of
+             GLASS_SELECTORS, which are dashboard-shell selectors and match
+             nothing on the market/console pages. */
+          if (hudSel) {
+            const hud = document.querySelector(hudSel);
+            if (hud && hud.getBoundingClientRect().width > 0) {
+              const cs = getComputedStyle(hud);
+              const bf = cs.backdropFilter || cs.webkitBackdropFilter || 'none';
+              const bg = cs.backgroundColor || '';
+              const m = /rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*(?:,\s*([\d.]+)\s*)?\)/.exec(bg);
+              out.hud = {
+                sel: hudSel,
+                backdrop: bf,
+                bg,
+                alpha: m && m[4] !== undefined ? parseFloat(m[4]) : (m ? 1 : 0),
+                sheen: /inset/.test(cs.boxShadow || '') && /0\.5px/.test(cs.boxShadow || ''),
+              };
+            }
+          }
 
           // Tap targets: only on a coarse pointer, and only real controls.
           const coarse = window.matchMedia('(pointer: coarse)').matches;
@@ -357,7 +382,7 @@ async function main() {
           }
 
           return out;
-        }, TAP_SELECTORS, GLASS_SELECTORS);
+        }, TAP_SELECTORS, GLASS_SELECTORS, pageDef.hud || null);
 
         // 1. Horizontal overflow.
         const overflow = probe.scrollW - probe.clientW;
@@ -380,6 +405,28 @@ async function main() {
           const noSheen = probe.glass.filter(g => !g.hasSheen);
           ok(`${label}: glass surfaces carry the sheen layer`, noSheen.length === 0,
             noSheen.map(g => g.sel).join(', '));
+        }
+
+        // 3b. The page's own chrome bar must be the glass material. The market
+        //     and console pages have no app shell, so check 3 never covered them.
+        //     Gated to the sheet's own range: ios_pages.css is deliberately inert
+        //     above 1024px, so asserting its sheen at desktop-1440 would demand
+        //     the desktop change - the opposite of the contract.
+        if (pageDef.hud && vp.width <= 1024) {
+          const hud = probe.hud;
+          if (!hud) {
+            ok(`${label}: chrome bar present`, false,
+              `${pageDef.hud} not found or has no box`);
+          } else {
+            ok(`${label}: chrome bar is frosted (${hud.sel})`,
+              hud.backdrop && hud.backdrop !== 'none',
+              `backdrop-filter = ${hud.backdrop}`);
+            ok(`${label}: chrome bar is translucent (${hud.sel})`,
+              hud.alpha > 0 && hud.alpha < 1,
+              `background ${hud.bg} (alpha ${hud.alpha}) - an opaque bar is not glass`);
+            ok(`${label}: chrome bar carries the hairline sheen (${hud.sel})`,
+              hud.sheen, 'no inset 0.5px highlight in box-shadow');
+          }
         }
 
         // 4. App shell integrity + silent clipping (dashboard only).

@@ -837,7 +837,13 @@
        6. MOBILE DOCK NAVIGATION CONTROLLER
        ========================================================================== */
 
-    window.switchMobileOptionsView = function (view) {
+    /* The dock's global is installed by mobile_dock.js, which loads BEFORE the
+       dock markup so the buttons work from first paint. Defining it here instead
+       meant the buttons were live ~360 lines of markup before this file ran, and
+       an early tap threw "switchMobileOptionsView is not defined" and did
+       nothing. Register the real behaviour with that bootstrap; fall back to
+       assigning the global so this file still works if the bootstrap is absent. */
+    function applyMobileOptionsView(view) {
         state.activeMobileView = view;
         const btnSingles = document.getElementById("mob-btn-singles");
         const btnSpreads = document.getElementById("mob-btn-spreads");
@@ -902,7 +908,13 @@
                 if (secChain) secChain.style.display = "flex";
             }
         }
-    };
+    }
+
+    if (typeof window.registerMobileView === "function") {
+        window.registerMobileView("options", applyMobileOptionsView);
+    } else {
+        window.switchMobileOptionsView = applyMobileOptionsView;
+    }
 
     /* ==========================================================================
        7. INITIALIZATION & SEARCH
@@ -913,7 +925,9 @@
         fetchSingleOptionSignals();
         fetchOptionRecommendations();
         if (window.innerWidth <= 900) {
-            window.switchMobileOptionsView("singles");
+            /* Honour a selection made before this file loaded (the dock is live
+               from first paint). Hardcoding "singles" here reverted it. */
+            window.switchMobileOptionsView(state.activeMobileView || "singles");
         }
     });
 

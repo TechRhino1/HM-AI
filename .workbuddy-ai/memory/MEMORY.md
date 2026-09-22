@@ -1,118 +1,10 @@
 # HM-AI / HM Algo 2.0 — index
 
-Injected every session, **hard-truncated at ~6,520 bytes** — stay under or the tail is lost. Pointers
-and paid-for rules only; detail lives elsewhere.
-
-* Root: **`MASTER_PLAN.md`** — backlog + M0–M5. **`AGENT_SYSTEM.md`** — multi-agent system.
-* `TRAPS.md` — every trap. `AUDIT-2026-09.md` — signal quality. `AUDIT-TRADES-2026-09.md` — trade-data
-  audit. `YYYY-MM-DD.md` — per-session detail.
-* Skills: `diagnose-git-push-auth`, `recover-vanished-working-tree`, `audit-trading-system-integrity`
-  (§5 measurement traps).
-
-## Non-negotiables
-
-* **`.git/` is not safe here.** Files vanish overnight (4 incidents; two after `git stash`). Commit and
-  push early, **never `git stash`**. Some paths are **not writable** — use a hardlink alias in
-  `.scratch/_restore/`.
-* **No hot-reload.** Python edits need a restart; static files are re-read per request. *A hang that
-  does not reproduce in a fresh interpreter is a stale process.* `py-spy dump --pid <pid>`.
-* **Push: bypass the credential selector.** A plain `git push` hung 6m37s; the helper path **has a
-  space**. Use `git -c credential.helper= -c credential.helper='!tools/gcm_wrap.sh' push origin main`.
-  `git status` always says `[gone]` — verify with `git ls-remote`. Use `git commit -F <file>`.
-
-## Running the platform
-
-`HM_start.py [paper|live]` — **real MT5 data; `paper` = simulated fills**; **default is `live`**
-(`HM_start.py:360`; `paper|test|sim|demo|backtest` switch). **The account is DEMO** (`trade_mode == 0`)
-despite LIVE mode — **read `trade_mode`, never the server name** (telemetry returns `trade_mode: None`).
-**Session background tasks are killed at end of turn**, so launch detached — `Start-Process -FilePath
-<managed python.exe> -ArgumentList HM_start.py` (PowerShell-from-bash **and** `cmd.exe`-from-PowerShell
-are both blocked). `HM_dashboard.bat` is dashboard-only (no engine/MT5/tunnel). Routes: **`TRAPS.md`**.
-
-## Baselines
-
-**pytest ~3004 passed / 0 failed / 20 deselected** — green, not tolerated. Parse `--junit-xml`: the
-harness truncates pytest's stdout, so `-rf` never prints.
-
-**Run the suite with `env -u HTTP_PROXY -u HTTPS_PROXY -u http_proxy -u https_proxy NO_PROXY='*'` and
-a unique `--basetemp=.scratch/ptmp-$TS`** — a proxy hangs localhost HTTP; >50 temp entries trips the
-bulk-delete guard (exit 1, all green). A *fixed* basetemp is worse: pytest removes it.
-
-`tools/` — 11 harnesses, all green; failure modes in **`TRAPS.md`**.
-
-## Rules worth repeating
-
-* **Execution mode must not gate market data.** Paper skips `mt5.initialize()`, so the data path must
-  call `broker_symbols.ensure_mt5_terminal()` itself or every frame is synthetic. Health flags must be
-  **measured**. **Never call `mt5.initialize()` on a request path** — no terminal ⇒ GIL held forever.
-* **The UI has no request timeout** — an empty result must still repaint; a watchdog must state a stall.
-* **MT5 times are BROKER-SERVER time, not UTC** — use `jarvis/data/broker_time.py`. Probes:
-  **`curl --noproxy '*'`**.
-* **A frontend reading a key the server never sends renders the empty state on success** (3×).
-* **A refused order is answered with HTTP 200** — decide from the body's `status`, never `res.ok`.
-  Broker sends `reason`.
-* **Back up `jarvis_history.db` with `sqlite3.Connection.backup()`, never `cp`.** It is WAL-mode and a
-  live dashboard server keeps it open and WRITES to it via `sync_mt5_history`, so a plain copy can be
-  torn. `tools/repair_forecast_column.py` is read-only until `--apply`.
-* **`executed_trades.timestamp` is not the entry time** — `database.py:287` overwrites it with the
-  EXIT time; **neither column is safe**. Run `tools/audit_trades.py`. **Shared defect? grep the other
-  front end.**
-* **`curl -s -o /dev/null -w '%{http_code}'` exits 23** — an `&&` chain on it silently skips every
-  later step. Use `;` between probes.
-* **Risk limits come from `config/settings.json`**; risk state is scoped by execution mode. Re-anchor
-  only via `tools/reset_risk_baseline.py`.
-* **A price must be finite AND `> 0`.** `_is_finite(0.0)` is True; an empty frame gives `bid = 0.0`,
-  from which a **negative** stop passed the last gate.
-* **A label must describe the thing it names**: anchor-price provenance, `expected_value` = outcome,
-  `ai_score` = `85.0`.
-* **Pruning per-ticket state destroys the only record of the path** — D19: retain, NULL when unsampled.
-* **A hung native call holds the MT5 lock forever** — `TimeoutGuard` bounds the caller, not the lock
-  (5/5 wedged); `TrackedRLock` bounds the wait and names the holder.
-* **Unknown R: withhold a recorded quantity, default a hyperparameter.** Bandit `rewards` is in R →
-  leave it (win/loss IS measured). In `update_online` R only weights the gradient → omit the arg;
-  `None` coerces to +1R. AI6.
-* **Hermeticity needs both ends.** Stateful components load eagerly in `__init__`;
-  `SelfLearningEngine` re-reads the journal at *call* time. Wrap both. AI8.
-* **`fetch_recent_trades` calls `sync_mt5_history` on every read.** Any test that
-  builds a `SQLiteTradeDB(db_path=tmp_path/"x.db")` and reads will receive real
-  broker deals whenever the terminal is running. Fix at the fixture boundary
-  with `monkeypatch.setattr(d, "sync_mt5_history", lambda *a, **kw: None)`, not
-  by guarding production — guarding on path broke 4 tests that need sync.
-* **A test hardcoding a version number goes vacuous when it moves** — derive "newer". AI10.
-* **No production caller makes a fallback branch the most dangerous code in the file** — AI9's
-  `WalkForwardEngine` certified a run that validated nothing as `1.0`/passed. **An OR of criteria must
-  name the one that carried it.**
-* **Adding an entry authority: re-key every guard that read the old verdict**, and drop any blunt
-  floor on the *same quantity* (else it vetoes the validated one).
-* **A mutation that kills nothing may be unreachable** — an inner `except` swallowed it first. Never
-  count a mutation as evidence until it turns something red. **Verify each in isolation**: mutations on
-  one file shadow each other (hit twice), so a combined count is only an upper bound.
-* **"Dead" ≠ "unwired".** Measure before wiring: AI9's calibration refuses **11 of 16** symbols
-  (negative OOS expectancy, gold included) — shipped **opt-in**, default OFF.
-* **A partial state rollback leaves the new state wearing the old state's credentials.** AI7: prior
-  weights kept the discarded model's 204 training steps. Reset derived fields together; carry
-  provenance. **Latent is not a defence** — it fires on the next schema change, reporting success.
-* **"Not connected" ≠ "the broker cannot answer".** A18: paper never calls `mt5.initialize()` but the
-  *data* path does, so `account_info()` answered with the live account (762.51 vs a simulated 10,000).
-  **Check the mode before the call** — keep the reconnect first, it rewrites `mode`.
-
-## UI / mobile
-
-* **Only `dashboard.html` loads `ios_mobile.css`.** `/` and `/dashboard` both serve it (not
-  `index.html` — that is `/classic`), so `/` *looks* fixed while `/stocks /india /options /console` run
-  their own page sheets + `ios_pages.css`. Check which sheet a page loads before believing a fix
-  landed. `hm_ui.css` is the shared token/unification layer.
-* **`@media (max-width: 1024px)` only *should* mean desktop is untouched — prove it.** At 1440px,
-  snapshot `getComputedStyle` for every element, `sheet.disabled = true`, snapshot again, diff. One
-  page load, so live data cannot pollute it. `.scratch/prove_desktop.js`. This is how a `<span>` wrap
-  was caught recolouring the brand at every width (`hm_ui.css:475` `.brand-text span { color: accent }`
-  — fix at the source with `:not()`, never by patching colour back in the new sheet).
-* **A page sheet's `!important` beats `hm_ui.css`'s specificity**, so several "unified" mobile rules
-  never applied (`stocks.css` pins `.nav-links-wrapper { display: flex !important }`).
-* **Visually-hidden text has 3 class names here** — `.tt-sr-only`, `.sr-only`, `.cx-visually-hidden`.
-  A clip scan must exclude all three or 1×1 sr-only text is reported as clipped on every page.
-* **`tools/verify_ui_layout.js` listed the market pages but only ran 3 checks on them** (tap/clip were
-  dashboard-gated). Now 285/285. A page in `PAGES` is not a page that is measured.
+Injected every session, **hard-truncated at ~6,520 bytes** — stay under or the tail is lost. Rules only;
+detail lives elsewhere: **`MASTER_PLAN.md`** (backlog, M0–M5), **`AGENT_SYSTEM.md`** (multi-agent),
+**`TRAPS.md`** (every trap), `AUDIT-2026-09.md` (signal quality), `AUDIT-TRADES-2026-09.md` (trade data),
+`YYYY-MM-DD.md` (sessions). Skills: `diagnose-git-push-auth`, `recover-vanished-working-tree`,
+`audit-trading-system-integrity`, `diagnose-layout-defects`.
 
 ## Signal quality — **the entry signal has no measured edge.**
 
@@ -123,4 +15,90 @@ rows = **327 independent bets**). **`AUDIT-2026-09.md`**. **Consume `spread_pips
 ## Environment
 
 Writes outside the project dir are refused. Bash, not the other Windows shell. Python 3.13.12 at
-`…\binaries\python\versions\3.13.12\python.exe`.
+`…\binaries\python\versions\3.13.12\python.exe`. **`env` as a command wrapper silently swallows its
+payload** — see Baselines.
+
+## Non-negotiables
+
+* **`.git/` is not safe here** — files vanish overnight (4 incidents; two after `git stash`). Commit and
+  push early, **never `git stash`**. Some paths are **not writable** — hardlink alias in `.scratch/_restore/`.
+* **No hot-reload.** Python edits need a restart; static files and templates are re-read per request.
+  *A hang that does not reproduce in a fresh interpreter is a stale process.* `py-spy dump --pid <pid>`.
+* **Push: bypass the credential selector.** Plain `git push` hung 6m37s; the helper path **has a space**.
+  `git -c credential.helper= -c credential.helper='!tools/gcm_wrap.sh' push origin main`. `git status`
+  always says `[gone]` — verify with `git ls-remote`. Use `git commit -F <file>`.
+
+## Running the platform
+
+`HM_start.py [paper|live]` — **real MT5 data; `paper` = simulated fills**; **default `live`**
+(`HM_start.py:360`). **The account is DEMO** (`trade_mode == 0`) despite LIVE mode — **read `trade_mode`,
+never the server name**. **Session background tasks are killed at end of turn** — launch detached via
+`Start-Process` (PowerShell-from-bash and `cmd.exe`-from-PowerShell are both blocked). `HM_dashboard.bat`
+is dashboard-only. Routes: **`TRAPS.md`**.
+
+## Baselines
+
+**pytest 3004 passed / 0 failed / 20 deselected** (junit `tests=3018 failures=0 errors=0 skipped=1`) —
+green, not tolerated. Parse `--junit-xml`; the harness truncates stdout so `-rf` never prints.
+
+**NEVER wrap a command in `env`** — `env FOO=bar python -c "print(1)"` prints **nothing**, exit 0: it
+swallows whatever it wraps. That, not `--basetemp`, is why pytest "succeeded" with an empty log.
+`python -m pytest` also no-ops here (yet `pytest --version` works). Working invocation:
+
+`NO_PROXY='*' <python> -c "import pytest,sys; sys.exit(pytest.main(['-q','--junit-xml=.scratch/pytest.xml']))"`
+
+~3.5 min. **A command that "succeeds" instantly with no output — suspect the wrapper, not the payload.**
+`nohup &` / `run_in_background` do not survive here. `tools/` — 12 harnesses, all green.
+
+## Rules worth repeating
+
+* **Execution mode must not gate market data.** Paper skips `mt5.initialize()`, so the data path must call
+  `broker_symbols.ensure_mt5_terminal()` itself or every frame is synthetic. **Never call
+  `mt5.initialize()` on a request path** — no terminal ⇒ GIL held forever.
+* **MT5 times are BROKER-SERVER time, not UTC** — `jarvis/data/broker_time.py`. Probes: `curl --noproxy '*'`.
+* **A frontend reading a key the server never sends renders the empty state on success** (3×). **A refused
+  order is answered with HTTP 200** — decide from the body's `status`, never `res.ok`.
+* **Back up `jarvis_history.db` with `sqlite3.Connection.backup()`, never `cp`** (WAL + live writer).
+* **`executed_trades.timestamp` is not the entry time** — `database.py:287` overwrites it with the EXIT
+  time; **neither column is safe**. `tools/audit_trades.py`. **Shared defect? grep the other front end.**
+* **`curl -s -o /dev/null -w '%{http_code}'` exits 23** — an `&&` chain on it silently skips later steps.
+* **A price must be finite AND `> 0`.** `_is_finite(0.0)` is True; an empty frame gives `bid = 0.0`, from
+  which a **negative** stop passed the last gate.
+* **`fetch_recent_trades` calls `sync_mt5_history` on every read** — tests get real broker deals. Fix at
+  the fixture boundary with `monkeypatch.setattr`, not by guarding production (broke 4 tests).
+* **Unknown R: withhold a recorded quantity, default a hyperparameter.** Bandit `rewards` is in R → leave
+  it; in `update_online` R only weights the gradient → omit the arg (`None` ⇒ +1R). AI6.
+* **Never count a mutation as evidence until it turns something red** — it may be unreachable, and
+  mutations on one file shadow each other. **"Dead" ≠ "unwired"** (AI9's calibration refuses 11 of 16
+  symbols → opt-in). **No production caller may make a fallback branch the most dangerous code in the
+  file.** **Latent is not a defence** (AI7). **Check the execution mode before the broker call** (A18).
+  Hermeticity needs both ends (AI8). **Detail: `TRAPS.md`.**
+
+## UI / mobile
+
+* **Only `dashboard.html` loads `ios_mobile.css`.** `/` and `/dashboard` both serve it (not `index.html`
+  — that is `/classic`), so `/` *looks* fixed while `/stocks /india /options /console` run their own page
+  sheets + `ios_pages.css`. Check which sheet a page loads before believing a fix landed.
+* **`@media (max-width: 1024px)` only *should* mean desktop is untouched — prove it.** At 1440px snapshot
+  `getComputedStyle` per element, `sheet.disabled = true`, snapshot again, diff, in one page load
+  (`.scratch/prove_desktop.js`). Caught a `<span>` wrap recolouring the brand at every width — fix at the
+  source with `:not()`, never by patching colour back in the new sheet.
+* **A page sheet's `!important` beats `hm_ui.css`'s specificity**, so several "unified" rules never
+  applied. Visually-hidden text has 3 class names — `.tt-sr-only`, `.sr-only`, `.cx-visually-hidden`.
+* **A page in `PAGES` is not a page that is measured.** The verifier's market pages ran 3 checks; its
+  `GLASS_SELECTORS` are dashboard-only, so the four glass pages' glass was asserted nowhere. Now a
+  per-page `hud` + 3 checks **gated to `vp.width <= 1024`**. 238/238 → **321/321**.
+* **A server-rendered control whose handler is defined by a later blocking script is dead on arrival.**
+  The dock's inline `onclick="switchMobileXView(...)"` resolves at *click* time, but the handler lives
+  ~400 lines later — so every early tap threw `switchMobileXView is not defined` and did nothing. Reads
+  as **intermittent** (warm-cache smoke test passes; ~1 run in 3 fails). Fixed by `mobile_dock.js` loaded
+  **before** the dock, replaying an early tap via `window.registerMobileView`. `/console` and `/dashboard`
+  were never affected — delegated listeners, no inline `onclick`.
+* **A recorded field that is read but never written silently reverts user state** —
+  `state.activeMobileView` was read by the resize handler and the init in all three controllers, written
+  by only one. **Grep for the write, not just the read.**
+* **`getComputedStyle` reports an animation on a `display:none` element** — a `querySelector` matched a
+  hidden bottom-sheet modal and reported its `slideUpSheet` presentation animation as the content card's
+  entry motion. Filter by `getBoundingClientRect().width > 0`. `slideUpSheet` there is *correct*.
+* **Prove a fix is non-vacuous by reverting it** — removing the bootstrap turned 7 checks red.
+  `tools/verify_mobile_dock.js` holds the controller to force the race. Detail: `2026-09-22.md`.

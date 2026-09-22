@@ -67,6 +67,11 @@
     <!-- ==========================================================================
          MOBILE BOTTOM NAVIGATION TAB BAR (VISIBLE ON TOUCH / MOBILE <= 900PX)
          ========================================================================== -->
+    <!-- Installs switchMobileStocksView before the buttons exist. Without it the
+         dock is tappable before stocks.js (near the end of the document) has
+         defined the handler, so an early tap threw "switchMobileStocksView is
+         not defined" and did nothing. Must load before the dock, not deferred. -->
+    <script src="/static/js/mobile_dock.js?v=20260922_v1"></script>
     <nav class="mobile-nav-bar" id="mobile-nav-bar" role="tablist" aria-label="Screener view selector">
         <button id="mob-btn-setups" class="mob-tab-btn active" role="tab" aria-selected="true" onclick="switchMobileStocksView('setups')">🔥 Buy Now</button>
         <button id="mob-btn-screener" class="mob-tab-btn" role="tab" aria-selected="false" onclick="switchMobileStocksView('screener')">📋 Screener</button>

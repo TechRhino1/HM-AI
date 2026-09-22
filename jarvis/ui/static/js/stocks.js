@@ -1212,7 +1212,19 @@ window.applyMobileFilterSelect = function (selectEl, pillSelector) {
    11. MOBILE DOCK NAVIGATION CONTROLLER
    ========================================================================== */
 
-window.switchMobileStocksView = function (view) {
+/* The dock's global is installed by mobile_dock.js, which loads BEFORE the dock
+   markup so the buttons work from first paint. Defining it here instead meant
+   the buttons were live ~500 lines of markup before this file ran, and an early
+   tap threw "switchMobileStocksView is not defined" and did nothing.
+   Register the real behaviour with that bootstrap; fall back to assigning the
+   global so this file still works if the bootstrap is absent. */
+function applyMobileStocksView(view) {
+    /* Record the selection. The resize handler and the init both read
+       state.activeMobileView, but nothing ever wrote it - so a resize at <=900px
+       silently reverted the user's tab to the default, and a tap made before the
+       controller loaded was reverted on DOMContentLoaded. india_options.js
+       already did this; stocks and india did not. */
+    state.activeMobileView = view;
     const btnSetups = document.getElementById("mob-btn-setups");
     const btnScreener = document.getElementById("mob-btn-screener");
     const btnHeatmap = document.getElementById("mob-btn-heatmap");
@@ -1262,7 +1274,13 @@ window.switchMobileStocksView = function (view) {
             if (secHeatmap) secHeatmap.style.display = "none";
         }
     }
-};
+}
+
+if (typeof window.registerMobileView === "function") {
+    window.registerMobileView("stocks", applyMobileStocksView);
+} else {
+    window.switchMobileStocksView = applyMobileStocksView;
+}
 
 /* ==========================================================================
    12. GLOBAL INITIALIZATION
@@ -1282,7 +1300,9 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     }
     if (window.innerWidth <= 900) {
-        window.switchMobileStocksView("setups");
+        /* Honour a selection made before this file loaded (the dock is live from
+           first paint). Hardcoding "setups" here reverted it. */
+        window.switchMobileStocksView(state.activeMobileView || "setups");
     }
 });
 

@@ -76,6 +76,11 @@
     <!-- ==========================================================================
          MOBILE BOTTOM NAVIGATION TAB BAR (VISIBLE ON TOUCH / MOBILE <= 900PX)
          ========================================================================== -->
+    <!-- Installs switchMobileIndiaView before the buttons exist. Without it the
+         dock is tappable before india.js (near the end of the document) has
+         defined the handler, so an early tap threw "switchMobileIndiaView is
+         not defined" and did nothing. Must load before the dock, not deferred. -->
+    <script src="/static/js/mobile_dock.js?v=20260922_v1"></script>
     <nav class="mobile-nav-bar" id="mobile-nav-bar" role="tablist" aria-label="India market view selector">
         <button id="mob-btn-buys" class="mob-tab-btn active" role="tab" aria-selected="true" onclick="switchMobileIndiaView('buys')">⚡ Prime Buys</button>
         <button id="mob-btn-screener" class="mob-tab-btn" role="tab" aria-selected="false" onclick="switchMobileIndiaView('screener')">📋 Screener</button>

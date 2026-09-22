@@ -74,6 +74,12 @@
     <!-- ==========================================================================
          MOBILE BOTTOM NAVIGATION TAB BAR (VISIBLE ON TOUCH / MOBILE <= 900PX)
          ========================================================================== -->
+    <!-- Installs switchMobileOptionsView before the buttons exist. Without it the
+         dock is tappable before india_options.js (near the end of the document)
+         has defined the handler, so an early tap threw
+         "switchMobileOptionsView is not defined" and did nothing. Must load
+         before the dock, not deferred. -->
+    <script src="/static/js/mobile_dock.js?v=20260922_v1"></script>
     <nav class="mobile-nav-bar" id="mobile-nav-bar" role="tablist" aria-label="Options view selector">
         <button id="mob-btn-singles" class="mob-tab-btn active" role="tab" aria-selected="true" onclick="switchMobileOptionsView('singles')">⚡ Single Buys</button>
         <button id="mob-btn-spreads" class="mob-tab-btn" role="tab" aria-selected="false" onclick="switchMobileOptionsView('spreads')">🛡️ Spreads</button>

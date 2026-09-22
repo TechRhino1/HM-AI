@@ -987,7 +987,19 @@
        10. MOBILE DOCK NAVIGATION CONTROLLER
        ========================================================================== */
 
-    window.switchMobileIndiaView = function (view) {
+    /* The dock's global is installed by mobile_dock.js, which loads BEFORE the
+       dock markup so the buttons work from first paint. Defining it here instead
+       meant the buttons were live ~540 lines of markup before this file ran, and
+       an early tap threw "switchMobileIndiaView is not defined" and did nothing.
+       Register the real behaviour with that bootstrap; fall back to assigning the
+       global so this file still works if the bootstrap is absent. */
+    function applyMobileIndiaView(view) {
+        /* Record the selection. The resize handler and the init both read
+           state.activeMobileView, but nothing ever wrote it - so a resize at
+           <=900px silently reverted the user's tab to the default, and a tap made
+           before the controller loaded was reverted on DOMContentLoaded.
+           india_options.js already did this; india and stocks did not. */
+        state.activeMobileView = view;
         const btnBuys = document.getElementById("mob-btn-buys");
         const btnScreener = document.getElementById("mob-btn-screener");
         const btnHeatmap = document.getElementById("mob-btn-heatmap");
@@ -1034,7 +1046,13 @@
                 if (secHeatmap) secHeatmap.style.display = "none";
             }
         }
-    };
+    }
+
+    if (typeof window.registerMobileView === "function") {
+        window.registerMobileView("india", applyMobileIndiaView);
+    } else {
+        window.switchMobileIndiaView = applyMobileIndiaView;
+    }
 
     /* ==========================================================================
        10b. MOBILE FILTER DROPDOWNS
@@ -1094,7 +1112,9 @@
             });
         }
         if (window.innerWidth <= 900) {
-            window.switchMobileIndiaView("buys");
+            /* Honour a selection made before this file loaded (the dock is live
+               from first paint). Hardcoding "buys" here reverted it. */
+            window.switchMobileIndiaView(state.activeMobileView || "buys");
         }
     });
 
