@@ -246,6 +246,62 @@ class TestSwingStopFloor(_InvariantMixin, unittest.TestCase):
         self.assertGreater(res["risk_dist"], self.FLOOR)
 
 
+class TestSwingCapCannotUndercutFloor(_InvariantMixin, unittest.TestCase):
+    """The SWING `max_risk_cap` is applied AFTER the `pip_size * 5` floor and had
+    no floor of its own, so it could push `risk_dist` back below the floor.
+
+    Reachability: the cap is `2.80 * d1_atr` for XAUUSD (gold/other bucket) and the
+    floor is `pip_size * 5` = 0.5, so the cap only undercuts the floor when
+    `d1_atr < 0.5 / 2.80`. `d1_atr` is a *daily* true range, so with real data this
+    never happens — but a degenerate near-flat D1 frame yielding a tiny positive
+    d1_atr slips past the `if d1_atr <= 0` guard and would produce a sub-5-pip stop
+    that MT5 rejects, while the sizer derives a huge lot size from the tiny
+    risk_dist (the same failure mode as the BTCUSD 0.06-risk -> 100-lot case).
+
+    These tests fail against the pre-fix engine, where `risk_dist` comes out at the
+    cap (0.14) instead of the floor (0.5).
+    """
+
+    PRICE = 2400.00
+    D1_ATR = 0.05          # degenerate: 2.80 * 0.05 = 0.14 < floor 0.5
+    FLOOR = 0.5            # pip_size (0.1) * 5
+
+    def _run(self, bias, range_low, range_high):
+        eng = InstitutionalEntryEngine()
+        ctx = _make_context("XAUUSD", self.PRICE, atr=1.0, spread_pips=0.0)
+        with patch.object(eng, "_estimate_atr", return_value=self.D1_ATR), \
+             patch.object(eng, "_get_htf_range", return_value=(range_low, range_high)), \
+             patch.object(eng, "_find_htf_order_block", return_value=self.PRICE), \
+             patch.object(eng, "_detect_choch", return_value=True):
+            return eng.calculate_entry_and_levels(
+                ctx, _regime(), tentative_bias=bias, trade_style="SWING", mtf_data=None
+            )
+
+    def test_cap_is_lifted_to_the_floor(self):
+        res = self._run("BUY", self.PRICE - 0.1, self.PRICE + 0.1)
+        self.assert_stop_invariant(res, "BUY", self.FLOOR, expect_floored=True)
+        self.assertGreaterEqual(res["risk_dist"], self.FLOOR - 1e-9)
+
+    def test_sell_cap_is_lifted_to_the_floor(self):
+        res = self._run("SELL", self.PRICE - 0.1, self.PRICE + 0.1)
+        self.assert_stop_invariant(res, "SELL", self.FLOOR, expect_floored=True)
+        self.assertGreaterEqual(res["risk_dist"], self.FLOOR - 1e-9)
+
+    def test_cap_still_binds_above_the_floor(self):
+        """The clamp must not disable the cap: a normal D1 ATR still trims."""
+        eng = InstitutionalEntryEngine()
+        ctx = _make_context("XAUUSD", self.PRICE, atr=1.0, spread_pips=0.0)
+        with patch.object(eng, "_estimate_atr", return_value=1.0), \
+             patch.object(eng, "_get_htf_range", return_value=(self.PRICE - 5.0, self.PRICE + 5.0)), \
+             patch.object(eng, "_find_htf_order_block", return_value=self.PRICE), \
+             patch.object(eng, "_detect_choch", return_value=True):
+            res = eng.calculate_entry_and_levels(
+                ctx, _regime(), tentative_bias="BUY", trade_style="SWING", mtf_data=None
+            )
+        # Structural distance is ~5.0, cap is 2.80 * 1.0 = 2.80 -> the cap applies.
+        self.assertAlmostEqual(res["risk_dist"], 2.80, places=6)
+
+
 class TestEndToEndStopInvariant(_InvariantMixin, unittest.TestCase):
     """End-to-end (no mocks): the invariant must hold for BUY and SELL, all styles."""
 

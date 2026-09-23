@@ -5,6 +5,7 @@ and 12 Institutional Defined-Risk Strategies (Bull Call, Bear Put, Bull Put Cred
 Short Straddle, Short Strangle, Iron Condor, Iron Butterfly, Long Straddle, Long Strangle).
 Includes SEBI hedge margin benefit math, portfolio Greeks, and smart-sequenced broker baskets.
 """
+import logging
 import math
 import random
 from typing import Dict, Any, List, Optional
@@ -14,6 +15,8 @@ from jarvis.india.nse_rules import NSE_RULES
 from jarvis.india.greeks import GREEKS_ENGINE
 from jarvis.india.gamma_exposure import compute_gex
 from jarvis.data.determinism import stable_seed
+
+logger = logging.getLogger("JARVIS_IndiaOptions")
 
 
 class IndiaOptionsEngine:
@@ -668,8 +671,12 @@ class IndiaOptionsEngine:
                     "estimated_margin_inr": strat.get("estimated_margin_inr", 5000.0),
                     "net_debit_credit_inr": strat.get("net_debit_or_credit_inr", 0.0)
                 })
-            except Exception:
-                pass
+            except Exception as e:
+                # A failure here silently drops this preset's recommendation from
+                # the returned list, which reads as "no setup" rather than
+                # "could not build one". Log it so the two are distinguishable.
+                logger.warning("Skipping options recommendation for preset %s: %s",
+                               strat.get("strategy", "?"), e)
 
         return recs
 

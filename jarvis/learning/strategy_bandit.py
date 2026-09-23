@@ -5,9 +5,12 @@ across (Market Regime, Trading Style, Strategy) contexts.
 """
 import os
 import json
+import logging
 import threading
 import numpy as np
 from typing import Dict, Any, Optional, Tuple, List, ClassVar
+
+logger = logging.getLogger("JARVIS_StrategyBandit")
 
 class StrategyBandit:
     """
@@ -261,8 +264,12 @@ class StrategyBandit:
             }
             with open(self.state_file, "w") as f:
                 json.dump(data, f, indent=2)
-        except Exception:
-            pass
+        except Exception as e:
+            # Persisting is best-effort and must not break a live cycle, but a
+            # silent failure here means every cycle of learning is discarded on
+            # restart, which looks like the bandit simply never learning.
+            logger.warning("Could not persist bandit state to %s: %s",
+                           self.state_file, e)
 
     def _load_state(self):
         # See _save_state_internal: under offline_mode a backtest must start from
@@ -282,5 +289,9 @@ class StrategyBandit:
                     self.counts = data.get("counts", self.counts)
                     self.rewards = data.get("rewards", self.rewards)
                     self.priors = data.get("priors", self.priors)
-                except Exception:
-                    pass
+                except Exception as e:
+                    # Falling back to priors is the right behaviour, but doing it
+                    # silently makes a corrupt state file indistinguishable from
+                    # a fresh install.
+                    logger.warning("Could not load bandit state from %s, starting "
+                                   "from priors: %s", self.state_file, e)

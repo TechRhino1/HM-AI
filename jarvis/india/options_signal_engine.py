@@ -4,6 +4,7 @@ Calculates exact Delta-adjusted entry, TP1 (+25% to +45%), TP2 (+50% to +85%), a
 using Taylor series Greek expansions, Central Pivot Range (CPR), Camarilla H4/L4 breakouts,
 Put-Call Ratio (PCR) momentum, Volume Spread Analysis (VSA/RVOL), and live FII/DII institutional flows.
 """
+import logging
 import random
 from typing import Dict, Any, List, Optional
 
@@ -18,6 +19,8 @@ from jarvis.india.gamma_exposure import interpret_for_signal
 
 
 import concurrent.futures
+
+logger = logging.getLogger("JARVIS_IndiaOptionSignals")
 
 class OptionSignalEngine:
     """
@@ -52,8 +55,12 @@ class OptionSignalEngine:
                     sig = future.result()
                     if sig:
                         signals.append(sig)
-                except Exception:
-                    pass
+                except Exception as e:
+                    # One failing instrument must not abort the batch, but it
+                    # must not vanish either: a dropped symbol here is
+                    # indistinguishable from a symbol with no setup.
+                    logger.warning("Option-buy evaluation failed for %s: %s",
+                                   future_to_sym.get(future, "?"), e)
 
         # Sort by AI Conviction Score descending
         signals.sort(key=lambda x: x["conviction_score"], reverse=True)
