@@ -176,6 +176,26 @@ measurement, not profitability:
 | 6 | **Remove the dead ICT gates** (`institutional_entry_engine.py`) | `has_mss` is computed at `:97` and never read; `h1_aligned` is computed at `:212` and only stored as a report key at `:281`; `in_kill_zone` at `:225` only relabels `entry_type` — both branches set the identical `entry_price`. Three gates that look like risk controls and reject nothing. |
 | 7 | **Fix the BUY/SELL `struct_sl_dist` asymmetry** (`dynamic_levels.py:227/:229` vs `:363/:365`) | The BUY path omits `spread_dist` while the SELL path adds it, so **SELL stops are systematically one spread wider than BUY stops for identical structure**. A directional bias introduced by an inconsistency, not by any trading view. |
 
+### H. The "unknown vs zero" defect class — three layers, all fixed
+
+`0.0` is a real P&L *and* what `dict.get()` returns for a missing key. That ambiguity was silently
+turning **missing measurements into recorded losses** in three separate layers.
+
+| Layer | Defect | Fix |
+|---|---|---|
+| `executed_trades` | No `exit_price`/`realized_pnl` columns at all — the only real P&L lived in a request-time dict built from live MT5 deals. | Columns + `record_trade_exit()`; NULL never 0.0. |
+| `trade_records` (`jarvis_trade_memory.db`) | `record_trade` wrote `exit`/`pnl`/`is_win` as `0.0`/loss **at open time**. | NULL + `update_closed_trade()` (UPDATE, not `INSERT OR REPLACE`). |
+| `_on_trade_closed` (orchestrator) | `pnl = float(data.get("pnl", 0.0))` turned a missing P&L into a genuine break-even, and `is_win = 1 if pnl > 0 else 0` filed it as a **loss**. | Optional `pnl`/`is_win`; each consumer withholds an unknown sample. |
+
+**The third one was the dangerous one.** That phantom loss fed
+`circuit_breaker.record_trade_result(is_win == 1)` — so **a data gap could help trip the circuit
+breaker on losses nobody ever observed.** It also penalised the strategy bandit and trained the ML
+model to read a missing measurement as a negative label.
+
+**Not backfilled:** the 42 historical rows in `jarvis_trade_memory.db` were deliberately left alone.
+With no `closed_at` marker, `exit_price = 0 AND pnl = 0` cannot be distinguished from a real
+break-even whose exit price was unavailable. Rewriting them would be guessing.
+
 ### G. The pattern behind all three negative results
 
 Three separate "fix the stop" levers were measured, and all three are inert:
@@ -367,7 +387,7 @@ default `pytest` run.
 
 | Check | Result |
 |---|---|
-| `pytest` | **3087 passed / 0 failed / 0 errors / 2 skipped / 20 deselected — 3089 collected** (junit-verified, not just the summary line). Was 3004 before this work. |
+| `pytest` | **3105 passed / 0 failed / 0 errors / 2 skipped / 20 deselected — 3107 collected** (junit-verified, not just the summary line). Was 3004 before this work. |
 | `tools/verify_ui_layout.js` | **345/345** |
 | `tools/verify_mobile_dock.js` | **24/24** stable across 3 consecutive runs |
 | Interaction smoke test | **ALL INTERACTIONS OK** stable across 3 consecutive runs |
