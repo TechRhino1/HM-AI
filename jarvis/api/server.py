@@ -666,6 +666,14 @@ class JarvisRequestHandler(BaseHTTPRequestHandler):
                                             # frontend reading a field the
                                             # server never sends.
                                             "origin": "broker",
+                                            # The closing deal's own fill price.
+                                            # `d.price` on an out-deal is the
+                                            # EXIT price, so the row carries the
+                                            # outcome a client needs to draw an
+                                            # exit marker — without it the API
+                                            # sent a `realized_pnl` with no price
+                                            # it could have come from.
+                                            "exit_price": float(d.price),
                                             "realized_pnl": round(float(d.profit), 2),
                                             "profit": round(float(d.profit), 2)
                                         })

@@ -109,7 +109,12 @@ def _empty_pnl():
 #       is price provenance, and its own docstring says so: "A microsecond
 #       timestamp only tells us the ENGINE wrote it, not whether that engine was
 #       trading real money or paper". The mode was still nowhere in the row.
-SCHEMA_VERSION = 4
+#   5 — `exit_price` and a NULLable `realized_pnl` (see _migration_5). The table
+#       described how a trade ENTERED and had nowhere to record how it LEFT, so
+#       a closed row carried no outcome at all: `realized_pnl` defaulted to 0.0
+#       (a scratch trade) whether the trade had closed or not, and the exit price
+#       was never stored.
+SCHEMA_VERSION = 5
 
 
 def _migration_1(conn) -> None:
@@ -234,7 +239,41 @@ def _migration_4(conn) -> None:
     )
 
 
-MIGRATIONS = {1: _migration_1, 2: _migration_2, 3: _migration_3, 4: _migration_4}
+def _migration_5(conn) -> None:
+    """Record a closed trade's OUTCOME, not only how it entered.
+
+    Every column on `executed_trades` described the ENTRY: `entry_price`, `sl`,
+    `tp`, `volume`, `expected_value`. There was no `exit_price` and no real
+    `realized_pnl`, so a row could not say how its trade ended — the only place
+    a realised figure existed was a request-time dict built from live MT5 deals
+    (server.py), never written back. `sync_mt5_history` is the one writer that
+    had the outcome in hand and it dropped the exit price on the floor.
+
+    `exit_price` is added as a plain NULLable REAL. `realized_pnl` already exists
+    (migration 1) but with `DEFAULT 0.0`, and that default is the whole
+    ambiguity: a row that was never closed, and a row that closed at break-even,
+    both read `0.0`. The backfill below clears the sentinel for exactly the rows
+    where it cannot be an outcome — those with no `closed_at`.
+
+    **Only rows with `closed_at IS NULL` are cleared.** `closed_at` is written
+    only when a real exit deal was matched, so it is the one field that says
+    "this trade really closed". A closed row keeps its value even when that value
+    is a genuine `0.0` scratch. Nothing is invented for history: a row that never
+    closed gets NULL, which reads as "no outcome recorded", not "broke even".
+    """
+    add_columns(conn, "executed_trades", {
+        "exit_price": "REAL",
+        # Defensive: present on every file that ran migration 1, added here so a
+        # file that somehow skipped it still gets the column before the UPDATE.
+        "realized_pnl": "REAL",
+    })
+    conn.execute(
+        "UPDATE executed_trades SET realized_pnl = NULL "
+        "WHERE realized_pnl = 0.0 AND closed_at IS NULL"
+    )
+
+
+MIGRATIONS = {1: _migration_1, 2: _migration_2, 3: _migration_3, 4: _migration_4, 5: _migration_5}
 
 # Executor tags, matched as TOKENS. The old `"ai" in comment_lower` substring test
 # also matched "trailing", "pair", "main", "wait" and "chair", so a manual trade
@@ -308,6 +347,12 @@ class SQLiteTradeDB:
                     ai_score REAL,
                     regime TEXT,
                     expected_value REAL,
+                    -- The OUTCOME of the trade, written when it closes. NULL means
+                    -- "not recorded", never 0.0: a 0.0 P&L is a real break-even
+                    -- trade, and `dict.get()` on a missing key also yields 0.0,
+                    -- so 0.0 cannot be allowed to stand for both.
+                    exit_price REAL,
+                    realized_pnl REAL,
                     executor TEXT DEFAULT 'BOT (AI)',
                     session_name TEXT DEFAULT 'UNKNOWN',
                     is_prime_session INTEGER DEFAULT 1,
@@ -398,20 +443,90 @@ class SQLiteTradeDB:
             conn.execute('''
                 INSERT INTO executed_trades (
                     ticket, position_id, origin, execution_mode, symbol, action, entry_price, sl, tp, volume, timestamp,
-                    ai_score, regime, expected_value, executor, session_name,
+                    ai_score, regime, expected_value, exit_price, realized_pnl, executor, session_name,
                     is_prime_session, adx, plus_di, minus_di, spread_pips,
                     mtf_alignment, threats_json, features_json
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 ticket, position_id, origin, execution_mode, symbol, action, entry, sl, tp, volume,
                 datetime.now(timezone.utc).isoformat(),
-                score, regime, ev, executor, session_name, int(is_prime_session),
+                score, regime, ev,
+                # The outcome columns are written NULL, not omitted. `realized_pnl`
+                # carries `DEFAULT 0.0` on files that ran migration 1, so an
+                # omitted value would come back as 0.0 — indistinguishable from a
+                # break-even close. At open there is no outcome, and NULL says so.
+                None, None,
+                executor, session_name, int(is_prime_session),
                 adx, plus_di, minus_di, spread_pips, mtf_alignment, threats_json, features_json
             ))
             conn.commit()
         except Exception as e:
             logger.error(f"Failed to log trade to DB: {e}")
+
+    def record_trade_exit(
+        self,
+        ticket: Optional[int] = None,
+        position_id: Optional[int] = None,
+        exit_price: Optional[float] = None,
+        realized_pnl: Optional[float] = None,
+        closed_at: Optional[str] = None,
+    ) -> bool:
+        """Write a trade's OUTCOME onto the row written when it opened.
+
+        This is the other half of :meth:`log_trade`: a row says how a trade
+        entered, and this says how it left. Without it a closed trade had no
+        stored result at all — the only realised P&L lived in a request-time dict
+        built from live MT5 deals (server.py) and was never written back.
+
+        Keyed on `position_id` first, then on `ticket` for rows that predate that
+        column, matching `sync_mt5_history` so both writers close the same row.
+
+        **`None` means "not recorded" and is stored as NULL — never as 0.0.**
+        A `0.0` P&L is a real break-even trade; a missing one is not, and
+        `dict.get()` returns 0.0 for a missing key, so allowing the two to share
+        a value is exactly the ambiguity that made every open row look like a
+        scratch. `COALESCE` means a later call that does not know the outcome
+        cannot erase one that is already stored.
+
+        Returns True if a row was found and updated.
+        """
+        if ticket is None and position_id is None:
+            return False
+        conn = self._get_conn()
+        try:
+            cur = conn.cursor()
+            # Prefer the position id; a row written before `position_id` existed
+            # still holds the id in `ticket` (see migration 1's note).
+            if position_id is not None:
+                cur.execute(
+                    "SELECT id FROM executed_trades "
+                    "WHERE position_id = ? OR (position_id IS NULL AND ticket = ?) "
+                    "ORDER BY (position_id IS NOT NULL) DESC, id ASC LIMIT 1",
+                    (position_id, position_id),
+                )
+            else:
+                cur.execute(
+                    "SELECT id FROM executed_trades WHERE ticket = ? "
+                    "ORDER BY id ASC LIMIT 1",
+                    (ticket,),
+                )
+            row = cur.fetchone()
+            if not row:
+                return False
+            cur.execute(
+                "UPDATE executed_trades SET "
+                "realized_pnl = COALESCE(?, realized_pnl), "
+                "exit_price = COALESCE(?, exit_price), "
+                "closed_at = COALESCE(?, closed_at) "
+                "WHERE id = ?",
+                (realized_pnl, exit_price, closed_at, row[0]),
+            )
+            conn.commit()
+            return True
+        except Exception as e:
+            logger.error(f"Failed to record trade exit: {e}")
+            return False
 
     def sync_mt5_history(self, days: int = 30, limit: int = 100):
         """Syncs executed and closed trades from MT5 broker history into SQLite database.
@@ -512,8 +627,21 @@ class SQLiteTradeDB:
                 entry_swap = float(getattr(entry_deal, "swap", 0.0) or 0.0) if entry_deal else 0.0
                 exit_comm = float(getattr(exit_deal, "commission", 0.0) or 0.0) if exit_deal else 0.0
                 exit_swap = float(getattr(exit_deal, "swap", 0.0) or 0.0) if exit_deal else 0.0
-                exit_profit = float(exit_deal.profit) if exit_deal else 0.0
-                pnl = exit_profit + entry_comm + entry_swap + exit_comm + exit_swap
+                # A position with no exit deal has NOT closed, so it has no
+                # outcome: the commissions booked on the open alone are not one.
+                # Recording 0.0 there would re-create the exact ambiguity
+                # migration 5 removed, so the outcome stays NULL until a real
+                # exit deal arrives.
+                if exit_deal:
+                    pnl = float(exit_deal.profit) + entry_comm + entry_swap + exit_comm + exit_swap
+                    # `TradeDeal.price` on the CLOSING deal is the fill the broker
+                    # actually gave. Verified against the MT5 5.0 `TradeDeal`
+                    # struct, whose fields include `price`, `profit`, `commission`
+                    # and `swap` — so the exit price is read, not invented.
+                    exit_p = float(exit_deal.price)
+                else:
+                    pnl = None
+                    exit_p = None
                 target_time = exit_deal.time if exit_deal else target_deal.time
                 dt_str = datetime.fromtimestamp(
                     float(target_time) - broker_offset, timezone.utc
@@ -591,9 +719,9 @@ class SQLiteTradeDB:
                     # trading paper. This is the one place the mode is a fact
                     # rather than something we were told.
                     conn.execute('''
-                        INSERT INTO executed_trades (ticket, position_id, origin, execution_mode, symbol, action, entry_price, sl, tp, volume, timestamp, ai_score, regime, expected_value, realized_pnl, executor, closed_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ''', (pid, pid, "broker", "live", clean_sym, side, entry_p, sl_val, tp_val, vol, dt_str, None, regime_str, None, pnl, exec_label,
+                        INSERT INTO executed_trades (ticket, position_id, origin, execution_mode, symbol, action, entry_price, sl, tp, volume, timestamp, ai_score, regime, expected_value, exit_price, realized_pnl, executor, closed_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (pid, pid, "broker", "live", clean_sym, side, entry_p, sl_val, tp_val, vol, dt_str, None, regime_str, None, exit_p, pnl, exec_label,
                           dt_str if exit_deal else None))
                 else:
                     # Update realized PnL, executor, and close timestamp for completed positions.
@@ -615,7 +743,12 @@ class SQLiteTradeDB:
                     # left alone here.
                     conn.execute('''
                         UPDATE executed_trades
-                        SET realized_pnl = ?, executor = ?, timestamp = ?,
+                        SET realized_pnl = COALESCE(?, realized_pnl), executor = ?, timestamp = ?,
+                            -- The exit price, when the closing deal carried one.
+                            -- COALESCE for the same reason as `realized_pnl`: a
+                            -- sync that cannot see the exit deal must not erase an
+                            -- outcome the live close path already recorded.
+                            exit_price = COALESCE(?, exit_price),
                             -- A row the broker's own history has now matched is
                             -- proven real, whatever it was labelled at entry.
                             origin = CASE WHEN origin IS NULL OR origin IN ('unknown', 'synthetic')
@@ -625,7 +758,7 @@ class SQLiteTradeDB:
                             sl = CASE WHEN ? > 0 THEN ? ELSE sl END,
                             tp = CASE WHEN ? > 0 THEN ? ELSE tp END
                         WHERE id = ?
-                    ''', (pnl, exec_label, dt_str,
+                    ''', (pnl, exec_label, dt_str, exit_p,
                           pid, pid,
                           dt_str if exit_deal else None, dt_str if exit_deal else None,
                           sl_val, sl_val, tp_val, tp_val, row[0]))

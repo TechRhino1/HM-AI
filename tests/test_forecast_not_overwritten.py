@@ -216,4 +216,7 @@ class TestTheWriteSites:
 
     def test_the_close_update_still_records_the_outcome(self):
         src = self._source()
-        assert "SET realized_pnl = ?, executor = ?, timestamp = ?" in src
+        # The outcome is written with COALESCE so a sync that cannot see the
+        # exit deal (an open position) does not erase an outcome the live close
+        # path already recorded — see `record_trade_exit`.
+        assert "realized_pnl = COALESCE(?, realized_pnl), executor = ?, timestamp = ?" in src

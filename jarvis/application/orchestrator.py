@@ -389,6 +389,29 @@ class JarvisOrchestrator:
                 mae=mae
             )
 
+            # `executed_trades` is a DIFFERENT store from `trade_memory`, and it
+            # is written at OPEN by `ExecutionEngine` — nothing wrote the outcome
+            # back. So a closed row there kept no exit price and no realised P&L,
+            # and the only place a real figure existed was a request-time dict
+            # built from live MT5 deals. `trade_closed` carries both, so record
+            # them on the row this position opened.
+            #
+            # A price of 0 means the event did not carry one, and is passed as
+            # None so the column stays NULL ("not recorded") rather than 0.0.
+            # `pnl` is a genuine 0.0 for a scratch trade and is passed through.
+            try:
+                from jarvis.data.database import TRADE_DB
+                TRADE_DB.record_trade_exit(
+                    ticket=ticket,
+                    position_id=data.get("position_id") or ticket,
+                    exit_price=exit_price if exit_price > 0 else None,
+                    realized_pnl=pnl,
+                    closed_at=datetime.now(timezone.utc).isoformat(),
+                )
+            except Exception:
+                logger.warning("could not record the exit in the trade journal",
+                               exc_info=True)
+
         # 2. Update ML SGD predictor with return weighting (§17)
         #
         # AI6: what R means is different here than it is to the bandit, and the two

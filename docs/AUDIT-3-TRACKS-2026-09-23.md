@@ -168,12 +168,33 @@ measurement, not profitability:
 
 | # | Action | Why it survives |
 |---|---|---|
-| 1 | **Fix the daily-vs-H1 ATR unit error** (`dynamic_levels.py:140-142`) | `atr_ratio` pins at its 0.33 clamp on 69.8% of bars (FX 90–99.6%), so the "adaptive" buffer is a constant. This is a genuine bug and the root of the false diagnosis. |
+| 1 | **Fix the daily-vs-H1 ATR unit error** (`dynamic_levels.py:140-142`) | **Measured inert — safe to ship, but buys nothing.** Fixing it flips **3 outcomes in 46,939 trades**; ΔE[R] ≤ 6e-5 R. Reason: `atr_ratio` is **dead code**. It only feeds `effective_buffer = max(dynamic_buffer, anti_wick_buffer)`, and the dynamic term needs `atr_ratio + spread_ratio > 4.6` to beat the fixed 0.35×ATR anti-wick buffer — impossible at a normal spread. Median `effective_buffer` is **0.3500×ATR in every arm**; only 2.41% of bars move it at all. **The "volatility-adaptive buffer" was never actually delivered.** Making it adaptive means changing the `max()` or raising alpha/beta — a real change that needs its own backtest gate. |
 | 2 | **Persist `exit_price` + real `realized_pnl`** (`jarvis/data/database.py`) | 109/109 closed rows have `realized_pnl == expected_value`; `data/jarvis_trade_memory.db` has 42/93 rows with `exit_price=0, pnl=0`, and XAUUSD rows carry `entry_price=2400` while the market prints ~5000. **Entry quality cannot be measured at all until this is trustworthy.** |
 | 3 | **Fix the `risk_dist` floor that never moves `sl_price`** (`institutional_entry_engine.py:131,341,348`) | Floors the *reported* risk without moving the actual stop, decoupling sized risk and reported R:R from reality — the source of the "0.06×ATR stop, R:R 13.8" artifact. |
 | 4 | **Correct `typical_spread_pips`** | Understates measured FX spreads 2–3× (EURUSD 0.7 vs 1.90 measured); the manifest's same-named field is in **points** for indices (GER40 205 vs 1.95). Costs are being under-charged across the board. |
 | 5 | **Resolve the `mtf_data` path** (`dynamic_levels.py:514-539`) | When `mtf_data` holds any non-empty frame the function returns the institutional result *instead of* `base_result`, so the line 273/404 floor may never govern a live stop at all. This must be settled before any further stop-floor work means anything. |
 | 6 | **Remove the dead ICT gates** (`institutional_entry_engine.py`) | `has_mss` is computed at `:97` and never read; `h1_aligned` is computed at `:212` and only stored as a report key at `:281`; `in_kill_zone` at `:225` only relabels `entry_type` — both branches set the identical `entry_price`. Three gates that look like risk controls and reject nothing. |
+| 7 | **Fix the BUY/SELL `struct_sl_dist` asymmetry** (`dynamic_levels.py:227/:229` vs `:363/:365`) | The BUY path omits `spread_dist` while the SELL path adds it, so **SELL stops are systematically one spread wider than BUY stops for identical structure**. A directional bias introduced by an inconsistency, not by any trading view. |
+
+### G. The pattern behind all three negative results
+
+Three separate "fix the stop" levers were measured, and all three are inert:
+
+| Lever | Measured effect |
+|---|---|
+| Raise the stop floor 0.10 → 1.11×ATR | Arms 0.10/0.30/0.50 **bit-identical**; ΔE[R] = +0.00092 |
+| Fix the daily-vs-H1 ATR unit error | **3 outcome flips in 46,939**; ΔE[R] ≤ 6e-5 R |
+| FVG as the entry trigger | 0/20 DSR; Sharpe negative on all 20 |
+
+This is not three coincidences — it is one fact: **the stop geometry is not what is losing money.**
+Stop width barely moves outcomes because the buffer is pinned at a constant 0.35×ATR, the floor
+never binds, and the entry signal has no edge to begin with. Widening or narrowing a stop on a
+signalless entry just rescales the same loss.
+
+**The actionable conclusion:** stop tuning this class of knob. Until the entry signal has a measured
+edge, no stop/target/geometry parameter will produce profitability — and each one costs a backtest
+to prove inert. The remaining work that actually changes what we know is **measurement plumbing**
+(§F #2: persist real outcomes), not parameter tuning.
 
 ---
 
