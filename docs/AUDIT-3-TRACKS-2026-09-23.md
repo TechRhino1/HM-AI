@@ -196,6 +196,50 @@ model to read a missing measurement as a negative label.
 With no `closed_at` marker, `exit_price = 0 AND pnl = 0` cannot be distinguished from a real
 break-even whose exit price was unavailable. Rewriting them would be guessing.
 
+### I. Diagnostic answers (`reports/stop_floor_and_spread_calibration_findings.md`)
+
+**Q1 — Does the line 273/404 floor govern live stops? YES, always in the automated path.**
+
+The `mtf_data` early return at `:514` looked like it discarded the baseline floor, which would have
+made the entire stop-floor investigation moot. It does not: `DecisionEngine.evaluate()` accepts
+`mtf_data` (`decision_engine.py:707`) and both live drivers pass a **populated** dict
+(`orchestrator.py:597→717`, `server.py:214→262`) — but `evaluate()` **never forwards it** to
+`_compute_bias_and_levels` (`:712-716`), using it only for order-flow / master-confluence / FVG.
+`calculate_levels` therefore receives `mtf_data=None` and returns `base_result`. Runtime proof in
+`tools/probe_mtf_data_reachability.py`: *"mtf_data was NOT PASSED (kwarg absent) -> baseline floor
+governs."* **The premise of the stop-floor work was valid.**
+
+But this reveals something larger: **the institutional entry engine is unreachable in the live
+automated path.** The ICT/FVG engine — displacement gates, kill zones, OTE, the FVG CE entry — is
+only reached via `calculate_manual_trade_levels` (`dynamic_levels.py:662→667`), and only on a cold
+`GLOBAL_STATE` with a successful fresh MTF fetch. So the model the user asked about (§C) was never
+actually driving live entries *or* the backtests, which explains part of why "FVG is already shipped
+and the system still loses" — it was shipped but mostly never exercised.
+
+**Q2 — Spread calibration is materially wrong, and the live spread is a constant.**
+
+Measured (M1, 183d) median pips vs the registry's `typical_spread_pips`:
+
+| Symbol | measured | registry | ratio | % bars over `max_spread_pips` |
+|---|---|---|---|---|
+| EURUSD | 1.9 | 0.7 | **2.71×** | 6.8% |
+| USDJPY | 2.3 | 0.8 | **2.88×** | 9.1% |
+| AUDUSD | 2.3 | 0.9 | **2.56×** | 5.8% |
+| GBPUSD | 2.2 | 0.9 | **2.44×** | 8.5% |
+| GBPJPY | 2.5 | 1.2 | **2.08×** | 10.9% |
+| EURJPY | 2.0 | 1.0 | **2.00×** | 5.9% |
+| WTI | 3.0 | 13.0 | **0.23×** (over-charged) | — |
+
+Accurate (≈1.0×): USDCHF, USDCAD, NZDUSD, XAUUSD, ETHUSD, SOLUSD and all five indices.
+
+**The compounding bug:** every live `build_context` call passes
+`current_spread_pips = spec.typical_spread_pips` (`orchestrator.py:679`, `server.py:257`) — a
+hardcoded constant, not a measurement. Therefore (a) cost/EV is understated ~2.7× on EURUSD, (b) the
+spread rejection filter **can never fire**, since `typical < max` always holds, even though the real
+spread exceeds `max` on 6–11% of M1 bars for every major, (c) the floor's spread term at `:139` is
+~2.7× too tight, and (d) `spread_ratio` at `:147-148` is pinned at 1.0 because current always equals
+typical — so the `gamma_spread` term is inert too.
+
 ### G. The pattern behind all three negative results
 
 Three separate "fix the stop" levers were measured, and all three are inert:
