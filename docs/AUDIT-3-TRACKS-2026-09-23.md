@@ -169,7 +169,7 @@ measurement, not profitability:
 | # | Action | Why it survives |
 |---|---|---|
 | 1 | **Fix the daily-vs-H1 ATR unit error** (`dynamic_levels.py:140-142`) | **Measured inert — safe to ship, but buys nothing.** Fixing it flips **3 outcomes in 46,939 trades**; ΔE[R] ≤ 6e-5 R. Reason: `atr_ratio` is **dead code**. It only feeds `effective_buffer = max(dynamic_buffer, anti_wick_buffer)`, and the dynamic term needs `atr_ratio + spread_ratio > 4.6` to beat the fixed 0.35×ATR anti-wick buffer — impossible at a normal spread. Median `effective_buffer` is **0.3500×ATR in every arm**; only 2.41% of bars move it at all. **The "volatility-adaptive buffer" was never actually delivered.** Making it adaptive means changing the `max()` or raising alpha/beta — a real change that needs its own backtest gate. |
-| 2 | **Persist `exit_price` + real `realized_pnl`** (`jarvis/data/database.py`) | 109/109 closed rows have `realized_pnl == expected_value`; `data/jarvis_trade_memory.db` has 42/93 rows with `exit_price=0, pnl=0`, and XAUUSD rows carry `entry_price=2400` while the market prints ~5000. **Entry quality cannot be measured at all until this is trustworthy.** |
+| 2 | **Persist `exit_price` + real `realized_pnl`** (`jarvis/data/database.py`) | **DONE** (commit `0d0f0ef`). `SCHEMA_VERSION` 4→5; migration adds both columns and backfills the old `DEFAULT 0.0` sentinel to NULL **only where `closed_at IS NULL`**; `record_trade_exit()` writes from the closing MT5 deal (`.price` / `.profit` verified present on `TradeDeal`); `orchestrator._on_trade_closed` calls it. **Unknown is NULL, never 0.0** — pinned by four tests, including one that a break-even close's real `0.0` survives and one that an unclosed trade reports `None`, not `0.0`. |
 | 3 | **Fix the `risk_dist` floor that never moves `sl_price`** (`institutional_entry_engine.py:131,341,348`) | Floors the *reported* risk without moving the actual stop, decoupling sized risk and reported R:R from reality — the source of the "0.06×ATR stop, R:R 13.8" artifact. |
 | 4 | **Correct `typical_spread_pips`** | Understates measured FX spreads 2–3× (EURUSD 0.7 vs 1.90 measured); the manifest's same-named field is in **points** for indices (GER40 205 vs 1.95). Costs are being under-charged across the board. |
 | 5 | **Resolve the `mtf_data` path** (`dynamic_levels.py:514-539`) | When `mtf_data` holds any non-empty frame the function returns the institutional result *instead of* `base_result`, so the line 273/404 floor may never govern a live stop at all. This must be settled before any further stop-floor work means anything. |
@@ -367,7 +367,7 @@ default `pytest` run.
 
 | Check | Result |
 |---|---|
-| `pytest` | **3062 passed / 0 failed / 1 xfailed / 20 deselected** (was 3004 before this work; +58 new tests) |
+| `pytest` | **3087 passed / 0 failed / 0 errors / 2 skipped / 20 deselected — 3089 collected** (junit-verified, not just the summary line). Was 3004 before this work. |
 | `tools/verify_ui_layout.js` | **345/345** |
 | `tools/verify_mobile_dock.js` | **24/24** stable across 3 consecutive runs |
 | Interaction smoke test | **ALL INTERACTIONS OK** stable across 3 consecutive runs |
