@@ -304,6 +304,45 @@ the scan pipeline is nondeterministic across processes (GBPUSD 383 vs 468 under 
 raising the analyst timeout 2s→60s); and `test_spread_cap_admits_...` only checks the D1 file's p95,
 not the trading timeframe.
 
+### K. ⚠ LIVE DEFECT FOUND AND FIXED — position management was dead on four FX majors
+
+This is the one finding in the entire audit that was **actively causing losses at the time it was
+found**, and it is now fixed (`c262cf5`).
+
+`position_monitor.py:1050` built the market context with **no spread argument**:
+
+```python
+ctx = self.context_engine.build_context(symbol, mtf_data)
+```
+
+`build_context` declares `current_spread_pips: float = 2.0` (`market_context.py:36`), so the spread
+reaching the blowout guard was **the hardcoded 2.0 for every symbol**. The guard at `:290` is
+`spread > typical_spread * 2.0`, and for any symbol whose `typical_spread_pips` is below 1.0 the
+hardcoded 2.0 exceeds the threshold permanently:
+
+| Symbol | typical | threshold | hardcoded | guard fires |
+|---|---|---|---|---|
+| EURUSD | 0.7 | 1.4 | 2.0 | **always** |
+| USDJPY | 0.8 | 1.6 | 2.0 | **always** |
+| GBPUSD | 0.9 | 1.8 | 2.0 | **always** |
+| AUDUSD | 0.9 | 1.8 | 2.0 | **always** |
+| EURJPY | 1.0 | 2.0 | 2.0 | borderline (`2.0 > 2.0` is False) |
+
+**Result: trailing stops, breakeven moves and partial closes never executed on EURUSD, USDJPY,
+GBPUSD or AUDUSD.** Every winner on four of the highest-volume FX majors ran unprotected, and losses
+were never trailed out. This presents as a strategy problem — "the system can't hold a winner" —
+while being a plain argument-omission bug.
+
+**Fix:** `position_monitor.py` now resolves the symbol's own `typical_spread_pips` and passes it in,
+so the guard compares like-for-like. All other `build_context` call sites were audited and already
+passed a spread, so this was the only omission. `SPREAD_BLOWOUT_MULT` and the registry calibration
+were deliberately left untouched.
+
+**Verification:** 7 new tests (23 cases) in `tests/test_position_monitor_spread_guard.py`.
+**12 cases fail against the pre-fix code** — the 4 majors × 3 management methods — and 0 fail after.
+A genuine blowout still trips the guard, and the EURJPY boundary is pinned so it cannot silently
+regress. Suite: 3161 passed, 0 failures, 0 errors.
+
 ### G. The pattern behind all three negative results
 
 Three separate "fix the stop" levers were measured, and all three are inert:
