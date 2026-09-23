@@ -343,6 +343,13 @@ were deliberately left untouched.
 A genuine blowout still trips the guard, and the EURJPY boundary is pinned so it cannot silently
 regress. Suite: 3161 passed, 0 failures, 0 errors.
 
+**⚠ This changes live behaviour on the next run.** Position management will now begin executing on
+EURUSD, USDJPY, GBPUSD and AUDUSD for the first time — trailing stops, breakeven moves and partial
+closes will start firing where they previously did nothing. That is the intended behaviour being
+restored, not a new feature, but it is a real change to how open positions are handled: **watch the
+first session after this lands.** If trailing logic has its own latent defects, they were previously
+masked by the guard firing and will now become visible.
+
 ### G. The pattern behind all three negative results
 
 Three separate "fix the stop" levers were measured, and all three are inert:
