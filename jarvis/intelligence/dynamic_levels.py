@@ -224,25 +224,32 @@ class DynamicRiskAndLevelsEngine:
                 # Anti-Wick Shield: Outer structural support boundary min(candidate_anchors)
                 anchors_in_range = [a for a in candidate_anchors if (entry_price - a) <= 3.0 * atr]
                 anchor = min(anchors_in_range) if anchors_in_range else min(candidate_anchors)
-                struct_sl_dist = (entry_price - anchor) + effective_buffer
+                struct_sl_dist = (entry_price - anchor) + effective_buffer + spread_dist
             else:
-                struct_sl_dist = atr * (0.85 if is_strong_trend else (1.0 if is_ranging else 0.95)) + effective_buffer
+                struct_sl_dist = atr * (0.85 if is_strong_trend else (1.0 if is_ranging else 0.95)) + effective_buffer + spread_dist
 
+            # Spread symmetry: the SELL branch below adds `spread_dist` at every one
+            # of these sites, because the fill always pays the spread — a BUY enters
+            # at the ask and a SELL at the bid, and either stop fills on the far side.
+            # The BUY branch used to omit it, which made every BUY stop systematically
+            # one spread tighter than the mirrored SELL stop for identical structure.
+            # That is a directional asymmetry introduced by an inconsistency, not a
+            # trading view, so BUY is widened to match SELL rather than the reverse.
             if style == "SCALP":
-                sl_dist = min(0.65 * atr, max(0.20 * atr, struct_sl_dist * 0.5))
+                sl_dist = min(0.65 * atr + spread_dist, max(0.20 * atr, struct_sl_dist * 0.5))
                 min_target_rr = 1.3
                 asym_rr = 2.0
             elif style in ("DAY_TRADING", "DAY", "INTRADAY"):
                 if is_index:
-                    sl_dist = min(0.90 * atr, max(0.35 * atr, struct_sl_dist * 0.7))
+                    sl_dist = min(0.90 * atr + spread_dist, max(0.35 * atr, struct_sl_dist * 0.7))
                     min_target_rr = 2.0
                     asym_rr = 3.0
                 elif is_forex:
-                    sl_dist = min(1.05 * atr, max(0.40 * atr, struct_sl_dist * 0.75))
+                    sl_dist = min(1.05 * atr + spread_dist, max(0.40 * atr, struct_sl_dist * 0.75))
                     min_target_rr = 2.2
                     asym_rr = 3.2
                 else:
-                    sl_dist = min(1.30 * atr, max(0.45 * atr, struct_sl_dist * 0.8))
+                    sl_dist = min(1.30 * atr + spread_dist, max(0.45 * atr, struct_sl_dist * 0.8))
                     min_target_rr = 1.8
                     asym_rr = 2.8
             else:  # SWING
@@ -260,7 +267,7 @@ class DynamicRiskAndLevelsEngine:
                 else:
                     min_floor_sl = 0.65 * atr if (is_index or is_forex) else 0.75 * atr
 
-                sl_dist = min(max_swing_sl, max(min_floor_sl, struct_sl_dist))
+                sl_dist = min(max_swing_sl + spread_dist, max(min_floor_sl, struct_sl_dist))
 
             # The stop-distance floor must be applied to the *distance*, not just to
             # risk_dist. Previously risk_dist was lifted to the floor while sl_price kept

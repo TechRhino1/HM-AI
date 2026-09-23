@@ -476,7 +476,14 @@ class JarvisOrchestrator:
             self.drawdown_guard.update_equity_benchmarks(new_equity, float(data.get("balance", new_equity)))
 
         # 5. Recalibrate confidence curve from recent closed trades (§17)
-        all_closed = [t for t in self.trade_memory.fetch_recent_trades(50) if t.get("exit_price", 0) > 0]
+        # `exit_price` is NULL for a trade whose outcome was never recorded, and
+        # `dict.get(key, 0)` only returns the default when the key is *missing* — a
+        # present-but-None value comes back as None and `None > 0` raises. Those rows
+        # are "not closed yet" for calibration purposes and must be filtered out.
+        all_closed = [
+            t for t in self.trade_memory.fetch_recent_trades(50)
+            if (t.get("exit_price") or 0) > 0
+        ]
         if len(all_closed) >= 10:
             self.decision_engine.calibrator.update_calibration_from_history(all_closed)
 
