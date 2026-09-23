@@ -3,7 +3,7 @@ HM Algo 2.0 — Chronological Event-Driven Backtesting Engine.
 Executes historical simulation without lookahead bias, incorporating realistic spreads, commissions, and slippage.
 """
 import pandas as pd
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, ClassVar
 
 from jarvis.market.market_context import MarketContextEngine
 from jarvis.intelligence.regime_engine import MarketRegimeClassifier
@@ -77,7 +77,7 @@ class BacktestEngine:
     # How many bars of each role the context builder gets. Matches the legacy
     # resample path (primary 300, context 100, macro 50) so the two paths feed
     # the engines comparable amounts of history.
-    _ROLE_LOOKBACK = {"primary": 300, "context": 100, "macro": 50, "setup": 100, "timing": 100}
+    _ROLE_LOOKBACK: ClassVar[Dict[str, int]] = {"primary": 300, "context": 100, "macro": 50, "setup": 100, "timing": 100}
 
     @staticmethod
     def _prepare_mtf(

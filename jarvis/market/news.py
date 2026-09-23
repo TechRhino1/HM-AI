@@ -14,7 +14,7 @@ import threading
 import urllib.request
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone, timedelta
-from typing import Dict, List, Any
+from typing import Dict, List, Any, ClassVar
 
 logger = logging.getLogger("HM_LiveNewsEngine")
 
@@ -91,7 +91,7 @@ class LiveNewsEngine:
     FAIRECONOMY_URL = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
     MYFXBOOK_URL = "https://www.myfxbook.com/rss/forex-economic-calendar-events"
     
-    COUNTRY_MAP = {
+    COUNTRY_MAP: ClassVar[Dict[str, str]] = {
         "United States": "USD", "US": "USD", "Euro Area": "EUR", "Eurozone": "EUR", "Germany": "EUR",
         "France": "EUR", "Italy": "EUR", "Spain": "EUR", "Netherlands": "EUR",
         "United Kingdom": "GBP", "UK": "GBP", "Japan": "JPY", "Switzerland": "CHF",

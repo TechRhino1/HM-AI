@@ -6,7 +6,7 @@ import os
 import time
 import logging
 import math
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, ClassVar
 
 from jarvis.common.timeout_guard import TimeoutGuard
 from jarvis.data.broker_time import broker_utc_offset
@@ -23,8 +23,8 @@ except ImportError:
     MT5_AVAILABLE = False
 
 class MT5Client:
-    _shared_paper_positions: Dict[int, PositionSnapshot] = {}
-    _shared_paper_pending_orders: Dict[int, Dict[str, Any]] = {}
+    _shared_paper_positions: ClassVar[Dict[int, PositionSnapshot]] = {}
+    _shared_paper_pending_orders: ClassVar[Dict[int, Dict[str, Any]]] = {}
     # P3: NOT a plain RLock. This lock is held ACROSS native broker calls, and a
     # native call that never returns cannot be interrupted — Python cannot kill a
     # thread blocked in C. A plain RLock therefore turned one hung call into a

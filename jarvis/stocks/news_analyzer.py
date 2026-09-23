@@ -5,7 +5,7 @@ catalyst impact classifications, and contextual executive summaries.
 """
 import random
 from datetime import datetime, timezone, timedelta
-from typing import Dict, Any, List
+from typing import Dict, Any, List, ClassVar
 
 
 class StockNewsAnalyzer:
@@ -13,7 +13,7 @@ class StockNewsAnalyzer:
     Analyzes real-time macroeconomic and stock-specific news with AI sentiment & catalyst impact ratings.
     """
 
-    NEWS_TEMPLATES: Dict[str, List[Dict[str, Any]]] = {
+    NEWS_TEMPLATES: ClassVar[Dict[str, List[Dict[str, Any]]]] = {
         "NVDA": [
             {
                 "headline": "NVIDIA Blackwell B200 GPU Production Surges Ahead of Hyper-Scaler Shipments",
@@ -152,7 +152,7 @@ class StockNewsAnalyzer:
         ]
     }
 
-    GENERIC_CATALYSTS = [
+    GENERIC_CATALYSTS: ClassVar[List[Dict[str, Any]]] = [
         {
             "headline_fmt": "{name} ({symbol}) Upgraded to 'Strong Buy' at Goldman Sachs With Raised Price Target",
             "source": "Goldman Sachs Research",

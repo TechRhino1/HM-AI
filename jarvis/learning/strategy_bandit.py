@@ -7,7 +7,7 @@ import os
 import json
 import threading
 import numpy as np
-from typing import Dict, Any, Optional, Tuple
+from typing import Dict, Any, Optional, Tuple, List, ClassVar
 
 class StrategyBandit:
     """
@@ -15,7 +15,7 @@ class StrategyBandit:
     and Upper Confidence Bound (UCB1) for optimal strategy allocation.
     """
     
-    STRATEGIES = [
+    STRATEGIES: ClassVar[List[str]] = [
         "MICRO_ACCOUNT_ADAPTIVE",
         "MICRO_LIQUIDITY_SWEEP",
         "M1_M5_FVG_SCALP",

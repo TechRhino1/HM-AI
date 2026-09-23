@@ -1,5 +1,5 @@
 from datetime import datetime, timezone, timedelta
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Tuple, ClassVar
 import zoneinfo
 
 try:
@@ -13,7 +13,7 @@ class SessionEngine:
     """Calculates active trading sessions, prime volume hours, killzones, and global market open/closed status."""
     
     # Killzone definitions (UTC hours) — institutional high-probability entry windows
-    KILLZONES = {
+    KILLZONES: ClassVar[Dict[str, Tuple[int, int]]] = {
         "LONDON_OPEN":  (7, 10),   # 07:00-10:00 UTC — first directional move of the day
         "NY_OPEN":      (12, 15),  # 12:00-15:00 UTC — highest volume, news reactions
         "LONDON_CLOSE": (15, 17),  # 15:00-17:00 UTC — mean reversion / position unwinding

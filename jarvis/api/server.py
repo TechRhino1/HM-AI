@@ -13,7 +13,7 @@ import sqlite3
 from datetime import datetime, timezone, timedelta
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
-from typing import Any, Optional, Dict, Tuple
+from typing import Any, Optional, Dict, Tuple, ClassVar
 
 from jarvis.application.state_manager import StateManager, GLOBAL_STATE
 from jarvis.application.radar_sort import radar_sort_key
@@ -53,7 +53,7 @@ class JarvisRequestHandler(BaseHTTPRequestHandler):
     orchestrator: Optional[Any] = None
     _bg_thread_started: bool = False
     _bg_lock = threading.Lock()
-    _CANDLES_CACHE: Dict[str, Tuple[Dict[str, Any], float]] = {}
+    _CANDLES_CACHE: ClassVar[Dict[str, Tuple[Dict[str, Any], float]]] = {}
     
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     root_dir = os.path.dirname(base_dir)
@@ -493,8 +493,8 @@ class JarvisRequestHandler(BaseHTTPRequestHandler):
                                 provider = "pinggy.io"
                             elif "serveo" in tunnel_url:
                                 provider = "serveo.net"
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.warning(f"Could not read tunnel URL file {tunnel_file}: {e}")
                 from HM_start import get_local_wifi_ip
                 local_ip = get_local_wifi_ip()
                 self._send_json({
@@ -1231,7 +1231,7 @@ class JarvisRequestHandler(BaseHTTPRequestHandler):
         except Exception as e:
             logger.debug(f"Socket write exception (non-fatal): {e}")
 
-    _STATIC_CACHE = {}
+    _STATIC_CACHE: ClassVar[Dict[str, Tuple[bytes, str, float]]] = {}
 
     def _serve_static_file(self, req_path: str):
         now = time.time()

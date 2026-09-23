@@ -3,7 +3,7 @@ HM Algo 2.0 — Cross-Asset Dynamic Correlation Engine.
 Calculates dynamic rolling correlations between Gold, USD Majors, Indices, and Crypto to prevent concentrated risk exposure.
 """
 import pandas as pd
-from typing import Dict, Any
+from typing import Dict, Any, Tuple, ClassVar
 
 class DynamicCorrelationEngine:
     def __init__(self, rolling_window: int = 30):
@@ -30,7 +30,7 @@ class DynamicCorrelationEngine:
 
         return result
 
-    _DEFAULT_CORRELATIONS = {
+    _DEFAULT_CORRELATIONS: ClassVar[Dict[Tuple[str, str], float]] = {
         ("EURUSD", "GBPUSD"): 0.82,
         ("EURUSD", "USDJPY"): -0.65,
         ("EURUSD", "USDCHF"): -0.88,

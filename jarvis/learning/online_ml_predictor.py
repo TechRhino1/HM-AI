@@ -14,7 +14,7 @@ import numpy as np
 import threading
 import logging
 from collections import deque
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List, ClassVar
 from datetime import datetime, timezone
 
 from jarvis.data.schemas import MarketContext, RegimeOutput
@@ -25,7 +25,7 @@ logger = logging.getLogger("JARVIS_OnlineML")
 class OnlineMLPredictor:
     """Online Adaptive Machine Learning engine predicting trade success probability."""
     
-    FEATURE_NAMES = [
+    FEATURE_NAMES: ClassVar[List[str]] = [
         "momentum_trend_score",       # 1. Normalized trend score (-1.0 to +1.0)
         "adx_strength",              # 2. ADX strength (0.0 to 1.0)
         "rsi_distance",              # 3. RSI distance from neutral 50 (-1.0 to +1.0)

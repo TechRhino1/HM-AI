@@ -4,7 +4,7 @@ Features:
 - Micro-Account Adaptive Sizing & Execution (< $100 Equity)
 - Context-Aware Bayesian Probability Weighting Engine driven by Sweep Detection, Volume Delta, and ADX Slope.
 """
-from typing import Dict, Optional
+from typing import Dict, Optional, List, ClassVar
 import logging
 
 logger = logging.getLogger("JARVIS_StrategySelector")
@@ -18,7 +18,7 @@ from jarvis.intelligence.symbol_profile_config import get_symbol_profile_config,
 class StrategySelector:
     """Selects and ranks candidate trading strategies with dynamic context-aware Bayesian weighting."""
     
-    STRATEGIES = [
+    STRATEGIES: ClassVar[List[str]] = [
         "MICRO_ACCOUNT_ADAPTIVE",
         "TREND_FOLLOWING",
         "TREND_PULLBACK",
@@ -64,8 +64,8 @@ class StrategySelector:
             try:
                 spec = resolve_symbol(context.symbol)
                 asset_class = getattr(spec, "asset_class", "").upper()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Symbol resolution failed for %s; asset class stays UNKNOWN: %s", context.symbol, e)
 
         is_jpy = "JPY" in symbol_name
         is_crypto = (asset_class == "CRYPTO") or any(k in symbol_name for k in ["BTC", "ETH", "SOL"])

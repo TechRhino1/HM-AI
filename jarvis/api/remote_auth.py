@@ -14,7 +14,7 @@ try:
     _HAVE_BCRYPT = True
 except Exception:  # pragma: no cover
     _HAVE_BCRYPT = False
-from typing import Dict, Any, Optional, Tuple, List
+from typing import Dict, Any, Optional, Tuple, List, ClassVar
 
 logger = logging.getLogger("JARVIS_RemoteAuth")
 
@@ -67,8 +67,8 @@ def _resolve_admin_password() -> str:
                     existing = f.read().strip()
                     if existing:
                         return existing
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"Could not read admin password file {pass_file}: {e}")
     new_pass = secrets.token_urlsafe(18)
     pass_file = os.path.join(base_dir, ".jarvis_admin_pass")
     try:
@@ -111,19 +111,19 @@ class RemoteAuthEngine:
     Secure Authentication and Session Engine for HM Algo 2.0 Remote Web Terminals.
     Includes rate limiting, temporary lockout against brute-force attacks, and persistent HMAC signing.
     """
-    _tokens: Dict[str, float] = {}       # token -> expiration timestamp
+    _tokens: ClassVar[Dict[str, float]] = {}       # token -> expiration timestamp
     # token -> the moment the revocation itself may be forgotten (dict-shaped;
     # see _RevokedTokens — it still answers the old set interface).
-    _revoked_tokens: Dict[str, float] = _RevokedTokens()
+    _revoked_tokens: ClassVar[Dict[str, float]] = _RevokedTokens()
     _token_ttl: float = 8 * 3600.0       # Short-lived browser session
 
     # Failed login attempts tracker for brute force protection
-    _failed_attempts: Dict[str, List[float]] = {}
+    _failed_attempts: ClassVar[Dict[str, List[float]]] = {}
     _lockout_duration_sec: float = 60.0
     _max_failed_attempts: int = 5
 
     # In-memory user database with salted hashes and roles
-    _users: Dict[str, Dict[str, Any]] = {}
+    _users: ClassVar[Dict[str, Dict[str, Any]]] = {}
 
     @classmethod
     def is_local_client(cls, client_ip: str) -> bool:
