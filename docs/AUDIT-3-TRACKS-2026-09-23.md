@@ -457,17 +457,47 @@ The A/B included a **reference arm** precisely to validate the harness, and it *
   (**favourable**); GBPUSD 652 → 407. A second attempt to reproduce §J's literal change
   ("correct the registry to observed") was also favourable: Total R −206.7.
 
-There is also a ~3× scale gap on the *same* 46,939-candidate universe — 7,177 selected here vs
-§J's 2,440 EXECUTE — which says §J ran under a materially different selection configuration
-(stricter EXECUTE/gate set, and/or the 2.0 s analyst-timeout degraded path noted in §J3, and/or
-`backtesting/engine.py`'s scalar `spread=2.0`, which gp11 §5 flags as disagreeing with
-`signal_scan`).
+### What actually explains the gap — and a worse problem found underneath
 
-**Status: unresolved.** The "withhold spread calibration" decision rests on a measurement that
-does not reproduce, so it is not confirmed either way — do not treat §J's adverse number as
-settled, and do not treat this run's favourable number as a green light either. It needs a
-re-run under a matched config before any spread change ships. This does **not** affect the
-A-vs-B′ conclusion above, which is a same-bar, same-process paired comparison.
+I now have §J2's surviving artefact, `reports/spread_ab_H1_183d.json`. Two findings:
+
+**1. The count gap is mostly the universe, not the config.** §J2 ran on **8 symbols**
+(EURUSD, GBPUSD, USDJPY, AUDUSD, GBPJPY, EURJPY, BTCUSD, WTI) over **18,823 candidates**, not the
+20 symbols / 46,939 candidates of the new harness. The selection *rate* is nearly identical —
+2,782 / 18,823 = **14.78%** vs 7,177 / 46,939 = **15.29%**. So the two do not disagree about how
+often the engine trades; the "3× gap" is arithmetic. The selection predicate is also the same in
+both (`decision == "EXECUTE"` plus BUY/SELL, matching `signal_scan.py:252`).
+
+**2. §J2's numbers as written in this report do not match its own artefact.** That is the serious
+part:
+
+| | §J2 as quoted above | §J2's artefact (`spread_ab_H1_183d.json`) |
+|---|---|---|
+| Executed | 2,440 → 2,839 | **2,782 → 2,784** |
+| Total R | −115.0 → −240.3 | **−206.176 → −226.131** |
+| EURUSD | 14 → 20 | 14 → 21 |
+| GBPUSD | 383 → 648 | **649 → 677** |
+| AUDUSD | 52 → 78 | 75 → 75 |
+| EURJPY | 200 → 285 | 286 → 286 |
+| WTI | 1,329 → 1,286 | 1,285 → 1,251 |
+
+Several quoted "B" figures are close to the artefact's **A** figures (648≈649, 285≈286,
+1286≈1285), which is what a transposed or mixed-run rendering looks like. **Treat §J2's quoted
+numbers as unreliable.** The artefact itself is self-consistent and says **adverse**:
+−206.176 → −226.131, Δ −19.96 R.
+
+**3. The direction conflict is real and comes from the replay model.** Per-trade R differs by
+1.7× between the two harnesses on the baseline: **−0.0741** (§J2 artefact) vs **−0.0430** (new
+harness). Same selection behaviour, different exits — so these are different exit/cost models,
+and that, not the spread change, is what flips the sign of the delta. Note also that WTI alone is
+**+103.081 R** and 46% of §J2's executions, so that total is dominated by one profitable symbol.
+
+**Status: unresolved, and now with a documented reason.** §J2's artefact says adverse; the newer
+harness says favourable; the two disagree because the exit model differs, and §J2's headline
+numbers do not match its own output. Do not treat either as settled, and do not treat the
+favourable number as a green light. It needs one run with both harnesses pinned to the same exit
+model and symbol set. This does **not** affect the A-vs-B′ conclusion above, which is a same-bar,
+same-process paired comparison.
 
 Determinism was verified: two identical cross-process runs are byte-identical. The unseeded
 `np.random.beta` in `ensemble_bandit.py:36` / `strategy_bandit.py:89,101` is a red herring —
