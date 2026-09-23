@@ -1,15 +1,73 @@
 # HM-AI / JARVIS — Three-Track Audit Report
-*Wednesday 2026-09-23. Read-only investigation. No code modified.*
+*Wednesday 2026-09-23. Read-only investigation. No production code modified.*
+
+---
+
+## ⚠ Correction — read this before the rest
+
+Both entry-model questions are now **measured**, and the measurement **overturned the headline of
+the first draft of this report**. The original headline blamed the losses on a "mechanical
+stop-doubling defect (median 0.21×ATR)". That figure **does not reproduce**.
+
+| First draft claimed | Measured | Verdict |
+|---|---|---|
+| Median stop is **0.21×ATR**, 92% below 0.85×ATR | Median candidate stop is **2.58×ATR (H1)**; only 0.2–3% of trades sit below 1.11×ATR | **Wrong.** A daily-vs-H1 ATR unit error (§A1) |
+| Raising the stop floor to 1.11×ATR is the top fix (§D #1) | Arms 0.10 / 0.30 / 0.50×ATR are **bit-identical**; ΔE[R] at 1.11 is **+0.00092** on 46,939 trades | **Do not ship.** Measured no-op |
+| Effective n = **327** independent bets from 94,937 rows | A **single symbol** measures 3,971 independent bets | **Wrong.** 327 for a 20-symbol book is internally impossible (§E) |
+| FVG: **WAIT** pending backtest | **0/20** pass DSR; Sharpe **negative on all 20**; win rates 12–34.7% vs 42–59% required | **DO NOT PROCEED** — now answered, not deferred |
+
+The two things that survive unchanged: **the system loses money (−$633.33 on 137 real broker
+closed trades, 25.5% win rate)**, and **the incumbent signal has no measured edge**. What changed
+is that we no longer know the *mechanical* cause — the stop floor was a false lead.
+
+**Consequence:** the top-ranked fix in §D is withdrawn. Phase 5 (stop-floor hardening) is **not
+recommended**, and Phase 7 (FVG) is answered **no**. See §F for what replaces them.
 
 ---
 
 ## Headline
 
-The recurring losses are dominated by a **mechanical stop-doubling defect** (median 0.21×ATR; 92% of trades have a stop < 0.85×ATR). On 137 real broker closed trades: **−$633.33, win rate 25.5%**. Fixing the stop floor is mechanical and *reduces bleeding* — but the prior signal-quality audit already established `DSR > 0.95` met by **0/20** on **327 independent bets**, and the most recent `entry_edge_verdict.md` (18,998 candidates) states *"There is no edge in the current entry features… `score` sorts how badly trades lose, not how well they win."* **No entry-model change can produce profitability until that verdict is overturned with evidence.** The FVG/ICT entry model the user asked about is *already partially implemented* in `institutional_entry_engine._find_micro_fvg_ce` (drives SCALP/DAY at the gap's 50% CE) — and the system still loses. Per the user's own instruction ("evaluate before implementing"), the FVG swap is **WAIT**: implement only after a standalone FVG backtest passes DSR > 0.95 on *effective* n AND beats always-long, both instruments already in-repo.
+The recurring losses are **not** explained by the stop floor. Raising the floor is a measured
+no-op (ΔE[R] = +0.00092 over 46,939 trades; arms 0.10/0.30/0.50×ATR come out bit-identical),
+because the floor is not the binding constraint — median candidate stops are already 2.58×ATR.
+On 137 real broker closed trades: **−$633.33, win rate 25.5%**. The prior signal-quality audit
+established `DSR > 0.95` met by **0/20**, and `entry_edge_verdict.md` (18,998 candidates) states
+*"There is no edge in the current entry features… `score` sorts how badly trades lose, not how
+well they win."* The FVG/ICT model the user asked about is *already partially implemented* in
+`institutional_entry_engine._find_micro_fvg_ce` — and the system still loses. It has now been
+backtested standalone: **0/20 pass DSR, Sharpe negative on every symbol.** **No entry-model change
+can produce profitability, and the mechanical lever we thought we had does not exist.**
 
 ---
 
 ## Track 1 — Loss analysis & entry-model evaluation
+
+### A1. CORRECTION — the "0.21×ATR stop" does not reproduce
+
+The first draft's headline root cause was: `dynamic_levels.py:273` floors `min_sl_dist` at
+`max(3×spread, 0.10×ATR)`, producing a median stop of 0.21×ATR. Measured directly on 46,939
+candidate trades across 20 symbols, **median candidate stops are 2.58×ATR (H1)**, and only
+**0.2–3%** of trades fall below 1.11×ATR. The floor never binds.
+
+The origin of the bad figure is a **unit error**:
+
+```python
+# dynamic_levels.py:140-142
+typical_atr_pct = getattr(spec, "typical_atr_pct", 0.5)      # documented as DAILY ATR %
+typical_atr = c_price * (typical_atr_pct / 100.0)
+atr_ratio = min(3.0, max(0.33, atr / max(atr_median, 1e-6)))  # H1 ATR / daily ATR
+```
+
+`jarvis/data/symbol_registry.py:22` documents `typical_atr_pct` as *"Typical **daily** ATR as % of
+price"*, while `atr = vol.atr` is the **timeframe (H1)** ATR — 4–6× smaller. So `atr_ratio`
+compares an hourly ATR against a daily one and **pins at its 0.33 clamp on 69.8% of bars (90–99.6%
+for FX)**. The "volatility-adaptive buffer" is therefore a *constant*, and any stop/ATR statistic
+computed against the daily denominator understates by ~4.5× — which is where 0.21 came from.
+
+Self-consistency check: the system's own P&L of −0.11R/trade is consistent with 2.6×ATR stops and
+inconsistent with 0.21×ATR stops (0.21×ATR stops with a 1.5R target would be stopped out almost
+immediately and would not produce the observed 61–73% stop-out rate). **The audit's own numbers
+contradicted each other, and the measurement resolves it in favour of ~2.6×ATR.**
 
 ### A. Root causes (measured on real closed trades)
 
@@ -38,7 +96,22 @@ Historical check, last 56 joinable real closed trades vs the H1 swing set (pivot
 
 Control: every bar's close vs the same swing set gives EURUSD/GBPUSD **99%** within 5 pip (median 0.2 pip) and XAUUSD **44%**. **Entries are no more clustered at swings than random bars — proximity is incidental, not intentional.**
 
-### C. FVG evaluation — WAIT (do not implement as a replacement)
+### C. FVG evaluation — **MEASURED: DO NOT PROCEED**
+
+The backtest has been run (`tools/fvg_standalone_backtest.py`, `reports/fvg_standalone_findings.md`).
+Design: 20 symbols, M15 183d signals, M5 execution, H1 365d structure; 3-candle gap with
+displacement body/range ≥ 0.55 (the code's own threshold, `institutional_entry_engine.py:563`);
+entry at the gap's 50% CE **on retrace** (not at the edge — that would be lookahead); stop beyond
+the gap plus buffer; 1.5R target; costs charged from each bar's own `spread_pips`.
+
+**Result: 0/20 symbols pass DSR > 0.95. Sharpe is negative on all 20.** Win rates land at
+12–34.7% against the 42–59% needed to break even at 1.5R. Both FVG and always-long lose money;
+FVG loses *less*, but "less negative than a losing baseline" is not an edge and cannot be
+monetised long-only. Neither bar is cleared.
+
+The first draft said WAIT pending evidence. **The evidence is now in, and it is negative** — so
+this is no longer a deferral, it is a **no**. Wiring FVG as a replacement would swap an unproven
+model for a measured-negative one.
 
 - **FVG is already partly shipped.** `jarvis/market/fair_value_gap.py` (3-candle gap, 50-bar lookback, mitigation tracking), `jarvis/market/market_structure.py:111-154` (FVG + OBs with 45% displacement), and `institutional_entry_engine._find_micro_fvg_ce` (`:568-599`) which drives SCALP/DAY at the gap's 50% CE. The system still loses.
 - **Data exists for an honest backtest.** `data/market/real/<SYM>/<SYM>_{M1,M5,M15,H1,H4,D1}_*.parquet` for 20 symbols (256 files). M5/M15 183d full; H1 365d full to 2026-09-15; M1 183d only from 2026-07-06 (~67d).
@@ -59,6 +132,48 @@ Control: every bar's close vs the same swing set gives EURUSD/GBPUSD **99%** wit
 | 7 | Dedup-aware reporting | `tools/audit_trade_quality.py` | `one_position_at_a_time=True` by default | Counts inflated ~25× without it. |
 
 **Not measured (not findings):** adverse excursion at entry, partial-fill/slippage on the 137 real rows, per-symbol edge claim.
+
+**§D #1 is WITHDRAWN** — see §A1 and §E. It was ranked first on the 0.21×ATR figure, which does
+not reproduce. Raising the floor to 1.11×ATR is a measured no-op.
+
+### E. CORRECTION — the "327 independent bets" figure is wrong
+
+Every DSR conclusion in this report quoted *94,937 rows → 327 independent bets (0.3%)*. That
+number is **not credible**, and the proof is internal: the same engine run on a **single symbol**
+returns **3,971 independent bets**. One symbol cannot contain 12× the independent bets of the
+20-symbol book it belongs to.
+
+At `tools/deflated_sharpe_report.py:239` the pooled span accumulation is:
+
+```python
+pooled_spans.extend(spans[prod_key])          # a flat list
+...
+book_n_eff = SampleUniquenessWeightEngine.effective_sample_size(pooled_spans)
+```
+
+`effective_sample_size` (`jarvis/learning/sample_weights.py:101`) expects
+`List[Dict[str, Any]]` — trade records. The pooled call passes the raw span entries instead, so
+the uniqueness engine never sees the structures it needs and returns a degenerate value. The
+measured ratio is **4.2%, not 0.3%** — an order of magnitude out.
+
+**Direction of the correction:** effective n is *larger* than claimed, so the DSR bar is *less*
+severe than reported. That does **not** rescue the incumbent: it still fails 0/20 on the raw
+count, and the FVG study fails 0/20 on the corrected count too. The conclusion is unchanged; only
+the stated severity was wrong.
+
+### F. What replaces the withdrawn fixes
+
+With the stop floor and FVG both measured out, the remaining levers are loss-reduction and
+measurement, not profitability:
+
+| # | Action | Why it survives |
+|---|---|---|
+| 1 | **Fix the daily-vs-H1 ATR unit error** (`dynamic_levels.py:140-142`) | `atr_ratio` pins at its 0.33 clamp on 69.8% of bars (FX 90–99.6%), so the "adaptive" buffer is a constant. This is a genuine bug and the root of the false diagnosis. |
+| 2 | **Persist `exit_price` + real `realized_pnl`** (`jarvis/data/database.py`) | 109/109 closed rows have `realized_pnl == expected_value`; `data/jarvis_trade_memory.db` has 42/93 rows with `exit_price=0, pnl=0`, and XAUUSD rows carry `entry_price=2400` while the market prints ~5000. **Entry quality cannot be measured at all until this is trustworthy.** |
+| 3 | **Fix the `risk_dist` floor that never moves `sl_price`** (`institutional_entry_engine.py:131,341,348`) | Floors the *reported* risk without moving the actual stop, decoupling sized risk and reported R:R from reality — the source of the "0.06×ATR stop, R:R 13.8" artifact. |
+| 4 | **Correct `typical_spread_pips`** | Understates measured FX spreads 2–3× (EURUSD 0.7 vs 1.90 measured); the manifest's same-named field is in **points** for indices (GER40 205 vs 1.95). Costs are being under-charged across the board. |
+| 5 | **Resolve the `mtf_data` path** (`dynamic_levels.py:514-539`) | When `mtf_data` holds any non-empty frame the function returns the institutional result *instead of* `base_result`, so the line 273/404 floor may never govern a live stop at all. This must be settled before any further stop-floor work means anything. |
+| 6 | **Remove the dead ICT gates** (`institutional_entry_engine.py`) | `has_mss` is computed at `:97` and never read; `h1_aligned` is computed at `:212` and only stored as a report key at `:281`; `in_kill_zone` at `:225` only relabels `entry_type` — both branches set the identical `entry_price`. Three gates that look like risk controls and reject nothing. |
 
 ---
 
@@ -162,10 +277,11 @@ Each phase ends with `pytest` green and the layout verifier (`tools/verify_ui_la
 | **3 — Refactor reorg** | Move `timeout_guard.py` → `jarvis/common/`; remove 9 unused imports; collapse `jarvis.bat`/`JARVIS.cmd`/`HM_start.bat`/`HM_start.ps1`; demote `jarvis.py` duplication | Low | No |
 | **4 — Scalability first cuts** | Hoist `ThreadPoolExecutor`; move non-broker compute outside the lock; per-IP request throttle; raise the metrics surface | Low–medium (touches request path) | No |
 | `⛔` | **Approval gate.** Show: remaining gaps; updated count of pytest-green + verifier-green. | | |
-| **5 — Entry-model hardening (backtested before live)** | Enforce stop floor ≥ 1.11×ATR (#1); recompute TP off floored risk (#2); add `exit_price`/`realized_pnl` columns (#3) | Med — needs backtest | **Yes — but only after backtest on the same instrument is run and DSR > 0.95 on effective n** |
+| **5 — Entry-model hardening** | ~~Enforce stop floor ≥ 1.11×ATR~~ **WITHDRAWN — measured no-op (§A1)**: ΔE[R] = +0.00092 over 46,939 trades; arms 0.10/0.30/0.50×ATR bit-identical. Keep only: recompute TP off floored risk (#2) and add `exit_price`/`realized_pnl` columns (#3) | n/a | **No — the stop-floor half is dead; the persistence half stands** |
 | **6 — Architecture fixes (architecture-level changes only)** | Loopback auth bypass tightening (#3); CSE/security headers expansion; break `market⟲intelligence` and `intelligence⟲backtesting` cycles | Med-High | No |
 | `⛔` | **Approval gate.** Show: entry-model backtest verdict (DSR, always-long delta); if NOT profitable → STOP here and revisit the model. | | |
-| **7 — FVG standalone backtest** | The honest recipe in §C, run via `tools/deflated_sharpe_report.py` + `tools/p0_1_direction_audit.py`. If passes both bars → wire FVG as *additional* (not replacement) entry. | Backtest only. | **Only if §C verdict clears.** |
+| **7 — FVG standalone backtest** | **RUN — verdict NEGATIVE.** 0/20 pass DSR > 0.95; Sharpe negative on all 20; win rates 12–34.7% vs 42–59% required. Artifacts: `tools/fvg_standalone_backtest.py`, `reports/fvg_standalone_findings.md`, 6 JSON under `reports/`. | Done | **No. Do not wire FVG — as replacement or as addition.** |
+| **8 — Stop-floor A/B** | **RUN — verdict NEGATIVE.** Arms 0.10/0.30/0.50/1.11×ATR compared over 46,939 trades (183d) and 94,937 (365d). No width is profitable; best E[R] −0.120R, DSR 0. Knee ≈ 0.70×ATR, and the system is already past it. Artifacts: `tools/stop_floor_ab.py`, `reports/stop_floor_ab_findings.md`. | Done | **No.** |
 
 ### What I will **not** do without explicit approval
 
