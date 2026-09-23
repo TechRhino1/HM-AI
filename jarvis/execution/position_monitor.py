@@ -1047,7 +1047,20 @@ class PositionMonitorEngine:
         # Fetch fresh context
         try:
             mtf_data = self.data_feed.fetch_multi_timeframe(symbol)
-            ctx = self.context_engine.build_context(symbol, mtf_data)
+            # Feed the symbol's own typical spread so the spread-blowout guard
+            # in _manage_single_position compares like-for-like. build_context
+            # defaults current_spread_pips to a global 2.0; that constant
+            # exceeded 2x the typical spread of EURUSD/GBPUSD/USDJPY/AUDUSD,
+            # so the guard fired on every call and silently disabled trailing
+            # stops, breakeven moves and partial closes on those majors.
+            from jarvis.data.symbol_registry import resolve as _resolve_symbol
+            try:
+                spread_pips = _resolve_symbol(symbol).typical_spread_pips
+            except Exception:
+                spread_pips = 3.0
+            ctx = self.context_engine.build_context(
+                symbol, mtf_data, current_spread_pips=spread_pips
+            )
             with self._ctx_lock:
                 self._ctx_cache[symbol] = (ctx, now)
             return ctx
