@@ -1,0 +1,230 @@
+{
+  "config": {
+    "tf": "H1",
+    "window": 183,
+    "corrected": {
+      "EURUSD": {
+        "typical_spread_pips": 1.9,
+        "max_spread_pips": 5.5
+      },
+      "GBPUSD": {
+        "typical_spread_pips": 2.2,
+        "max_spread_pips": 6.0
+      },
+      "USDJPY": {
+        "typical_spread_pips": 2.3,
+        "max_spread_pips": 7.0
+      },
+      "AUDUSD": {
+        "typical_spread_pips": 2.3,
+        "max_spread_pips": 6.5
+      },
+      "GBPJPY": {
+        "typical_spread_pips": 2.5,
+        "max_spread_pips": 6.5
+      },
+      "EURJPY": {
+        "typical_spread_pips": 2.0,
+        "max_spread_pips": 5.0
+      },
+      "BTCUSD": {
+        "typical_spread_pips": 2250.0
+      },
+      "WTI": {
+        "typical_spread_pips": 3.0
+      }
+    }
+  },
+  "per_symbol": {
+    "EURUSD": {
+      "cand_A": 2151,
+      "cand_B": 2151,
+      "exec_A": 14,
+      "exec_B": 20,
+      "gate_A": 14,
+      "gate_B": 20,
+      "exec_rows_A": 14,
+      "exec_rows_B": 20,
+      "replay_A": {
+        "n": 14,
+        "mean_r": -0.12541,
+        "total_r": -1.756,
+        "t_stat": -0.373
+      },
+      "replay_B": {
+        "n": 20,
+        "mean_r": -0.39657,
+        "total_r": -7.931,
+        "t_stat": -1.579
+      },
+      "cand_overlap": 2151,
+      "cand_only_A": 0,
+      "cand_only_B": 0
+    },
+    "GBPUSD": {
+      "cand_A": 2198,
+      "cand_B": 2198,
+      "exec_A": 383,
+      "exec_B": 648,
+      "gate_A": 386,
+      "gate_B": 663,
+      "exec_rows_A": 383,
+      "exec_rows_B": 648,
+      "replay_A": {
+        "n": 383,
+        "mean_r": -0.23549,
+        "total_r": -90.194,
+        "t_stat": -3.975
+      },
+      "replay_B": {
+        "n": 648,
+        "mean_r": -0.20892,
+        "total_r": -135.379,
+        "t_stat": -4.544
+      },
+      "cand_overlap": 2198,
+      "cand_only_A": 0,
+      "cand_only_B": 0
+    },
+    "USDJPY": {
+      "cand_A": 2350,
+      "cand_B": 2350,
+      "exec_A": 0,
+      "exec_B": 0,
+      "gate_A": 0,
+      "gate_B": 0,
+      "exec_rows_A": 0,
+      "exec_rows_B": 0,
+      "replay_A": null,
+      "replay_B": null,
+      "cand_overlap": 2350,
+      "cand_only_A": 0,
+      "cand_only_B": 0
+    },
+    "AUDUSD": {
+      "cand_A": 2309,
+      "cand_B": 2309,
+      "exec_A": 52,
+      "exec_B": 78,
+      "gate_A": 53,
+      "gate_B": 79,
+      "exec_rows_A": 52,
+      "exec_rows_B": 78,
+      "replay_A": {
+        "n": 52,
+        "mean_r": -0.44516,
+        "total_r": -23.148,
+        "t_stat": -3.119
+      },
+      "replay_B": {
+        "n": 78,
+        "mean_r": -0.44529,
+        "total_r": -34.733,
+        "t_stat": -3.776
+      },
+      "cand_overlap": 2309,
+      "cand_only_A": 0,
+      "cand_only_B": 0
+    },
+    "GBPJPY": {
+      "cand_A": 2190,
+      "cand_B": 2190,
+      "exec_A": 120,
+      "exec_B": 127,
+      "gate_A": 122,
+      "gate_B": 129,
+      "exec_rows_A": 120,
+      "exec_rows_B": 127,
+      "replay_A": {
+        "n": 120,
+        "mean_r": -0.73837,
+        "total_r": -88.605,
+        "t_stat": -10.324
+      },
+      "replay_B": {
+        "n": 127,
+        "mean_r": -0.69401,
+        "total_r": -88.139,
+        "t_stat": -9.352
+      },
+      "cand_overlap": 2190,
+      "cand_only_A": 0,
+      "cand_only_B": 0
+    },
+    "EURJPY": {
+      "cand_A": 2266,
+      "cand_B": 2266,
+      "exec_A": 200,
+      "exec_B": 285,
+      "gate_A": 203,
+      "gate_B": 291,
+      "exec_rows_A": 200,
+      "exec_rows_B": 285,
+      "replay_A": {
+        "n": 200,
+        "mean_r": -0.09163,
+        "total_r": -18.326,
+        "t_stat": -1.072
+      },
+      "replay_B": {
+        "n": 285,
+        "mean_r": -0.10923,
+        "total_r": -31.131,
+        "t_stat": -1.533
+      },
+      "cand_overlap": 2266,
+      "cand_only_A": 0,
+      "cand_only_B": 0
+    },
+    "BTCUSD": {
+      "cand_A": 3191,
+      "cand_B": 3191,
+      "exec_A": 342,
+      "exec_B": 395,
+      "gate_A": 343,
+      "gate_B": 396,
+      "exec_rows_A": 342,
+      "exec_rows_B": 395,
+      "replay_A": {
+        "n": 342,
+        "mean_r": -0.1155,
+        "total_r": -39.502,
+        "t_stat": -1.784
+      },
+      "replay_B": {
+        "n": 395,
+        "mean_r": -0.11393,
+        "total_r": -45.002,
+        "t_stat": -1.891
+      },
+      "cand_overlap": 3191,
+      "cand_only_A": 0,
+      "cand_only_B": 0
+    },
+    "WTI": {
+      "cand_A": 2168,
+      "cand_B": 2168,
+      "exec_A": 1329,
+      "exec_B": 1286,
+      "gate_A": 1382,
+      "gate_B": 1334,
+      "exec_rows_A": 1329,
+      "exec_rows_B": 1286,
+      "replay_A": {
+        "n": 1329,
+        "mean_r": 0.11025,
+        "total_r": 146.528,
+        "t_stat": 3.236
+      },
+      "replay_B": {
+        "n": 1286,
+        "mean_r": 0.07936,
+        "total_r": 102.061,
+        "t_stat": 2.298
+      },
+      "cand_overlap": 2168,
+      "cand_only_A": 0,
+      "cand_only_B": 0
+    }
+  }
+}

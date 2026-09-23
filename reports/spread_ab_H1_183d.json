@@ -1,0 +1,530 @@
+{
+  "config": {
+    "tf": "H1",
+    "window": 183,
+    "symbols": [
+      "EURUSD",
+      "GBPUSD",
+      "USDJPY",
+      "AUDUSD",
+      "GBPJPY",
+      "EURJPY",
+      "BTCUSD",
+      "WTI"
+    ],
+    "corrected": {
+      "EURUSD": {
+        "typical_spread_pips": 1.9,
+        "max_spread_pips": 5.5
+      },
+      "GBPUSD": {
+        "typical_spread_pips": 2.2,
+        "max_spread_pips": 6.0
+      },
+      "USDJPY": {
+        "typical_spread_pips": 2.3,
+        "max_spread_pips": 7.0
+      },
+      "AUDUSD": {
+        "typical_spread_pips": 2.3,
+        "max_spread_pips": 6.5
+      },
+      "GBPJPY": {
+        "typical_spread_pips": 2.5,
+        "max_spread_pips": 6.5
+      },
+      "EURJPY": {
+        "typical_spread_pips": 2.0,
+        "max_spread_pips": 5.0
+      },
+      "BTCUSD": {
+        "typical_spread_pips": 2250.0
+      },
+      "WTI": {
+        "typical_spread_pips": 3.0
+      }
+    }
+  },
+  "per_symbol": {
+    "EURUSD": {
+      "bars": 3120,
+      "candidates_A": 2151,
+      "candidates_B": 2151,
+      "executed_A": 14,
+      "executed_B": 21,
+      "gate_pass_A": 14,
+      "gate_pass_B": 21,
+      "decisions_A": {
+        "NO_TRADE": 1215,
+        "WAIT": 922,
+        "EXECUTE": 14
+      },
+      "decisions_B": {
+        "WAIT": 1255,
+        "NO_TRADE": 875,
+        "EXECUTE": 21
+      },
+      "exec_replay_A": {
+        "n": 14,
+        "mean_r": -0.12467,
+        "total_r": -1.745,
+        "win_rate": 0.3571,
+        "t_stat": -0.371,
+        "median_risk_price": 0.002005
+      },
+      "exec_replay_B": {
+        "n": 21,
+        "mean_r": -0.4261,
+        "total_r": -8.948,
+        "win_rate": 0.2381,
+        "t_stat": -1.77,
+        "median_risk_price": 0.002
+      },
+      "all_replay_A": {
+        "n": 2151,
+        "mean_r": -0.20928,
+        "total_r": -450.169,
+        "win_rate": 0.3245,
+        "t_stat": -8.299,
+        "median_risk_price": 0.00272
+      },
+      "all_replay_B": {
+        "n": 2151,
+        "mean_r": -0.20928,
+        "total_r": -450.169,
+        "win_rate": 0.3245,
+        "t_stat": -8.299,
+        "median_risk_price": 0.00272
+      },
+      "entry_overlap": 2151,
+      "only_A": 0,
+      "only_B": 0,
+      "live_stop": {
+        "n": 400,
+        "median_risk_A": 0.00235,
+        "median_risk_B": 0.00235,
+        "median_ratio_B_over_A": 1.0,
+        "frac_risk_changed": 0.0,
+        "mean_ratio_B_over_A": 1.0
+      }
+    },
+    "GBPUSD": {
+      "bars": 3120,
+      "candidates_A": 2198,
+      "candidates_B": 2198,
+      "executed_A": 649,
+      "executed_B": 677,
+      "gate_pass_A": 665,
+      "gate_pass_B": 700,
+      "decisions_A": {
+        "WAIT": 1046,
+        "EXECUTE": 649,
+        "NO_TRADE": 503
+      },
+      "decisions_B": {
+        "WAIT": 1053,
+        "EXECUTE": 677,
+        "NO_TRADE": 468
+      },
+      "exec_replay_A": {
+        "n": 649,
+        "mean_r": -0.19626,
+        "total_r": -127.376,
+        "win_rate": 0.3282,
+        "t_stat": -4.262,
+        "median_risk_price": 0.00338
+      },
+      "exec_replay_B": {
+        "n": 677,
+        "mean_r": -0.20038,
+        "total_r": -135.661,
+        "win_rate": 0.3264,
+        "t_stat": -4.449,
+        "median_risk_price": 0.00349
+      },
+      "all_replay_A": {
+        "n": 2198,
+        "mean_r": -0.19012,
+        "total_r": -417.877,
+        "win_rate": 0.3294,
+        "t_stat": -7.607,
+        "median_risk_price": 0.00358
+      },
+      "all_replay_B": {
+        "n": 2198,
+        "mean_r": -0.19012,
+        "total_r": -417.877,
+        "win_rate": 0.3294,
+        "t_stat": -7.607,
+        "median_risk_price": 0.00358
+      },
+      "entry_overlap": 2198,
+      "only_A": 0,
+      "only_B": 0,
+      "live_stop": {
+        "n": 400,
+        "median_risk_A": 0.003095,
+        "median_risk_B": 0.003095,
+        "median_ratio_B_over_A": 1.0,
+        "frac_risk_changed": 0.0,
+        "mean_ratio_B_over_A": 1.0
+      }
+    },
+    "USDJPY": {
+      "bars": 3120,
+      "candidates_A": 2350,
+      "candidates_B": 2350,
+      "executed_A": 0,
+      "executed_B": 0,
+      "gate_pass_A": 0,
+      "gate_pass_B": 0,
+      "decisions_A": {
+        "NO_TRADE": 2157,
+        "WAIT": 193
+      },
+      "decisions_B": {
+        "NO_TRADE": 2165,
+        "WAIT": 185
+      },
+      "exec_replay_A": null,
+      "exec_replay_B": null,
+      "all_replay_A": {
+        "n": 2350,
+        "mean_r": -0.19181,
+        "total_r": -450.752,
+        "win_rate": 0.3294,
+        "t_stat": -7.919,
+        "median_risk_price": 0.38
+      },
+      "all_replay_B": {
+        "n": 2350,
+        "mean_r": -0.19181,
+        "total_r": -450.752,
+        "win_rate": 0.3294,
+        "t_stat": -7.919,
+        "median_risk_price": 0.38
+      },
+      "entry_overlap": 2350,
+      "only_A": 0,
+      "only_B": 0,
+      "live_stop": {
+        "n": 400,
+        "median_risk_A": 0.364,
+        "median_risk_B": 0.364,
+        "median_ratio_B_over_A": 1.0,
+        "frac_risk_changed": 0.0,
+        "mean_ratio_B_over_A": 1.0
+      }
+    },
+    "AUDUSD": {
+      "bars": 3120,
+      "candidates_A": 2309,
+      "candidates_B": 2309,
+      "executed_A": 75,
+      "executed_B": 75,
+      "gate_pass_A": 76,
+      "gate_pass_B": 76,
+      "decisions_A": {
+        "WAIT": 1341,
+        "NO_TRADE": 893,
+        "EXECUTE": 75
+      },
+      "decisions_B": {
+        "WAIT": 1341,
+        "NO_TRADE": 893,
+        "EXECUTE": 75
+      },
+      "exec_replay_A": {
+        "n": 75,
+        "mean_r": -0.4425,
+        "total_r": -33.187,
+        "win_rate": 0.24,
+        "t_stat": -3.721,
+        "median_risk_price": 0.00253
+      },
+      "exec_replay_B": {
+        "n": 75,
+        "mean_r": -0.4425,
+        "total_r": -33.187,
+        "win_rate": 0.24,
+        "t_stat": -3.721,
+        "median_risk_price": 0.00253
+      },
+      "all_replay_A": {
+        "n": 2309,
+        "mean_r": -0.35969,
+        "total_r": -830.525,
+        "win_rate": 0.2642,
+        "t_stat": -15.69,
+        "median_risk_price": 0.00257
+      },
+      "all_replay_B": {
+        "n": 2309,
+        "mean_r": -0.35969,
+        "total_r": -830.525,
+        "win_rate": 0.2642,
+        "t_stat": -15.69,
+        "median_risk_price": 0.00257
+      },
+      "entry_overlap": 2309,
+      "only_A": 0,
+      "only_B": 0,
+      "live_stop": {
+        "n": 400,
+        "median_risk_A": 0.00231,
+        "median_risk_B": 0.00231,
+        "median_ratio_B_over_A": 1.0,
+        "frac_risk_changed": 0.0,
+        "mean_ratio_B_over_A": 1.0
+      }
+    },
+    "GBPJPY": {
+      "bars": 3120,
+      "candidates_A": 2190,
+      "candidates_B": 2190,
+      "executed_A": 127,
+      "executed_B": 127,
+      "gate_pass_A": 129,
+      "gate_pass_B": 129,
+      "decisions_A": {
+        "NO_TRADE": 1154,
+        "WAIT": 909,
+        "EXECUTE": 127
+      },
+      "decisions_B": {
+        "NO_TRADE": 1154,
+        "WAIT": 909,
+        "EXECUTE": 127
+      },
+      "exec_replay_A": {
+        "n": 127,
+        "mean_r": -0.69363,
+        "total_r": -88.091,
+        "win_rate": 0.126,
+        "t_stat": -9.349,
+        "median_risk_price": 0.517
+      },
+      "exec_replay_B": {
+        "n": 127,
+        "mean_r": -0.69363,
+        "total_r": -88.091,
+        "win_rate": 0.126,
+        "t_stat": -9.349,
+        "median_risk_price": 0.517
+      },
+      "all_replay_A": {
+        "n": 2190,
+        "mean_r": -0.08043,
+        "total_r": -176.146,
+        "win_rate": 0.3731,
+        "t_stat": -3.126,
+        "median_risk_price": 0.5195
+      },
+      "all_replay_B": {
+        "n": 2190,
+        "mean_r": -0.08043,
+        "total_r": -176.146,
+        "win_rate": 0.3731,
+        "t_stat": -3.126,
+        "median_risk_price": 0.5195
+      },
+      "entry_overlap": 2190,
+      "only_A": 0,
+      "only_B": 0,
+      "live_stop": {
+        "n": 400,
+        "median_risk_A": 0.492,
+        "median_risk_B": 0.492,
+        "median_ratio_B_over_A": 1.0,
+        "frac_risk_changed": 0.0,
+        "mean_ratio_B_over_A": 1.0
+      }
+    },
+    "EURJPY": {
+      "bars": 3120,
+      "candidates_A": 2266,
+      "candidates_B": 2266,
+      "executed_A": 286,
+      "executed_B": 286,
+      "gate_pass_A": 292,
+      "gate_pass_B": 292,
+      "decisions_A": {
+        "NO_TRADE": 1089,
+        "WAIT": 891,
+        "EXECUTE": 286
+      },
+      "decisions_B": {
+        "NO_TRADE": 1089,
+        "WAIT": 891,
+        "EXECUTE": 286
+      },
+      "exec_replay_A": {
+        "n": 286,
+        "mean_r": -0.07992,
+        "total_r": -22.856,
+        "win_rate": 0.3741,
+        "t_stat": -1.118,
+        "median_risk_price": 0.419
+      },
+      "exec_replay_B": {
+        "n": 286,
+        "mean_r": -0.07992,
+        "total_r": -22.856,
+        "win_rate": 0.3741,
+        "t_stat": -1.118,
+        "median_risk_price": 0.419
+      },
+      "all_replay_A": {
+        "n": 2266,
+        "mean_r": -0.18962,
+        "total_r": -429.686,
+        "win_rate": 0.3297,
+        "t_stat": -7.672,
+        "median_risk_price": 0.392
+      },
+      "all_replay_B": {
+        "n": 2266,
+        "mean_r": -0.18962,
+        "total_r": -429.686,
+        "win_rate": 0.3297,
+        "t_stat": -7.672,
+        "median_risk_price": 0.392
+      },
+      "entry_overlap": 2266,
+      "only_A": 0,
+      "only_B": 0,
+      "live_stop": {
+        "n": 400,
+        "median_risk_A": 0.373,
+        "median_risk_B": 0.373,
+        "median_ratio_B_over_A": 1.0,
+        "frac_risk_changed": 0.0,
+        "mean_ratio_B_over_A": 1.0
+      }
+    },
+    "BTCUSD": {
+      "bars": 4392,
+      "candidates_A": 3191,
+      "candidates_B": 3191,
+      "executed_A": 346,
+      "executed_B": 347,
+      "gate_pass_A": 347,
+      "gate_pass_B": 348,
+      "decisions_A": {
+        "NO_TRADE": 1534,
+        "WAIT": 1311,
+        "EXECUTE": 346
+      },
+      "decisions_B": {
+        "NO_TRADE": 1533,
+        "WAIT": 1311,
+        "EXECUTE": 347
+      },
+      "exec_replay_A": {
+        "n": 346,
+        "mean_r": -0.10405,
+        "total_r": -36.002,
+        "win_rate": 0.3584,
+        "t_stat": -1.612,
+        "median_risk_price": 759.86
+      },
+      "exec_replay_B": {
+        "n": 347,
+        "mean_r": -0.10663,
+        "total_r": -37.002,
+        "win_rate": 0.3573,
+        "t_stat": -1.656,
+        "median_risk_price": 758.11
+      },
+      "all_replay_A": {
+        "n": 3191,
+        "mean_r": -0.08405,
+        "total_r": -268.197,
+        "win_rate": 0.3663,
+        "t_stat": -3.947,
+        "median_risk_price": 700.0
+      },
+      "all_replay_B": {
+        "n": 3191,
+        "mean_r": -0.08405,
+        "total_r": -268.197,
+        "win_rate": 0.3663,
+        "t_stat": -3.947,
+        "median_risk_price": 700.0
+      },
+      "entry_overlap": 3191,
+      "only_A": 0,
+      "only_B": 0,
+      "live_stop": {
+        "n": 400,
+        "median_risk_A": 691.225,
+        "median_risk_B": 691.225,
+        "median_ratio_B_over_A": 1.0,
+        "frac_risk_changed": 0.0,
+        "mean_ratio_B_over_A": 1.0
+      }
+    },
+    "WTI": {
+      "bars": 2955,
+      "candidates_A": 2168,
+      "candidates_B": 2168,
+      "executed_A": 1285,
+      "executed_B": 1251,
+      "gate_pass_A": 1333,
+      "gate_pass_B": 1290,
+      "decisions_A": {
+        "EXECUTE": 1285,
+        "WAIT": 646,
+        "NO_TRADE": 237
+      },
+      "decisions_B": {
+        "EXECUTE": 1251,
+        "WAIT": 672,
+        "NO_TRADE": 245
+      },
+      "exec_replay_A": {
+        "n": 1285,
+        "mean_r": 0.08022,
+        "total_r": 103.081,
+        "win_rate": 0.4342,
+        "t_stat": 2.322,
+        "median_risk_price": 2.16
+      },
+      "exec_replay_B": {
+        "n": 1251,
+        "mean_r": 0.07963,
+        "total_r": 99.614,
+        "win_rate": 0.4341,
+        "t_stat": 2.274,
+        "median_risk_price": 2.14
+      },
+      "all_replay_A": {
+        "n": 2168,
+        "mean_r": 0.10449,
+        "total_r": 226.535,
+        "win_rate": 0.4456,
+        "t_stat": 3.93,
+        "median_risk_price": 2.13
+      },
+      "all_replay_B": {
+        "n": 2168,
+        "mean_r": 0.10449,
+        "total_r": 226.535,
+        "win_rate": 0.4456,
+        "t_stat": 3.93,
+        "median_risk_price": 2.13
+      },
+      "entry_overlap": 2168,
+      "only_A": 0,
+      "only_B": 0,
+      "live_stop": {
+        "n": 400,
+        "median_risk_A": 1.87,
+        "median_risk_B": 1.87,
+        "median_ratio_B_over_A": 1.0,
+        "frac_risk_changed": 0.0,
+        "mean_ratio_B_over_A": 1.0
+      }
+    }
+  }
+}

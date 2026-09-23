@@ -1,0 +1,200 @@
+{
+  "config": {
+    "tf": "H1",
+    "window": 183,
+    "corrected": {
+      "EURUSD": {
+        "typical_spread_pips": 1.9,
+        "max_spread_pips": 5.5
+      },
+      "GBPUSD": {
+        "typical_spread_pips": 2.2,
+        "max_spread_pips": 6.0
+      },
+      "USDJPY": {
+        "typical_spread_pips": 2.3,
+        "max_spread_pips": 7.0
+      },
+      "AUDUSD": {
+        "typical_spread_pips": 2.3,
+        "max_spread_pips": 6.5
+      },
+      "GBPJPY": {
+        "typical_spread_pips": 2.5,
+        "max_spread_pips": 6.5
+      },
+      "EURJPY": {
+        "typical_spread_pips": 2.0,
+        "max_spread_pips": 5.0
+      },
+      "BTCUSD": {
+        "typical_spread_pips": 2250.0
+      },
+      "WTI": {
+        "typical_spread_pips": 3.0
+      }
+    }
+  },
+  "per_symbol": {
+    "EURUSD": {
+      "rows": 2151,
+      "a_typ": 0.7,
+      "b_typ": 1.9,
+      "a_max": 2.0,
+      "b_max": 5.5,
+      "fail_spread_protection": 85,
+      "flip_spread_protection": 82,
+      "flip_spread_protection_sole": 0,
+      "fail_forex_prime_session": 870,
+      "flip_prime_session_spreadterm": 787,
+      "flip_prime_session_sole": 2,
+      "rows_sole_failure": 380,
+      "fail_ai_multiscore": 904,
+      "rows_ai_gate_spread_effect_gt0": 904,
+      "max_min_score_drop_pts": 32.4812,
+      "fail_calib_winprob": 293,
+      "rows_calib_gate_effect_gt0": 292,
+      "max_required_winp_drop": 0.0379
+    },
+    "GBPUSD": {
+      "rows": 2198,
+      "a_typ": 0.9,
+      "b_typ": 2.2,
+      "a_max": 2.5,
+      "b_max": 6.0,
+      "fail_spread_protection": 102,
+      "flip_spread_protection": 61,
+      "flip_spread_protection_sole": 0,
+      "fail_forex_prime_session": 884,
+      "flip_prime_session_spreadterm": 789,
+      "flip_prime_session_sole": 132,
+      "rows_sole_failure": 634,
+      "fail_ai_multiscore": 788,
+      "rows_ai_gate_spread_effect_gt0": 788,
+      "max_min_score_drop_pts": 39.0,
+      "fail_calib_winprob": 281,
+      "rows_calib_gate_effect_gt0": 274,
+      "max_required_winp_drop": 0.0355
+    },
+    "USDJPY": {
+      "rows": 2350,
+      "a_typ": 0.8,
+      "b_typ": 2.3,
+      "a_max": 2.5,
+      "b_max": 7.0,
+      "fail_spread_protection": 106,
+      "flip_spread_protection": 100,
+      "flip_spread_protection_sole": 0,
+      "fail_forex_prime_session": 1767,
+      "flip_prime_session_spreadterm": 1683,
+      "flip_prime_session_sole": 0,
+      "rows_sole_failure": 8,
+      "fail_ai_multiscore": 1254,
+      "rows_ai_gate_spread_effect_gt0": 1254,
+      "max_min_score_drop_pts": 63.587,
+      "fail_calib_winprob": 513,
+      "rows_calib_gate_effect_gt0": 510,
+      "max_required_winp_drop": 0.0391
+    },
+    "AUDUSD": {
+      "rows": 2309,
+      "a_typ": 0.9,
+      "b_typ": 2.3,
+      "a_max": 2.5,
+      "b_max": 6.5,
+      "fail_spread_protection": 91,
+      "flip_spread_protection": 89,
+      "flip_spread_protection_sole": 0,
+      "fail_forex_prime_session": 941,
+      "flip_prime_session_spreadterm": 852,
+      "flip_prime_session_sole": 21,
+      "rows_sole_failure": 509,
+      "fail_ai_multiscore": 733,
+      "rows_ai_gate_spread_effect_gt0": 733,
+      "max_min_score_drop_pts": 37.3333,
+      "fail_calib_winprob": 667,
+      "rows_calib_gate_effect_gt0": 667,
+      "max_required_winp_drop": 0.0365
+    },
+    "GBPJPY": {
+      "rows": 2190,
+      "a_typ": 1.2,
+      "b_typ": 2.5,
+      "a_max": 3.0,
+      "b_max": 6.5,
+      "fail_spread_protection": 94,
+      "flip_spread_protection": 17,
+      "flip_spread_protection_sole": 0,
+      "fail_forex_prime_session": 633,
+      "flip_prime_session_spreadterm": 548,
+      "flip_prime_session_sole": 27,
+      "rows_sole_failure": 309,
+      "fail_ai_multiscore": 454,
+      "rows_ai_gate_spread_effect_gt0": 454,
+      "max_min_score_drop_pts": 68.64,
+      "fail_calib_winprob": 282,
+      "rows_calib_gate_effect_gt0": 267,
+      "max_required_winp_drop": 0.0312
+    },
+    "EURJPY": {
+      "rows": 2266,
+      "a_typ": 1.0,
+      "b_typ": 2.0,
+      "a_max": 2.5,
+      "b_max": 5.0,
+      "fail_spread_protection": 91,
+      "flip_spread_protection": 9,
+      "flip_spread_protection_sole": 0,
+      "fail_forex_prime_session": 911,
+      "flip_prime_session_spreadterm": 820,
+      "flip_prime_session_sole": 88,
+      "rows_sole_failure": 305,
+      "fail_ai_multiscore": 474,
+      "rows_ai_gate_spread_effect_gt0": 474,
+      "max_min_score_drop_pts": 48.3,
+      "fail_calib_winprob": 285,
+      "rows_calib_gate_effect_gt0": 268,
+      "max_required_winp_drop": 0.023
+    },
+    "BTCUSD": {
+      "rows": 3191,
+      "a_typ": 1500.0,
+      "b_typ": 2250.0,
+      "a_max": 3000.0,
+      "b_max": 3000.0,
+      "fail_spread_protection": 0,
+      "flip_spread_protection": 0,
+      "flip_spread_protection_sole": 0,
+      "fail_forex_prime_session": 0,
+      "flip_prime_session_spreadterm": 0,
+      "flip_prime_session_sole": 0,
+      "rows_sole_failure": 522,
+      "fail_ai_multiscore": 1566,
+      "rows_ai_gate_spread_effect_gt0": 1318,
+      "max_min_score_drop_pts": 3.0,
+      "fail_calib_winprob": 1082,
+      "rows_calib_gate_effect_gt0": 878,
+      "max_required_winp_drop": 0.01
+    },
+    "WTI": {
+      "rows": 2168,
+      "a_typ": 13.0,
+      "b_typ": 3.0,
+      "a_max": 25.0,
+      "b_max": 25.0,
+      "fail_spread_protection": 0,
+      "flip_spread_protection": 0,
+      "flip_spread_protection_sole": 0,
+      "fail_forex_prime_session": 0,
+      "flip_prime_session_spreadterm": 0,
+      "flip_prime_session_sole": 0,
+      "rows_sole_failure": 534,
+      "fail_ai_multiscore": 228,
+      "rows_ai_gate_spread_effect_gt0": 0,
+      "max_min_score_drop_pts": 0.0,
+      "fail_calib_winprob": 215,
+      "rows_calib_gate_effect_gt0": 0,
+      "max_required_winp_drop": 0.0
+    }
+  }
+}
