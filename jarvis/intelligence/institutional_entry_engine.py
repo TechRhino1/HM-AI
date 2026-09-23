@@ -125,20 +125,28 @@ class InstitutionalEntryEngine:
             entry_price = round(ote_level, digits)
 
         # 5. Structural SL: Sweep wick extreme +/- (1.0x spread + 0.20x M5 ATR)
+        # The floor is applied to the stop DISTANCE, then sl_price is derived from it,
+        # so sl_price and risk_dist always describe the same level (on every branch).
         sl_buffer = spread_dist + (0.20 * m5_atr)
         if bias == "BUY":
-            sl_price = round(sweep_extreme - sl_buffer, digits)
-            risk_dist = max(pip_size * 5, entry_price - sl_price)
-            # Re-enforce SL below entry
-            if sl_price >= entry_price:
-                sl_price = round(entry_price - (0.45 * m5_atr) - spread_dist, digits)
-                risk_dist = entry_price - sl_price
+            struct_sl = round(sweep_extreme - sl_buffer, digits)
+            if struct_sl >= entry_price:
+                # Re-enforce SL below entry
+                sl_dist = (0.45 * m5_atr) + spread_dist
+            else:
+                sl_dist = entry_price - struct_sl
+            sl_dist = max(sl_dist, pip_size * 5)
+            sl_price = round(entry_price - sl_dist, digits)
+            risk_dist = abs(entry_price - sl_price)
         else:
-            sl_price = round(sweep_extreme + sl_buffer, digits)
-            risk_dist = max(pip_size * 5, sl_price - entry_price)
-            if sl_price <= entry_price:
-                sl_price = round(entry_price + (0.45 * m5_atr) + spread_dist, digits)
-                risk_dist = sl_price - entry_price
+            struct_sl = round(sweep_extreme + sl_buffer, digits)
+            if struct_sl <= entry_price:
+                sl_dist = (0.45 * m5_atr) + spread_dist
+            else:
+                sl_dist = struct_sl - entry_price
+            sl_dist = max(sl_dist, pip_size * 5)
+            sl_price = round(entry_price + sl_dist, digits)
+            risk_dist = abs(sl_price - entry_price)
 
         # 6. Targets: TP1 at 1.2R - 1.5R (50% scale-out), TP2 at 2.0R - 2.5R
         tp1_r = 1.35
@@ -232,21 +240,29 @@ class InstitutionalEntryEngine:
             entry_price = round(ref_entry, digits)
 
         # 5. Structural SL: Displacement origin swing point +/- (1.0x spread + 0.30x H1 ATR)
+        # The floor is applied to the stop DISTANCE, then sl_price is derived from it,
+        # so sl_price and risk_dist always describe the same level (on every branch).
         origin_swing = self._find_displacement_origin(df_h1, df_m15, context, bias)
         sl_buffer = spread_dist + (0.30 * h1_atr)
 
         if bias == "BUY":
-            sl_price = round(origin_swing - sl_buffer, digits)
-            risk_dist = max(pip_size * 5, entry_price - sl_price)
-            if sl_price >= entry_price:
-                sl_price = round(entry_price - (0.80 * h1_atr) - spread_dist, digits)
-                risk_dist = entry_price - sl_price
+            struct_sl = round(origin_swing - sl_buffer, digits)
+            if struct_sl >= entry_price:
+                sl_dist = (0.80 * h1_atr) + spread_dist
+            else:
+                sl_dist = entry_price - struct_sl
+            sl_dist = max(sl_dist, pip_size * 5)
+            sl_price = round(entry_price - sl_dist, digits)
+            risk_dist = abs(entry_price - sl_price)
         else:
-            sl_price = round(origin_swing + sl_buffer, digits)
-            risk_dist = max(pip_size * 5, sl_price - entry_price)
-            if sl_price <= entry_price:
-                sl_price = round(entry_price + (0.80 * h1_atr) + spread_dist, digits)
-                risk_dist = sl_price - entry_price
+            struct_sl = round(origin_swing + sl_buffer, digits)
+            if struct_sl <= entry_price:
+                sl_dist = (0.80 * h1_atr) + spread_dist
+            else:
+                sl_dist = struct_sl - entry_price
+            sl_dist = max(sl_dist, pip_size * 5)
+            sl_price = round(entry_price + sl_dist, digits)
+            risk_dist = abs(sl_price - entry_price)
 
         # 6. Targets: TP1 at 1.5R - 1.8R (50% scale-out), TP2 at 2.5R - 3.2R
         tp1_r = 1.65
@@ -334,21 +350,29 @@ class InstitutionalEntryEngine:
             entry_type = "SWING_STRUCTURE_ENTRY"
 
         # 5. Structural SL: Outer D1/H4 structural swing boundary +/- (1.0x spread + 0.40x D1 ATR)
+        # The floor is applied to the stop DISTANCE, then sl_price is derived from it,
+        # so sl_price and risk_dist always describe the same level (on every branch).
         sl_buffer = spread_dist + (0.40 * d1_atr)
         if bias == "BUY":
             outer_swing = range_low
-            sl_price = round(outer_swing - sl_buffer, digits)
-            risk_dist = max(pip_size * 5, entry_price - sl_price)
-            if sl_price >= entry_price:
-                sl_price = round(entry_price - (1.20 * d1_atr) - spread_dist, digits)
-                risk_dist = entry_price - sl_price
+            struct_sl = round(outer_swing - sl_buffer, digits)
+            if struct_sl >= entry_price:
+                sl_dist = (1.20 * d1_atr) + spread_dist
+            else:
+                sl_dist = entry_price - struct_sl
+            sl_dist = max(sl_dist, pip_size * 5)
+            sl_price = round(entry_price - sl_dist, digits)
+            risk_dist = abs(entry_price - sl_price)
         else:
             outer_swing = range_high
-            sl_price = round(outer_swing + sl_buffer, digits)
-            risk_dist = max(pip_size * 5, sl_price - entry_price)
-            if sl_price <= entry_price:
-                sl_price = round(entry_price + (1.20 * d1_atr) + spread_dist, digits)
-                risk_dist = sl_price - entry_price
+            struct_sl = round(outer_swing + sl_buffer, digits)
+            if struct_sl <= entry_price:
+                sl_dist = (1.20 * d1_atr) + spread_dist
+            else:
+                sl_dist = struct_sl - entry_price
+            sl_dist = max(sl_dist, pip_size * 5)
+            sl_price = round(entry_price + sl_dist, digits)
+            risk_dist = abs(sl_price - entry_price)
 
         # Asset-Class Structural Bounds
         sym_name = str(context.symbol).upper()
