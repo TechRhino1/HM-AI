@@ -383,8 +383,48 @@ to prove inert. The remaining work that actually changes what we know is **measu
 | Repo-root `.py` | 35 files · 4,392 LOC |
 | `tools/` `.py` | 43 |
 | Banned modules in `jarvis/` | **0** (no `subprocess`/`os.system`/`eval`/`exec`/`pickle`) |
-| Unused imports | 9 names in 5 files |
+| Unused imports | 9 names in 5 files — **now 0**; see "Executed: lint baseline" below |
 | Orphan subdirs | 0 |
+
+### Executed: lint baseline (`b13eee8`)
+
+The repository had **no lint configuration at all**, so "does it lint clean" was unanswerable.
+`ruff.toml` now exists and selects **`F` (Pyflakes) + `E9` (syntax errors)** only. The full
+`E`/`W` style families are deliberately *not* selected: enabling them would produce a
+reformatting change orders of magnitude larger than this one and bury the real findings.
+`F` + `E9` is the subset where every hit is a genuine defect rather than a preference.
+
+Cleaned: **211 dead bindings** across 102 files (F401 unused imports incl. partial symbols
+from multi-name imports, F841 unused locals, F541 f-strings with no placeholders).
+
+Three independent proofs that nothing live was removed — not "it looks fine":
+
+| # | Proof | Result |
+|---|---|---|
+| 1 | **Reproduction.** HEAD materialised into a scratch tree, `ruff check --select F --fix` run there, output diffed against the committed tree. | **78 / 102 files byte-identical.** The other 24 differ only by F841 removals, which ruff will not autofix. |
+| 2 | **Scope-aware liveness.** For each removed binding: locate the innermost enclosing scope in the HEAD AST, locate the same scope in the post-sweep AST, check for any remaining load. | **211 / 211 clean, 0 unsafe.** |
+| 3 | `compileall jarvis tools tests`, then the full suite. | exit 0; **3161 passed / 0 failed / 0 errors** — identical to baseline. |
+
+Proof 2 exists because the two obvious checks are both wrong in opposite directions. A
+file-wide grep says `cfg` in `jarvis/backtesting/engine.py` is still used — true, but in a
+*different* method, so removing the dead binding at the other site is harmless. And ruff
+never individually flags `is_jpy`, `ema200` or `risk_dist_ref`, because each is used by
+another line that was *itself* removed (a cascade) — the removal is still sound. Scripts:
+`.scratch/verify_sweep_scoped.py`, `.scratch/verify_sweep_against_ruff.py`.
+
+Two dead-code sites were removed **with an explanatory NOTE rather than silently**, because
+deleting them could be mistaken for a behaviour change:
+
+- `jarvis/intelligence/dynamic_levels.py` — `is_breakout` was computed and never read.
+  Breakout-regime handling was never actually implemented; removing the flag changes nothing
+  and no breakout behaviour was added.
+- `jarvis/risk/risk_engine.py` — the guard was commented "allow up to 0.30R" and computed a
+  0.30R dollar figure that was never used. The enforced threshold is and remains
+  `max($2, 0.5% equity)`. The comment/behaviour mismatch is **reported, not silently
+  reconciled** — changing the enforced threshold is a trading decision, not a cleanup.
+
+`jarvis/config/__init__.py` gained an explicit `__all__` so the public re-export keeps
+working and is not re-read as dead code.
 
 ### Proposed deletion list (all evidence: 0 refs in tests/docs/imports)
 
@@ -423,6 +463,7 @@ Achieve by: relocate `timeout_guard`; invert `data→india/stocks` behind a regi
 | **1** | Pure deletions (10 scratch + 6 root `test_*`) + archive 4 root DBs + 7 winrate-profiles | Zero — no references | None |
 | **2** | Wrapper consolidation (`jarvis.bat`/`JARVIS.cmd`/`HM_start.bat`/`HM_start.ps1`); demote `jarvis.py` | Low — entry-point edits only | None |
 | **3** | Move `timeout_guard.py` to `jarvis/common/`; update 4 import sites; remove 9 unused imports | Low — mechanical | None |
+| **3b** | **DONE (`b13eee8`)** — lint baseline `ruff.toml` (`F` + `E9`) + 211 dead bindings cleared. The unused-import half of phase 3 is complete (and was far larger than the 9 names first counted); the `timeout_guard` relocation is **not** done — it is an import-graph change, not a lint fix. | Low — verified by 3 independent proofs | None |
 | 4 (deferred) | Break `market⟲intelligence` and `intelligence⟲backtesting` cycles via shims | Med — touches decision paths | Yes |
 
 ---
@@ -536,12 +577,19 @@ default `pytest` run.
 | `tests/test_remote_auth_revocation.py` | A revoked token is rejected; expired revocations and >1 h `_failed_attempts` are pruned; the ADMIN-only 12-char password floor, including the deliberate asymmetry that a non-admin may still use 6–11 chars. |
 | `tests/test_risk_db_pragmas.py` | Both risk DBs apply `journal_mode=WAL` and `busy_timeout=5000` on *every* open — the defect was a one-time pragma in `_init_db` that never reached `_save_state`. |
 | `tests/test_scan_executor_singleton.py` | The scan pool is a module-level `ThreadPoolExecutor` with `max_workers == 16`, and `scan_all_modes` submits to it rather than building a pool per call. |
+| `tests/test_trade_outcome_recorded.py` | A closed trade records **how it left**, not only how it entered (`exit_price`, `realized_pnl` columns added by the v5 migration). Pins the measured defect that every closed row reported `realized_pnl == expected_value` — the pre-trade estimate echoed back, so nothing was learned at close. |
+| `tests/test_trade_outcome_unknown_is_null.py` | **"Unknown" ≠ "zero".** A trade that has not closed is stored as `exit_price=NULL, pnl=NULL, is_win=NULL`, not `0/0/0` — because `0.0` is a real break-even P&L *and* what `dict.get()` returns for a missing key, and `0` already means "loss". Guards the 42/93 rows that previously read `exit_price=0, pnl=0`. |
+| `tests/test_institutional_entry_sl_floor.py` | `risk_dist == abs(entry_price − sl_price)` **and** `risk_dist >= pip_size * 5` on every path: structural and re-enforce branches, BUY and SELL, across SCALP / DAY_TRADING / SWING. The bug was `risk_dist` floored while `sl_price` kept the tighter structural stop, so sizing priced risk off one number and the actual stop sat elsewhere. |
+| `tests/test_dynamic_levels_spread_symmetry.py` | BUY and SELL stops are mirror images: `spread_dist` is in the stop distance on **both** sides. Pre-fix, every BUY stop was exactly one spread tighter than the mirrored SELL stop for identical structure — an asymmetry produced by an inconsistency, not by any trading view. |
+| `tests/test_position_monitor_spread_guard.py` | Drives the real `_get_context` path against a context engine that mirrors `MarketContextEngine.build_context`'s signature *including its 2.0 default*, so a caller that forgets to pass the spread reproduces the defect exactly. Fails against the pre-fix code. |
 
 ## Test status today
 
 | Check | Result |
 |---|---|
-| `pytest` | **3111 passed / 0 failed / 0 errors / 1 skipped / 1 xfailed / 20 deselected** (junit root `tests=3132, failures=0, errors=0`). Was 3004 before this work. |
+| `pytest` | **3161 passed / 0 failed / 0 errors / 1 skipped / 1 xfailed / 20 deselected** (junit root `tests=3198, failures=0, errors=0`). Was 3004 before this work. |
+| `ruff check` (`ruff.toml`, `F` + `E9`) | **clean** — 0 findings |
+| `compileall jarvis tools tests` | exit 0 |
 | `tools/verify_ui_layout.js` | **345/345** |
 | `tools/verify_mobile_dock.js` | **24/24** stable across 3 consecutive runs |
 | Interaction smoke test | **ALL INTERACTIONS OK** stable across 3 consecutive runs |
