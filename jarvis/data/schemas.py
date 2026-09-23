@@ -2,7 +2,7 @@
 JARVIS AI 3.0 — Core Data Schemas & Type Definitions.
 Defines immutable data models, enums, analyst reports, hypothesis structures, and decision objects.
 """
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Dict, List, Optional, Any
 from datetime import datetime, timezone

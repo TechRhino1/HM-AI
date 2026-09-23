@@ -4,12 +4,12 @@ Evaluates, scores, and ranks trading opportunities across multi-asset universes 
 (SWING, DAY_TRADING, SCALP) using Machine Learning probability, Expected Value (EV), Master Confluence,
 Adversarial Threat Penalty, and Market Regime dynamic multipliers.
 """
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass
 from typing import Dict, List, Optional, Any, Tuple
 import logging
 import numpy as np
 
-from jarvis.data.schemas import DecisionObject, MarketContext, RegimeOutput, MarketRegime
+from jarvis.data.schemas import DecisionObject, MarketContext
 
 logger = logging.getLogger("JARVIS_OpportunityArbiter")
 

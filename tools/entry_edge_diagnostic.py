@@ -311,8 +311,8 @@ def render(results: list[dict], meta: dict, min_n: int) -> str:
     A("")
     A(f"**Data:** {meta['symbols']} symbols, {meta['candidates']:,} candidates, "
       f"{meta['outcomes']:,} simulated outcomes  ")
-    A(f"**Method:** every candidate replayed under its symbol's deployed geometry "
-      f"(identical exits), then bucketed by feature  ")
+    A("**Method:** every candidate replayed under its symbol's deployed geometry "
+      "(identical exits), then bucketed by feature  ")
     A(f"**Stop slippage charged:** {meta.get('slippage_pips', 0.5)} pips  ")
     A(f"**Generated:** {meta['generated_utc']}")
     A("")

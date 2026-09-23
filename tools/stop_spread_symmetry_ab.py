@@ -56,7 +56,7 @@ import json
 import math
 import os
 import sys
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 import pandas as pd
@@ -283,7 +283,7 @@ def main() -> int:
 
         w = widening_stats(cands, pip)
         delta = w.pop("_delta")
-        buy = w.pop("_buy")
+        w.pop("_buy")  # drop the key from `w` before it is embedded below (value itself unused)
 
         entry = {"widening": w, "targets": {}}
         for tp_mode in ("rr", "tp15", "abs"):

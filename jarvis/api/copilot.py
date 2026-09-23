@@ -18,7 +18,6 @@ import logging
 import threading
 import time
 from collections import OrderedDict
-from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional
 
 from jarvis.application.state_manager import StateManager, GLOBAL_STATE
@@ -289,9 +288,6 @@ class JarvisCopilot:
         if not q:
             return INTENT_HELP, self._help(), None
 
-        latest_decisions = self.state_manager.latest_decisions
-        contexts = self.state_manager.market_contexts
-        account = self.state_manager.account
         positions = self.state_manager.positions
 
         # 0. The trader's own book — checked first so "how is my EURUSD doing"

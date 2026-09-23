@@ -12,7 +12,7 @@ Per the user's directive, gate strictness is decided automatically by the AI:
 If there is no performance evidence yet, the policy defaults to BLOCK (identical to
 today's behaviour), so it can never increase risk on an untuned system.
 """
-from typing import List, Dict, Any, Tuple, Optional
+from typing import List, Tuple, Optional
 
 
 # Gates that must always block when they fail (capital-protection / validity).

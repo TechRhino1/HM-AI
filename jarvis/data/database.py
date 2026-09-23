@@ -1,10 +1,8 @@
 import sqlite3
-import json
 import logging
 import time
 from datetime import datetime, timezone
 import threading
-import os
 import re
 from typing import Optional
 

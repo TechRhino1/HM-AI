@@ -438,7 +438,6 @@ class InstitutionalEntryEngine:
     ) -> Dict[str, Any]:
         spec = resolve_symbol(context.symbol)
         digits = spec.digits
-        pip_size = spec.pip_size if spec.pip_size > 0 else 0.0001
         c_price = context.current_price
         atr = context.volatility.atr if context.volatility.atr > 0 else (c_price * 0.005)
 
@@ -580,7 +579,6 @@ class InstitutionalEntryEngine:
             ratios = bodies / ranges
 
             max_ratio = float(np.max(ratios))
-            disp_idx = int(np.argmax(ratios))
             disp_low = float(np.min(lows[-5:]))
             disp_high = float(np.max(highs[-5:]))
 

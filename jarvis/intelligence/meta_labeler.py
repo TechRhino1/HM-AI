@@ -11,7 +11,6 @@ never degrade an untrained live system.
 Features are extracted from a candle window; the model is trained from historical
 candles (forward-return labels) and persisted to disk.
 """
-from typing import List, Dict, Any, Optional, Tuple
 import logging
 import os
 import numpy as np

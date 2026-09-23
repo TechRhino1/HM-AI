@@ -46,7 +46,7 @@ are stated in R and never in currency.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, asdict, field
+from dataclasses import dataclass, asdict
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 import numpy as np

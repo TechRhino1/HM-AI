@@ -5,7 +5,7 @@ Provides contract_size, pip_size, pip_value, spread multiplier, asset class, and
 """
 import logging
 from typing import Dict, Any, List, Optional
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 logger = logging.getLogger("JARVIS_SymbolRegistry")
 

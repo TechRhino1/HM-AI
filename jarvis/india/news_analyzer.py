@@ -4,7 +4,7 @@ Synthesizes Indian macroeconomic indicators, RBI policy decisions, corporate qua
 and real-time Foreign & Domestic Institutional Investors (FII / DII) buying & selling cash data.
 """
 from typing import Dict, Any, List
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 import random
 
 from jarvis.data.determinism import stable_seed
@@ -77,7 +77,7 @@ class IndiaNewsAnalyzer:
                 "sentiment_score": score,
                 "time_ago": time_ago,
                 "source": src,
-                "summary": f"Institutional analysts view the development as a major medium-term catalyst strengthening price discovery on NSE.",
+                "summary": "Institutional analysts view the development as a major medium-term catalyst strengthening price discovery on NSE.",
                 # PROVENANCE: these are generated from templates above, not read
                 # from a news wire. The UI must label them as sample copy.
                 "data_source": "sample"

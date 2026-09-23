@@ -7,14 +7,12 @@ Includes SEBI hedge margin benefit math, portfolio Greeks, and smart-sequenced b
 """
 import math
 import random
-import concurrent.futures
-from typing import Dict, Any, List, Optional, Tuple
-from datetime import datetime, timezone
+from typing import Dict, Any, List, Optional
 
-from jarvis.india.universe import get_india_profile, INDIA_UNIVERSE
+from jarvis.india.universe import get_india_profile
 from jarvis.india.nse_rules import NSE_RULES
-from jarvis.india.greeks import GREEKS_ENGINE, norm_cdf, norm_pdf
-from jarvis.india.gamma_exposure import compute_gex, interpret_for_signal
+from jarvis.india.greeks import GREEKS_ENGINE
+from jarvis.india.gamma_exposure import compute_gex
 from jarvis.data.determinism import stable_seed
 
 
@@ -561,7 +559,7 @@ class IndiaOptionsEngine:
                 {"action": "BUY", "type": "PE", "strike": buy_strike, "expiry": expiry, "price": _get_leg_price(buy_strike, "PE"), "lots": 1}
             ]
             strat_name = "LONG PUT (NAKED PE BUY)"
-            rationale = f"Downside breakdown acceleration scalp with defined risk equal to premium paid."
+            rationale = "Downside breakdown acceleration scalp with defined risk equal to premium paid."
 
         # 7. SHORT ATM STRADDLE (Option Writing)
         elif strat_key in ["SHORT_STRADDLE", "STRADDLE"]:
@@ -596,7 +594,7 @@ class IndiaOptionsEngine:
                 {"action": "BUY", "type": "CE", "strike": buy_call_k, "expiry": expiry, "price": _get_leg_price(buy_call_k, "CE"), "lots": 1}
             ]
             strat_name = "DEFINED-RISK IRON BUTTERFLY"
-            rationale = f"Hedged straddle monetizing ATM theta with wings capping tail risk."
+            rationale = "Hedged straddle monetizing ATM theta with wings capping tail risk."
 
         # 10. LONG STRADDLE (Volatility Breakout)
         elif strat_key in ["LONG_STRADDLE"]:
@@ -605,7 +603,7 @@ class IndiaOptionsEngine:
                 {"action": "BUY", "type": "PE", "strike": atm, "expiry": expiry, "price": _get_leg_price(atm, "PE"), "lots": 1}
             ]
             strat_name = "LONG STRADDLE (BIG MOVE BREAKOUT)"
-            rationale = f"Trades massive two-sided volatility expansion (RBI policy / election / earnings)."
+            rationale = "Trades massive two-sided volatility expansion (RBI policy / election / earnings)."
 
         # 11. LONG STRANGLE
         elif strat_key in ["LONG_STRANGLE"]:
@@ -616,7 +614,7 @@ class IndiaOptionsEngine:
                 {"action": "BUY", "type": "CE", "strike": buy_call_k, "expiry": expiry, "price": _get_leg_price(buy_call_k, "CE"), "lots": 1}
             ]
             strat_name = "LONG STRANGLE (CHEAP WIDE VOLATILITY)"
-            rationale = f"Low-cost multi-strike breakout setup anticipating a large explosive move."
+            rationale = "Low-cost multi-strike breakout setup anticipating a large explosive move."
 
         # 12. DEFAULT: IRON CONDOR
         else:
@@ -670,7 +668,7 @@ class IndiaOptionsEngine:
                     "estimated_margin_inr": strat.get("estimated_margin_inr", 5000.0),
                     "net_debit_credit_inr": strat.get("net_debit_or_credit_inr", 0.0)
                 })
-            except Exception as e:
+            except Exception:
                 pass
 
         return recs

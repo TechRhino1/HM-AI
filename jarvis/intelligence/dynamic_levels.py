@@ -8,7 +8,6 @@ Computes purely structural, volatility-adaptive SL, TP, and scale-out plans with
 from typing import Dict, List, Any, Optional
 from datetime import datetime, timezone
 import logging
-import numpy as np
 import pandas as pd
 
 logger = logging.getLogger("JARVIS_DynamicLevels")
@@ -177,9 +176,12 @@ class DynamicRiskAndLevelsEngine:
         is_ranging = regime.primary_regime in (
             MarketRegime.RANGE, MarketRegime.LOW_VOLATILITY, MarketRegime.CONSOLIDATION, MarketRegime.COMPRESSION
         )
-        is_breakout = regime.primary_regime in (
-            MarketRegime.BREAKOUT, MarketRegime.POST_BREAKOUT, MarketRegime.HIGH_VOLATILITY
-        )
+        # NOTE (dead-code cleanup): an `is_breakout` flag
+        # (regime.primary_regime in (BREAKOUT, POST_BREAKOUT, HIGH_VOLATILITY)) was computed here
+        # but never read anywhere. It has been removed as dead code. The upshot is that
+        # breakout-regime handling is *absent* — the flag was sketched but never applied to the
+        # stop/entry logic below. This is reported, not silently "fixed": no breakout-specific
+        # behaviour was added, because doing so would change trade geometry.
         vol_state = getattr(vol, "state", "NORMAL").upper()
 
         # 2. Dynamic Structural Stop Loss & Entry Calculation

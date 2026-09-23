@@ -2,7 +2,6 @@
 HM Algo 2.0 — Historical Market Data Engine Operator CLI.
 Provides command-line commands for data status, inventory, download, validation, and replay.
 """
-import sys
 import argparse
 from datetime import datetime, timezone, timedelta
 try:
@@ -100,7 +99,7 @@ def run_replay(symbol, timeframe, bars):
     print("=" * 60)
     print(f"Bars Processed : {res.get('bars_processed')}")
     print(f"Elapsed Time   : {res.get('elapsed_sec')} sec")
-    print(f"Initial Balance: $10,000.00")
+    print("Initial Balance: $10,000.00")
     print(f"Final Balance  : ${res.get('final_balance'):.2f}")
     print(f"Final Equity   : ${res.get('final_equity'):.2f}")
     print(f"Total Trades   : {res.get('total_trades')}")

@@ -88,7 +88,7 @@ def main() -> int:
             forecast = cur.rowcount
 
         after = _counts(conn)
-        print(f"\napplied:")
+        print("\napplied:")
         print(f"  fabricated score rows nulled : {scored}")
         print(f"  overwritten forecasts nulled : {forecast}")
         print(f"  forecast NULL now             : {after['forecast_null']}")

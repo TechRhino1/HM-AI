@@ -5,7 +5,7 @@ Executes rolling In-Sample (IS) and Out-Of-Sample (OOS) validation windows to me
 import logging
 import pandas as pd
 import numpy as np
-from typing import Dict, List, Any, Optional
+from typing import Dict, Any
 
 from jarvis.backtesting.engine import BacktestEngine
 from jarvis.backtesting.metrics import PerformanceMetricsCalculator

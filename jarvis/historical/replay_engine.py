@@ -5,11 +5,9 @@ feeding simulated data feeds and executing orders in a strictly isolated broker 
 """
 import time
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Dict, List, Any, Optional, Callable, Tuple
-from datetime import datetime, timezone
 import pandas as pd
-import numpy as np
 
 from jarvis.data.symbol_registry import resolve as resolve_symbol_registry
 
@@ -103,7 +101,6 @@ class RealisticExecutionSimulator:
     def update_bar(self, current_bar: pd.Series, symbol: str):
         """Checks open positions against current bar's High/Low for SL/TP fills and computes floating PnL."""
         spec = resolve_symbol_registry(symbol)
-        pip_size = spec.pip_size if spec.pip_size > 0 else 0.0001
         contract_size = getattr(spec, "contract_size", 100000.0)
 
         high = float(current_bar["high"])

@@ -2,9 +2,7 @@
 HM Algo 2.0 — Advanced Institutional Market Structure Engine.
 Detects Swing Pivots (HH, HL, LH, LL), BOS, CHoCH, Order Blocks, Fair Value Gaps (FVG), and Premium/Discount Zones.
 """
-import numpy as np
 import pandas as pd
-from typing import Dict, List, Any
 from jarvis.data.schemas import StructureContext
 
 class MarketStructureEngine:

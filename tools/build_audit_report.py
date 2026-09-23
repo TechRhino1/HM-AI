@@ -127,7 +127,6 @@ def build_html() -> str:
 
     reg_names = json.dumps([r[0] for r in reg])
     reg_pf = json.dumps([round(r[3], 3) for r in reg])
-    reg_n = json.dumps([r[1] for r in reg])
 
     def table(rows, tp_label):
         out = []

@@ -5,7 +5,6 @@ conversion  pips = spread_points * point / spec.pip_size  where
 point = 10 ** -spec.digits  (see jarvis/backtesting/signal_scan.py:93,170-180).
 """
 import json
-import glob
 import os
 import sys
 

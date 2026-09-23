@@ -20,7 +20,6 @@ genuine withdrawal or deposit is re-anchored explicitly via `reset_baselines()`.
 Failing closed costs a day of trading; failing open costs the account.
 """
 import sqlite3
-import os
 from typing import Dict, Any, Optional, Callable
 from datetime import datetime, timezone
 

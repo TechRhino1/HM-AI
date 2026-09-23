@@ -34,8 +34,6 @@ from jarvis.data.mt5_history import (  # noqa: E402
     MT5HistoryFetcher,
     MT5UnavailableError,
     SyntheticDataError,
-    TIMEFRAME_MINUTES,
-    default_min_bars,
 )
 
 # Every timeframe any mode touches.

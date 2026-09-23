@@ -4,9 +4,8 @@ Features:
 - Micro-Account Adaptive Sizing & Execution (< $100 Equity)
 - Context-Aware Bayesian Probability Weighting Engine driven by Sweep Detection, Volume Delta, and ADX Slope.
 """
-from typing import Dict, Any, List, Optional
+from typing import Dict, Optional
 import logging
-import numpy as np
 
 logger = logging.getLogger("JARVIS_StrategySelector")
 

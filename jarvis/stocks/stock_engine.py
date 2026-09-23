@@ -6,13 +6,12 @@ On-Balance Volume (OBV) divergence, Mansfield Relative Strength vs SPY, Dual-Squ
 """
 import math
 import time
-import random
-from datetime import datetime, timezone, timedelta
-from typing import Dict, Any, List, Optional
+from datetime import datetime, timezone
+from typing import Dict, Any, List
 import pandas as pd
 import numpy as np
 
-from jarvis.stocks.universe import STOCK_UNIVERSE, get_stock_profile
+from jarvis.stocks.universe import get_stock_profile
 from jarvis.data.market_data_provider import (
     CandleSeries,
     SOURCE_LIVE,

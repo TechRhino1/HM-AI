@@ -49,12 +49,11 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from jarvis.backtesting.optimizer import (
     OBJECTIVES,
-    STYLES,
     GeometrySpace,
     OptimizerSpec,
     optimise,
 )
-from jarvis.config.paths import DATA_DIR, REPO_ROOT
+from jarvis.config.paths import REPO_ROOT
 from jarvis.intelligence.mode_aggregator import (
     STYLE_ORDER,
     ModeReliabilityModel,

@@ -2,7 +2,6 @@
 HM Algo 2.0 — Explainable Reasoning Engine.
 Generates structured natural-language rationales and decision explainability audit records.
 """
-from typing import Dict, List, Any
 from jarvis.data.schemas import DecisionObject
 
 class ReasoningEngine:

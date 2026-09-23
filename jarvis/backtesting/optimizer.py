@@ -68,7 +68,7 @@ import logging
 import math
 import os
 import time
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
@@ -84,7 +84,7 @@ from jarvis.backtesting.trade_simulator import (
 )
 from jarvis.config.paths import DATA_DIR
 from jarvis.data.symbol_registry import get_dollar_risk_per_price_unit, resolve as resolve_symbol
-from jarvis.market.data_feed import normalise_style, style_timeframes
+from jarvis.market.data_feed import normalise_style
 
 logger = logging.getLogger("JARVIS_BacktestOptimizer")
 

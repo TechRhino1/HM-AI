@@ -32,7 +32,7 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if REPO not in sys.path:
     sys.path.insert(0, REPO)
 
-from jarvis.data.symbol_registry import get_dollar_risk_per_price_unit, resolve  # noqa: E402
+from jarvis.data.symbol_registry import get_dollar_risk_per_price_unit  # noqa: E402
 
 DD_TARGET = 0.10            # acceptance criterion
 EQUITY = 10_000.0
@@ -113,7 +113,6 @@ def main() -> int:
                 if not m.get("n"):
                     continue
                 dd_r = float(m.get("max_dd_r", 0.0))
-                spec = resolve(sym)
                 money = get_dollar_risk_per_price_unit(sym, None)
                 # typical risk distance for this symbol, recovered from the
                 # reported expectancy and the mean R of the run is not stored,

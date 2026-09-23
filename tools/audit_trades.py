@@ -80,7 +80,6 @@ def audit_executed(conn, rep, label):
     # carry fabricated prices (see tradingview_provider.py:583) and must be
     # excluded from every risk/P&L number, or the audit over-reports ~5x.
     synth = q("select count(*) from %s where timestamp like '%%.%%'" % t).fetchone()[0]
-    broker = total - synth
     if synth:
         n_pnl0 = q("select count(*) from %s where timestamp like '%%.%%' "
                    "and (realized_pnl is null or realized_pnl = 0)" % t).fetchone()[0] if has("realized_pnl") else 0

@@ -5,7 +5,7 @@ to achieve stationarity (ADF test p < 0.05) while preserving maximum memory / lo
 """
 import numpy as np
 import pandas as pd
-from typing import List, Union
+from typing import List
 
 class FractionalDifferentiationTransformer:
     """Fixed-Width Window Fractional Differentiation Engine."""

@@ -5,9 +5,8 @@ duplicate timestamps, and calculating DATA_QUALITY_SCORE (0–100).
 """
 import logging
 from dataclasses import dataclass, field
-from typing import Dict, List, Any, Optional, Tuple
+from typing import Dict, List, Any
 import pandas as pd
-import numpy as np
 
 logger = logging.getLogger("JARVIS_DataQuality")
 

@@ -9,7 +9,7 @@ Sources researched (2026):
 - ICT Silver Bullet: sweep + displacement + FVG inside Kill Zone — 50-65% win
 - Triple Confluence: Breaker Block + FVG + HTF Order Block — "probability is absurd"
 """
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 import logging
 import pandas as pd
 from jarvis.market.fair_value_gap import FairValueGapEngine

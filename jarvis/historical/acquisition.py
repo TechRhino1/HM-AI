@@ -3,12 +3,10 @@ HM Algo 2.0 — Intelligent Historical Market Data Acquisition Engine.
 Connects to MT5 broker, extracts contract specs/sessions/swaps, detects exact
 missing historical intervals, downloads deltas, merges, and validates.
 """
-import time
 import logging
 from typing import Dict, List, Any, Optional, Tuple
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta
 import pandas as pd
-import numpy as np
 
 try:
     import MetaTrader5 as mt5
@@ -16,7 +14,6 @@ try:
 except ImportError:
     MT5_AVAILABLE = False
 
-from jarvis.data.symbol_registry import resolve as resolve_symbol_registry
 from jarvis.data.mt5_history import SyntheticDataError
 from jarvis.execution.mt5_client import MT5Client
 from jarvis.market.data_feed import DataFeedEngine

@@ -15,8 +15,7 @@ from jarvis.india.universe import (
     INDIA_UNIVERSE,
     get_all_india_symbols,
     get_all_india_stocks,
-    get_india_profile,
-    get_india_indices
+    get_india_profile
 )
 from jarvis.india.india_engine import INDIA_ENGINE
 from jarvis.india.options_engine import INDIA_OPTIONS

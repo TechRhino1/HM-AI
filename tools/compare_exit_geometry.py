@@ -19,7 +19,6 @@ Usage:
 """
 from __future__ import annotations
 
-import math
 import sys
 import types
 from collections import Counter, defaultdict
@@ -47,7 +46,6 @@ from jarvis.backtesting.exit_geometry import (  # noqa: E402
     EXIT_GEOMETRIES,
     ExitGeometry,
     ExitLeg,
-    geometry_modes,
     simulate_exit_geometry,
 )
 from jarvis.intelligence.winrate_targeting import (  # noqa: E402
@@ -305,7 +303,7 @@ def main() -> int:
             for x in oos:
                 by_reg[x.get("regime", "?")].append(x["pnl_r"])
             regime_exp = {k: float(np.mean(v)) for k, v in by_reg.items()}
-            print(f"\n  REGIME SEGMENTATION (OOS):")
+            print("\n  REGIME SEGMENTATION (OOS):")
             print(f"  {'regime':22} {'n':>4} {'WR%':>6} {'exp_R':>8} {'PF':>6}")
             for k in sorted(by_reg, key=lambda k: -regime_exp[k]):
                 m = metrics(by_reg[k])

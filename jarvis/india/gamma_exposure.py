@@ -17,8 +17,7 @@ The math is correct for ANY option chain feed (live or synthetic); results are o
 as good as the underlying OI/IV data. When chain data is synthetic, the engine flags
 `data_source="synthetic"` so the UI cannot mistake it for a real read.
 """
-from typing import Dict, Any, List, Optional
-import math
+from typing import Dict, Any
 
 from jarvis.india.greeks import GREEKS_ENGINE
 

@@ -150,7 +150,6 @@ def main() -> int:
         frame = pd.read_parquet(p)
         r = analyse(frame, style)
         report["modes"][style] = r
-        t1 = r["topk"][0]
         print(f"\n=== {style}  (n={r['n']}, overall {r['overall_exp_r']:+.4f} R) ===")
         print("  top-k vs rest:")
         for t in r["topk"]:

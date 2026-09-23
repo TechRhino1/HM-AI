@@ -71,7 +71,7 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if REPO not in sys.path:
     sys.path.insert(0, REPO)
 
-from jarvis.backtesting.fills import entry_fill, spread_price  # noqa: E402
+from jarvis.backtesting.fills import entry_fill  # noqa: E402
 from jarvis.backtesting.signal_scan import compute_atr  # noqa: E402
 from jarvis.backtesting.trade_simulator import (  # noqa: E402
     BarArrays, Geometry, simulate_trade,

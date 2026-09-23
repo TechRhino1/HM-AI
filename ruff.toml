@@ -1,0 +1,49 @@
+# ruff.toml — lint baseline for the HM-AI / JARVIS repository
+#
+# WHY THIS FILE EXISTS
+# --------------------
+# Before this file the repo had no linter and no CI, so "lint passes" was not a
+# checkable statement. This baseline is deliberately narrow: it turns on only
+# the rules that flag *real defects*, and it is green on the day it lands.
+#
+# WHAT IS SELECTED, AND WHY
+# -------------------------
+#   F   Pyflakes. Unused imports / variables (F401 / F841), f-strings with no
+#       placeholders (F541), undefined names (F821), redefinitions, etc. Low
+#       false-positive rate; these are genuine mistakes rather than taste.
+#       The repo was cleaned to zero F findings when this baseline landed.
+#   E9  Syntax-adjacent errors: E999 (syntax error) and E902 (IO error).
+#       Effectively a "does it parse" check — always worth failing on.
+#
+# WHAT IS DELIBERATELY *NOT* SELECTED
+# -----------------------------------
+# The full `E` / `W` style families (line length, whitespace, import ordering,
+# blank-line rules, ...) are left off on purpose. The codebase carries
+# thousands of pre-existing style deviations; a config that red-lines on those
+# would never be kept green, and a baseline nobody can keep green is worse than
+# no baseline at all. Style can be ratcheted in later, file by file.
+#
+# SCOPE
+# -----
+# `include` restricts linting to the shipped package (`jarvis/`) and the
+# developer tooling (`tools/`). Intentionally out of scope, and why:
+#   * tests/            — test modules frequently import fixtures / plugins for
+#                         their side effects, so unused-import findings there
+#                         need manual review before they can be auto-removed.
+#   * root-level ad-hoc scripts (run_*.py, jarvis.py, main.py, HM_start.py, ...)
+#                       — one-off backtest / launcher scripts, not part of the
+#                         package.
+#   * reports/, .scratch/, data/ — generated or vendored output.
+#
+# USAGE
+# -----
+#   ruff check                 # uses this scope, expect: All checks passed!
+#   ruff check --statistics
+#   ruff check --fix           # auto-fix the safe subset (F401 / F541)
+
+target-version = "py313"
+
+include = ["jarvis/**/*.py", "tools/**/*.py"]
+
+[lint]
+select = ["F", "E9"]

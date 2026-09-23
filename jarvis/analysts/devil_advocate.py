@@ -4,7 +4,7 @@ Implements parameterized adversarial risk scoring, cross-asset correlation check
 liquidity sweep detection, spread vulnerability, session timing, and empirical invalidation.
 """
 import time
-from typing import Dict, List, Any, Optional
+from typing import List, Optional
 from jarvis.data.schemas import MarketContext, RegimeOutput, DevilAdvocateReport
 from jarvis.market.correlations import DynamicCorrelationEngine
 from jarvis.data.symbol_registry import resolve as resolve_symbol
@@ -73,7 +73,7 @@ class DevilAdvocateAnalyst:
 
         if trend_broken:
             penalty_score += 18.0
-            threats.append(f"Primary market structure actively prints counter-trend swing points.")
+            threats.append("Primary market structure actively prints counter-trend swing points.")
 
         if htf_conflict:
             macro_bias = mtf.get("H4") or mtf.get("D1")

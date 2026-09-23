@@ -4,7 +4,7 @@ Combines LinUCB (Linear Upper Confidence Bound), Thompson Sampling (Beta distrib
 and EXP3 (Exponential-weight algorithm for Exploration and Exploitation) to dynamically re-weight strategy selection.
 """
 import numpy as np
-from typing import Dict, Any, List, Optional
+from typing import List, Optional
 
 class EnsembleStrategyBandit:
     """Ensemble Multi-Armed Bandit Strategy Allocator."""

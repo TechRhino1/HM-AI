@@ -2,7 +2,7 @@
 HM Algo 2.0 — Competing Hypothesis & Invalidation Engine.
 Constructs competing theses (Primary vs Alternative) and explicit invalidation criteria ("What would change my mind?").
 """
-from typing import Dict, List, Any
+from typing import Dict
 from jarvis.data.schemas import MarketContext, RegimeOutput, AnalystReport, DevilAdvocateReport, CompetingHypotheses
 
 class HypothesisEngine:
@@ -18,8 +18,6 @@ class HypothesisEngine:
     ) -> CompetingHypotheses:
         st = context.structure
         mom = context.momentum
-        vol = context.volatility
-        liq = context.liquidity
         c_price = context.current_price
 
         primary_evidence = []

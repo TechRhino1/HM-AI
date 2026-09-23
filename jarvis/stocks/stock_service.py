@@ -4,10 +4,9 @@ Unified service orchestrating stock universe scans, filtering, search indexing,
 breakout probability ranking, and REST API dispatching.
 """
 import time
-import json
 import logging
 import concurrent.futures
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List
 from datetime import datetime, timezone
 
 from jarvis.stocks.universe import STOCK_UNIVERSE, get_all_symbols, get_stock_profile

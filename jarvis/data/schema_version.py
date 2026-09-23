@@ -19,7 +19,7 @@ Rules:
 """
 import logging
 import sqlite3
-from typing import Callable, Dict, Optional
+from typing import Callable, Dict
 
 logger = logging.getLogger("JARVIS_Schema")
 

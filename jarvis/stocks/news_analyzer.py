@@ -3,7 +3,6 @@ HM Algo 2.0 — Stock News & AI Sentiment Intelligence Engine
 Provides stock-specific financial news headlines, AI sentiment scoring (Bullish/Bearish/Neutral),
 catalyst impact classifications, and contextual executive summaries.
 """
-import time
 import random
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, List

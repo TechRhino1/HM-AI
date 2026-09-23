@@ -4,7 +4,7 @@ Annotates historical price bars with causal (zero-lookahead) market regime label
 to enable conditional performance breakdown during backtesting and optimization.
 """
 import logging
-from typing import Dict, List, Any, Optional
+from typing import List
 import pandas as pd
 import numpy as np
 
@@ -37,7 +37,6 @@ class HistoricalRegimeTagger:
         # 1. Moving Averages (Trend Filter)
         ema20 = c.ewm(span=20, adjust=False).mean()
         ema50 = c.ewm(span=50, adjust=False).mean()
-        ema200 = c.ewm(span=min(len(df), 200), adjust=False).mean()
 
         # 2. Average True Range (Volatility Filter)
         tr1 = h - l
@@ -73,7 +72,6 @@ class HistoricalRegimeTagger:
             curr_c = c.iloc[i]
             curr_ema20 = ema20.iloc[i]
             curr_ema50 = ema50.iloc[i]
-            curr_ema200 = ema200.iloc[i]
             curr_adx = adx.iloc[i]
             curr_atr_r = atr_ratio.iloc[i]
             comp = is_compression.iloc[i]

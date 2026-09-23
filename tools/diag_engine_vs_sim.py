@@ -191,7 +191,7 @@ def main() -> int:
         if geom_diffs:
             print(f"  PER-REGIME GEOMETRY DIFFERS from base (tp_r, be, max_bars): {geom_diffs}")
         else:
-            print(f"  PER-REGIME GEOMETRY: identical to base")
+            print("  PER-REGIME GEOMETRY: identical to base")
 
     return 0
 

@@ -5,9 +5,8 @@ Guarantees real-time consistency between broker terminal state and internal appl
 import time
 import logging
 import threading
-from typing import Dict, List, Set, Any, Optional
+from typing import Dict, Set, Any, Optional
 
-from jarvis.data.schemas import AccountSnapshot, PositionSnapshot
 from jarvis.execution.mt5_client import MT5Client
 from jarvis.application.state_manager import StateManager, GLOBAL_STATE
 from jarvis.application.event_bus import EventBus, GLOBAL_EVENT_BUS

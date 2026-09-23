@@ -29,7 +29,7 @@ import logging
 import sys
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 import pandas as pd
@@ -490,7 +490,6 @@ def counterfactual_stop_sweep(
             continue
         rs = [o.pnl_r for o in outs]
         wins = [x for x in rs if x > 0]
-        losses = [x for x in rs if x <= 0]
         rows.append({
             "stop_mult": float(mult),
             "trades": len(outs),
@@ -783,8 +782,7 @@ def main() -> int:
     except Exception as exc:  # pragma: no cover
         logger.warning(f"could not read calibrated profile: {exc}")
 
-    # Cost of one round trip expressed in price units: spread + slippage + commission.
-    commission_price = float(getattr(spec, "commission_per_lot", 0.0) or 0.0)
+    # Cost of one round trip expressed in price units: spread + slippage.
     cost_price_equiv = spread * float(spec.pip_size) + args.slippage_pips * float(spec.pip_size)
 
     print(f"Running {sym} {args.days}d backtest "

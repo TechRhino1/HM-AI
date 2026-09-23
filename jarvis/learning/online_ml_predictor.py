@@ -10,15 +10,14 @@ Features:
 """
 import os
 import json
-import sqlite3
 import numpy as np
 import threading
 import logging
 from collections import deque
-from typing import Dict, List, Any, Optional
+from typing import Dict, Any, Optional
 from datetime import datetime, timezone
 
-from jarvis.data.schemas import MarketContext, RegimeOutput, DecisionObject
+from jarvis.data.schemas import MarketContext, RegimeOutput
 from jarvis.data.symbol_registry import resolve as resolve_symbol
 
 logger = logging.getLogger("JARVIS_OnlineML")

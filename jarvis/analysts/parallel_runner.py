@@ -3,10 +3,8 @@ HM Algo 2.0 — Parallel Analyst Cluster Orchestrator.
 Dispatches all specialized analyst agents concurrently via asyncio / ThreadPool with timeout protection.
 """
 import logging
-import time
-import asyncio
 from concurrent.futures import ThreadPoolExecutor
-from typing import Dict, List, Tuple, Any
+from typing import Dict, Tuple
 
 from jarvis.data.schemas import (
     MarketContext, RegimeOutput, AnalystReport, DevilAdvocateReport, AnalystRole,
@@ -20,7 +18,6 @@ from jarvis.analysts.volatility_analyst import VolatilityAnalyst
 from jarvis.analysts.macro_analyst import MacroAnalyst
 from jarvis.analysts.risk_analyst import RiskAnalyst
 from jarvis.analysts.devil_advocate import DevilAdvocateAnalyst
-from jarvis.common.timeout_guard import TimeoutGuard
 
 def _analyst_role(role_name: str):
     """The AnalystRole for a role name, falling back to the raw string.

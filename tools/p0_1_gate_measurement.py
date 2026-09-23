@@ -52,7 +52,6 @@ if REPO not in sys.path:
 from jarvis.backtesting.trade_simulator import Geometry  # noqa: E402
 from jarvis.data.symbol_registry import resolve  # noqa: E402
 from tools.audit_trade_quality import (  # noqa: E402
-    REALISED_RISK_PCT,
     breakeven_wr,
     dynamic_regimes,
     load_symbol,

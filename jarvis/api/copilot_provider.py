@@ -28,7 +28,6 @@ Provider-agnostic on purpose: any OpenAI-compatible ``/chat/completions``
 endpoint works, so choosing a vendor is a configuration decision, not a code
 change.
 """
-import json
 import logging
 import os
 from typing import Any, Dict, List, Optional

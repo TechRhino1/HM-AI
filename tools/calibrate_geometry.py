@@ -29,7 +29,6 @@ import sys
 import types
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 
 try:
@@ -53,8 +52,7 @@ from jarvis.intelligence.winrate_targeting import WRTargetCalibrator  # noqa: E4
 # Reuse the harness primitives so calibration and evaluation cannot diverge.
 sys.path.insert(0, str(REPO_ROOT / "tools"))
 from compare_exit_geometry import (  # noqa: E402
-    MIN_OOS_TRADES, MIN_OOS_PF, MAX_OOS_DD_PCT, RISK_PCT,
-    composite, metrics, run_variant, walk_forward,
+    MIN_OOS_TRADES, MIN_OOS_PF, MAX_OOS_DD_PCT, metrics, walk_forward,
 )
 
 REAL_DIR = Path(DATA_DIR) / "market" / "real"

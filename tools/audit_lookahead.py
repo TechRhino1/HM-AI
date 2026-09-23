@@ -31,7 +31,6 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if REPO not in sys.path:
     sys.path.insert(0, REPO)
 
-from jarvis.backtesting import signal_scan  # noqa: E402
 from jarvis.backtesting.signal_scan import SignalScanner  # noqa: E402
 from jarvis.backtesting.trade_simulator import BarArrays, Geometry, simulate_trade  # noqa: E402
 from jarvis.data.symbol_registry import get_dollar_risk_per_price_unit, resolve  # noqa: E402
@@ -103,14 +102,12 @@ def exposure(df: pd.DataFrame) -> Dict[str, float]:
     t = pd.to_datetime(df["time"])
     n = len(df)
     leaky_h4 = t.dt.floor("4h")                       # label='left'
-    leaky_d1 = t.dt.floor("1D")
     # With label='right' the bucket timestamp is its CLOSE, so a bucket is only
     # admissible once the last bar inside it has finished.
     fixed_h4 = leaky_h4 + pd.Timedelta(hours=4)
-    fixed_d1 = leaky_d1 + pd.Timedelta(days=1)
     # A bar at time T sees bucket label <= T.  Leaky: bucket start <= T.
     # Correct: bucket close <= T.
-    fut_h4, fut_d1 = [], []
+    fut_h4 = []
     for i in range(0, n, max(1, n // 2000)):          # sample up to 2000 bars
         T = t.iloc[i]
         lh = leaky_h4.iloc[i]

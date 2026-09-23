@@ -4,12 +4,11 @@ High-precision mathematical analysis of Indian equities & indices using Central 
 Camarilla Breakouts, VWAP standard deviation corridors, Multi-Timeframe Alignment, and Monte Carlo statistical forecasting.
 """
 import math
-import random
 import numpy as np
-from typing import Dict, Any, List, Optional
-from datetime import datetime, timezone, timedelta
+from typing import Dict, Any, List
+from datetime import datetime, timezone
 
-from jarvis.india.universe import get_india_profile, INDIA_UNIVERSE
+from jarvis.india.universe import get_india_profile
 from jarvis.india.nse_rules import NSE_RULES
 from jarvis.data.determinism import stable_seed
 from jarvis.data.market_data_provider import (
@@ -19,7 +18,6 @@ from jarvis.data.market_data_provider import (
 )
 
 
-import concurrent.futures
 
 class IndiaTechnicalEngine:
     """

@@ -4,7 +4,7 @@ Calculates a real-time standardized Portfolio Heat score (0–100) combining ope
 floating drawdown, margin utilization, active position density, and cross-asset correlation stress.
 """
 import logging
-from typing import Dict, List, Any, Optional
+from typing import Dict, List
 from dataclasses import dataclass, field
 from jarvis.data.schemas import PositionSnapshot, AccountSnapshot
 

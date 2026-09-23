@@ -86,7 +86,6 @@ class AIDissector:
         vol = getattr(context, "volatility", None)
         v = 7
         if vol:
-            atr = float(getattr(vol, "atr", 0) or 0)
             state = str(getattr(vol, "state", "NORMAL") or "NORMAL")
             spread_ok = not bool(getattr(vol, "is_excessive_spread", False))
             if state in ("NORMAL","EXPANSION"): v += 4

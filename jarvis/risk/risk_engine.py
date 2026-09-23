@@ -192,14 +192,18 @@ class RiskEngine:
             elif decision.bias == "SELL" and trend_score > 0:
                 breaches.append(f"ADAPTIVE_GATE_6: Momentum trend score ({trend_score:.1f}) is positive for SELL setup.")
 
-        # Condition 7: Anti-Averaging Down Guard — softened: allow small adverse excursion up to 0.30R
+        # Condition 7: Anti-Averaging Down Guard
+        # NOTE (dead-code cleanup): this guard was previously documented as allowing an adverse
+        # excursion of "up to 0.30R", and a 0.30R dollar figure was computed here — but that
+        # value was never used. The *enforced* threshold is the fixed dollar rule
+        # `max(2.0, account.equity * 0.005)` below. The dead 0.30R calculation has been removed;
+        # the enforced threshold was deliberately left unchanged. The comment/behaviour mismatch
+        # is reported rather than silently "fixed".
         for p in existing_sym_positions:
             p_side = getattr(p, "side", getattr(p, "type", "BUY")).upper()
             if (p_side == "BUY" and decision.bias == "BUY") or (p_side == "SELL" and decision.bias == "SELL"):
-                # Allow pyramiding if existing is flat or only slightly negative (<0.30R), block only deep drawdown
-                risk_dist_ref = abs(decision.entry_price - decision.stop_loss) if decision.stop_loss else 1.0
-                max_allowed_dd = -0.01 if risk_dist_ref <= 0 else -(risk_dist_ref * 0.30 * 100000 * 0.01)  # ~0.30R in dollars approx
-                # Simplified: allow up to -$2 or -0.5% of equity, whichever is larger
+                # Allow pyramiding unless the existing position is deeply in drawdown.
+                # Enforced rule: block once unrealised loss exceeds -$2 or -0.5% of equity.
                 max_dd_dollars = max(2.0, account.equity * 0.005)
                 if p.profit < -max_dd_dollars:
                     breaches.append(

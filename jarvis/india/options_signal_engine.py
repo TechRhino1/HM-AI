@@ -4,12 +4,10 @@ Calculates exact Delta-adjusted entry, TP1 (+25% to +45%), TP2 (+50% to +85%), a
 using Taylor series Greek expansions, Central Pivot Range (CPR), Camarilla H4/L4 breakouts,
 Put-Call Ratio (PCR) momentum, Volume Spread Analysis (VSA/RVOL), and live FII/DII institutional flows.
 """
-import math
 import random
 from typing import Dict, Any, List, Optional
-from datetime import datetime, timezone
 
-from jarvis.india.universe import get_india_profile, INDIA_UNIVERSE, get_all_india_stocks, get_india_indices
+from jarvis.india.universe import get_india_profile
 from jarvis.india.nse_rules import NSE_RULES
 from jarvis.india.greeks import GREEKS_ENGINE
 from jarvis.india.india_engine import INDIA_ENGINE
@@ -81,7 +79,6 @@ class OptionSignalEngine:
 
         is_index = analysis.get("is_index", False)
         cpr = analysis["cpr"]
-        camarilla = analysis["camarilla"]
         vwap_data = analysis["vwap_structure"]
         vwap = vwap_data["vwap"]
         prob = analysis["breakout_probability"]
@@ -111,7 +108,6 @@ class OptionSignalEngine:
             # Optimal Strike: ATM or 1-step ITM for Delta ~0.52-0.56
             atm_strike = round(spot / strike_step) * strike_step
             selected_strike = atm_strike
-            delta_target = 0.53
         elif is_bearish:
             option_type = "PE"
             action_label = "BUY PUT (PE)"
@@ -119,7 +115,6 @@ class OptionSignalEngine:
             bias_badge = "PUT BREAKDOWN SCALP" if is_index else "EQUITY BREAKDOWN PE"
             atm_strike = round(spot / strike_step) * strike_step
             selected_strike = atm_strike
-            delta_target = -0.52
         else:
             # Default to slightly bullish ATM CE
             option_type = "CE"
@@ -128,7 +123,6 @@ class OptionSignalEngine:
             bias_badge = "MOMENTUM EXPANSION CE"
             atm_strike = round(spot / strike_step) * strike_step
             selected_strike = atm_strike
-            delta_target = 0.51
 
         # 2. Calculate Black-Scholes Greeks at Selected Strike
         greeks = GREEKS_ENGINE.calculate_greeks(
@@ -219,7 +213,7 @@ class OptionSignalEngine:
         if iv_rank < 50:
             catalyst_reasons.append(f"💎 Low IV Rank ({iv_rank}) — Cheaper Option Vega")
         if gex_interp.get("gex_applicable") and gex_interp.get("regime") == "NEGATIVE":
-            catalyst_reasons.append(f"🌀 Dealer SHORT-gamma regime (momentum-acceleration)")
+            catalyst_reasons.append("🌀 Dealer SHORT-gamma regime (momentum-acceleration)")
         if not catalyst_reasons:
             catalyst_reasons.append("⚡ Multi-Timeframe Trend & VWAP Confluence")
 

@@ -6,7 +6,6 @@ Features:
 - Order Block & Liquidity Pool Boundary Mapping
 """
 import time
-from typing import Dict, Any
 from jarvis.data.schemas import MarketContext, RegimeOutput, AnalystReport, AnalystRole
 from jarvis.analysts.base_analyst import BaseAnalyst
 
@@ -17,8 +16,6 @@ class StructureAnalyst(BaseAnalyst):
     def analyze(self, context: MarketContext, regime: RegimeOutput) -> AnalystReport:
         t0 = time.perf_counter()
         st = context.structure
-        vol = context.volatility
-        c_price = context.current_price
         evidence = []
         risk_factors = []
 

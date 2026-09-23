@@ -8,7 +8,7 @@ import uuid
 import hashlib
 import json
 import logging
-from typing import Dict, List, Any, Optional, Tuple
+from typing import Dict, List, Any, Optional
 import pandas as pd
 import numpy as np
 import pyarrow as pa

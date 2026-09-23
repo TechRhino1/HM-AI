@@ -19,7 +19,6 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -92,7 +91,7 @@ def main() -> int:
     # pip size differs per symbol; recover slip from the data instead of assuming.
     # delta = -slip/risk_dist on stops  =>  slip = -delta * risk_dist
     est = (-m.loc[m["is_stop"], "delta"] * m.loc[m["is_stop"], "risk_dist"])
-    print(f"  implied slip per symbol (median, price units):")
+    print("  implied slip per symbol (median, price units):")
     for sym, g in est.groupby(m.loc[m["is_stop"], "symbol"]):
         print(f"    {sym:8s} median={g.median():.8f}  iqr=({g.quantile(.25):.8f},{g.quantile(.75):.8f})")
 
@@ -150,7 +149,7 @@ def main() -> int:
         bests = pd.Series([r[1] for r in per_sym]).value_counts()
         print(f"  most common 'best' category: {dict(bests.head(4))}")
         # And is any category reliably positive?
-        print(f"  pooled expectancy per category (n>=100):")
+        print("  pooled expectancy per category (n>=100):")
         agg = f.groupby(feat)["pnl_r"].agg(["mean", "size"])
         for k, row in agg[agg["size"] >= 100].sort_values("mean", ascending=False).iterrows():
             print(f"    {k:<30} {row['mean']:+.4f}R  n={int(row['size']):,}")

@@ -5,7 +5,6 @@ parses currency impact, evaluates macro shocks, computes Indian Standard Time (I
 provides deep indicator intelligence for modal inspection, displays the single most recent 1 release on top,
 followed by all upcoming news events sorted chronologically.
 """
-import os
 import re
 import json
 import ssl
@@ -15,7 +14,7 @@ import threading
 import urllib.request
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone, timedelta
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any
 
 logger = logging.getLogger("HM_LiveNewsEngine")
 

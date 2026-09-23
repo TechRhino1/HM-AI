@@ -234,7 +234,6 @@ def main() -> int:
     else:
         symbols = sorted(d for d in os.listdir(REAL_DIR) if os.path.isdir(os.path.join(REAL_DIR, d)))
 
-    spec0 = resolve(symbols[0]) if symbols else None
     report: Dict[str, object] = {
         "generated": pd.Timestamp.utcnow().isoformat(),
         "risk_pct_assumed": args.risk_pct,

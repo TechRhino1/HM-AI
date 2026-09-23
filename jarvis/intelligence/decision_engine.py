@@ -102,7 +102,6 @@ class DecisionEngine:
         risk_per_trade_pct: float = 0.5,
     ):
         st = context.structure
-        vol = context.volatility
         c_price = context.current_price
 
         # ── No observed price ⇒ no direction, no levels ────────────────────────
@@ -151,9 +150,6 @@ class DecisionEngine:
             tentative_bias = "BUY"
         else:
             tentative_bias = "HOLD"
-
-        spec = resolve_symbol(context.symbol)
-        digits = spec.digits
 
         style = trade_style or getattr(context, "trade_style", "SWING") or "SWING"
         levels = self.dynamic_levels_engine.calculate_levels(
@@ -256,7 +252,6 @@ class DecisionEngine:
         
         spec = resolve_symbol(context.symbol)
         contract_size = spec.contract_size
-        pip_size = spec.pip_size
         
         if tentative_bias not in ["BUY", "SELL"]:
             return final_win_p, loss_p, 0.0, hypotheses, calibrated_win_p, honest_base_rate, raw_prob
@@ -295,9 +290,6 @@ class DecisionEngine:
 
         from jarvis.data.symbol_registry import resolve as resolve_symbol
         spec = resolve_symbol(context.symbol)
-        atr_pips = context.volatility.atr / spec.pip_size if spec.pip_size > 0 else 0
-
-        is_prime_session = bool(getattr(context.session, "is_prime_session", False)) if hasattr(context, "session") else False
 
         sym_name = str(context.symbol).upper()
         is_jpy = "JPY" in sym_name

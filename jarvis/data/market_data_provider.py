@@ -21,7 +21,6 @@ from typing import Optional, List, Dict, Any
 from jarvis.data.broker_symbols import resolve_broker_symbol
 from jarvis.data.determinism import stable_seed
 import logging
-import socket
 import re
 import threading
 import datetime as _dt

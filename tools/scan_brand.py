@@ -92,7 +92,9 @@ def stripped(text):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--quiet", action="store_true")
-    args = ap.parse_args()
+    # Parsed for CLI validation / --help only. NOTE: the --quiet flag is currently a no-op —
+    # it is accepted but never read (pre-existing; reported during lint cleanup, not changed here).
+    ap.parse_args()
 
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     hits, preserved = [], 0

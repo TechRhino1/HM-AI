@@ -39,7 +39,7 @@ alpha-selection half.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Tuple
 
 
 # Gates that protect capital. Always enforced, never calibrated away.

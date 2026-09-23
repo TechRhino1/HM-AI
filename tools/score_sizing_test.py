@@ -252,7 +252,7 @@ def main() -> int:
     print("directional. If both directions improve, the 'effect' is symmetric noise.")
 
     if args.json:
-        out = ROOT = Path(REPO_ROOT) / "reports" / "score_sizing_test.json"
+        out = Path(REPO_ROOT) / "reports" / "score_sizing_test.json"
         out.write_text(json.dumps({
             "symbols": len(frames), "positions": total,
             "slippage_pips": args.slippage_pips, "permutations": args.permutations,

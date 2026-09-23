@@ -3,7 +3,7 @@ HM Algo 2.0 — Adaptive Portfolio Exposure & Margin Management Engine.
 Enforces soft/hard same-symbol position limits, currency directional concentration,
 and total portfolio monetary risk budget.
 """
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 from jarvis.data.schemas import PositionSnapshot, AccountSnapshot
 from jarvis.data.symbol_registry import resolve as resolve_symbol
 

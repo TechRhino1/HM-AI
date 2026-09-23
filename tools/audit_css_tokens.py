@@ -67,7 +67,7 @@ def main() -> int:
     print(f"UNDEFINED      : {len(undefined)}")
     for name, where in sorted(undefined.items()):
         print(f"  {name:26s} {', '.join(where)}")
-        print(f"      -> the declaration is DROPPED; check the intended token name")
+        print("      -> the declaration is DROPPED; check the intended token name")
     if fallback_only and not args.quiet:
         print(f"\nfallback-only  : {len(fallback_only)} (degrade gracefully, not a failure)")
         for name, where in sorted(fallback_only.items()):

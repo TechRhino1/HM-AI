@@ -13,7 +13,7 @@ ML hyperparameters without look-ahead bias:
 These are framework-agnostic and operate on numpy arrays so they can validate any
 model: the meta-labeler, the regime bandit, or strategy thresholds.
 """
-from typing import Any, Callable, Dict, List, Tuple, Iterable, Optional
+from typing import Any, Callable, Dict, List, Tuple, Iterable
 import logging
 import numpy as np
 

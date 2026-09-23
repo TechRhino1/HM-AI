@@ -10,7 +10,7 @@ from jarvis.intelligence.regime_engine import MarketRegimeClassifier
 from jarvis.analysts.parallel_runner import ParallelAnalystCluster
 from jarvis.intelligence.decision_engine import DecisionEngine
 from jarvis.risk.risk_engine import RiskEngine
-from jarvis.data.schemas import AccountSnapshot, PositionSnapshot
+from jarvis.data.schemas import AccountSnapshot
 from jarvis.data.symbol_registry import resolve as resolve_symbol
 from jarvis.backtesting.metrics import PerformanceMetricsCalculator
 from jarvis.risk.loss_cooldown import LossCooldownManager
@@ -205,7 +205,6 @@ class BacktestEngine:
         built by resampling the primary series to H4/D1.
         """
         balance = self.initial_balance
-        equity = self.initial_balance
         trades: List[Dict[str, Any]] = []
         open_trade: Optional[Dict[str, Any]] = None
 
@@ -229,11 +228,7 @@ class BacktestEngine:
         skipped_min_lot = 0
         
         sym_upper = symbol.upper()
-        is_jpy = "JPY" in sym_upper
         is_crypto = spec.is_crypto or ("BTC" in sym_upper)
-        is_gold = ("XAU" in sym_upper) or ("GOLD" in sym_upper) or (getattr(spec, "asset_class", "") == "COMMODITY")
-        is_fx = getattr(spec, "asset_class", "").upper() == "FOREX" and not is_jpy
-        cfg = get_symbol_profile_config(symbol)
         rejection_stats = {}
 
         # Pre-compute Full Multi-Timeframe (H4 & D1) Resamplings Once Upfront (Before the Bar Loop)
@@ -376,7 +371,6 @@ class BacktestEngine:
                     pnl_remaining = pnl_raw - comm
                     pnl_net = pnl_remaining + open_trade.get("realized_pnl", 0.0)
                     balance += pnl_remaining
-                    equity = balance
                     is_win = pnl_net > 0
                     cooldown_mgr.record_trade_result(pnl=pnl_net, is_win=is_win, symbol=symbol, current_date=b_date)
                     trades.append({
@@ -565,7 +559,6 @@ class BacktestEngine:
                     pnl_remaining = pnl_raw - comm
                     pnl_net = pnl_remaining + open_trade.get("realized_pnl", 0.0)
                     balance += pnl_remaining
-                    equity = balance
 
                     is_win = pnl_net > 0
                     cooldown_mgr.record_trade_result(pnl=pnl_net, is_win=is_win, symbol=symbol, current_date=b_date)

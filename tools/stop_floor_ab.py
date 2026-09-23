@@ -561,7 +561,7 @@ def main() -> int:
               f"{p['dsr']['dsr_effective_n']:>7.3f} "
               f"{(vsl if vsl is not None else float('nan')):>+8.4f}")
     print(f"\n  deflation: n_trials={n_trials}  var(trial SR)={var_trial:.6f}  E[max SR]={emax:+.6f}")
-    print(f"  cost check (must be identical across arms): "
+    print("  cost check (must be identical across arms): "
           + ", ".join(f"{key}:{portfolio[key]['cost_price_per_trade']:.6f}" for key in keys))
     print(f"\nwrote {args.out}")
     return 0

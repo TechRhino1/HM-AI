@@ -2,7 +2,7 @@
 HM Algo 2.0 -- Real-Time Adaptive Feedback Optimizer.
 Queries recent closed trade PnLs from SQLite to adjust win probability, score, and R:R deltas dynamically.
 """
-from typing import Dict, Any, List
+from typing import Dict
 import time
 import threading
 import logging

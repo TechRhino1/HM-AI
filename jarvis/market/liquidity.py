@@ -4,7 +4,6 @@ Identifies Equal Highs/Lows, Buy-Side/Sell-Side Liquidity Pools, Liquidity Sweep
 """
 import numpy as np
 import pandas as pd
-from typing import Dict, List, Any
 from jarvis.data.schemas import LiquidityContext
 
 class LiquidityEngine:
@@ -74,7 +73,6 @@ class LiquidityEngine:
 
         latest_high = float(highs[-1])
         latest_low = float(lows[-1])
-        latest_close = float(closes[-1])
         opens = df["open"].values if "open" in df.columns else closes
 
         for idx in [-1, -2]:
