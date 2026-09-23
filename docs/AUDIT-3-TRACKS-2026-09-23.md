@@ -304,8 +304,9 @@ guard are **dead**, because `spread_ratio ≡ 1` by construction. Fixing *that* 
 per-bar quoted spread) is a separate, more fundamental change than correcting the constants, and
 carries its own gate.
 
-**Also found:** a second divergent copy of the same constants in `symbol_profile_config.py` (unused);
-the scan pipeline is nondeterministic across processes (GBPUSD 383 vs 468 under load, resolved by
+**Also found:** a second divergent copy of the same constants in `symbol_profile_config.py` — **note:
+this was first written as "(unused)", which is wrong** (corrected in §N). The scan pipeline is
+nondeterministic across processes (GBPUSD 383 vs 468 under load, resolved by
 raising the analyst timeout 2s→60s); and `test_spread_cap_admits_...` only checks the D1 file's p95,
 not the trading timeframe.
 
@@ -502,6 +503,49 @@ same-process paired comparison.
 Determinism was verified: two identical cross-process runs are byte-identical. The unseeded
 `np.random.beta` in `ensemble_bandit.py:36` / `strategy_bandit.py:89,101` is a red herring —
 those methods are never called on the scan path.
+
+### N. "Fix all issues" pass — triaged by defect class, not by lint count
+
+Method: a wide ruff scan (`B,S,PERF,RUF,C4,SIM,TRY,RET,ARG,PIE,UP,N`) in **report-only** mode over
+`jarvis/` and `tools/`, then triaged by defect class rather than by rule count. Three parallel
+workers on disjoint file sets. Every fix is behaviour-preserving: no control flow changed, no public
+API changed, no test rewritten.
+
+#### Fixed
+
+| Issue | Root cause | Fix |
+|---|---|---|
+| **Shared mutable class state** (RUF012, 17 attrs / 11 files, `7c67d74`) | Class-level dicts/lists declared without `ClassVar`, so they read as instance fields and invite per-instance assumptions about shared state | Annotated `ClassVar[...]`. **Zero runtime effect** — proven by probing ruff itself: `@dataclass` fields are *not* flagged by RUF012, so every hit is by construction a non-field. Confirmed no file in `jarvis/` uses `@dataclass`, pydantic, or `get_type_hints`. |
+| **Silently swallowed exceptions** (S110/S112, 50 sites, `b30281b` + follow-up) | `except Exception: pass` in production paths — a failed DB write, fetch or hydration looked identical to "nothing happened" | 25 genuine invisible failures now log one line each: `debug` on per-bar/per-tick hot paths, `warning` for rare operation-level failures. 21 sites left as deliberate control flow (documented below). 4 more fixed in a follow-up once a module logger existed. **Control flow unchanged.** |
+| **File handles not closed on error** (SIM115, 9 sites, `tools/`, `e48ba49`) | `open()` outside a `with`, so a raise mid-read leaks the handle | Converted to `with open(...)`. The four `dead_code_audit.py` sites keep their `try/except OSError` semantics. |
+| **SWING stop could undercut the broker minimum** (`institutional_entry_engine.py:384`) | `max_risk_cap` is applied **after** the `pip_size * 5` floor and is a pure upper bound with **no floor of its own**, so it can push `risk_dist` back below the floor | `max_risk_cap = max(max_risk_cap, pip_size * 5)`. **Proven non-vacuous:** reverting it makes `risk_dist` come out at 0.14 against a floor of 0.5 — a 1.4-pip stop on XAUUSD, which MT5 rejects, while the sizer derives an enormous lot size from the tiny risk (the same failure mode as the documented BTCUSD 0.06-risk → 100-lot case). Not reachable with real data, since `d1_atr` is a *daily* range and the cap is always far above the floor; it guards only a degenerate near-flat D1 frame yielding a tiny positive `d1_atr`, which the existing `if d1_atr <= 0` check does not catch. Tests: `tests/test_institutional_entry_sl_floor.py::TestSwingCapCannotUndercutFloor`. |
+
+Note the dynamic_levels floor does **not** protect this path: when the institutional engine succeeds,
+`calculate_levels()` returns its dict directly and **discards `base_result`**, so the baseline
+`max(3 * spread_dist, 0.10 * atr)` never touches the institutional stop. The protection here is the
+clamp, not that floor.
+
+#### Found, deliberately NOT changed
+
+| Finding | Why not |
+|---|---|
+| **SQL injection** (S608 ×3: `database.py:834,882`, `realtime_optimizer.py:32`) | **False positives.** Both `database.py` sites build `where` from `?` placeholders — the only interpolation is `','.join('?' * n)`. `realtime_optimizer.py:32` interpolates `where_sql`, which is only ever the constants `"symbol=? AND regime=?"` / `"symbol=?"`, with values passed as params. No user string reaches a query. |
+| **XML from a remote feed** (S314, `news.py:210`) | **Real, but needs a dependency.** Parses `https://www.myfxbook.com/rss/...` with stdlib `ElementTree`. No XXE (stdlib does not resolve external entities) but exposed to entity-expansion / "billion laughs" DoS. `defusedxml` is **not** in `requirements.txt` and not importable; adding it, or capping `resp.read(N)`, is a dependency/behaviour change. Your call. |
+| **`random` usage** (S311 ×6) | All benign: retry-backoff jitter (`mt5_client.py:136`) and sample/modelled data generators. None produce a token, nonce, session id or order ticket; the auth path correctly uses `secrets`. |
+| **`zip()` without `strict=`** (B905 ×12) | Adding `strict=True` converts today's silent truncation into a raised exception — a behaviour change, not a fix. |
+| **B023 ×17** (`tools/`) | **All false positives.** Criterion: real only if the closure is *stored* and called after its loop iteration ends. Every one is consumed in the same iteration (`_row` called at `deflated_sharpe_report.py:210-211`, `fvg_standalone_backtest.py:497-498`; `ev_spread_cost_ab.py:634,637` lambdas passed to `DataFrame.apply`, which is eager). |
+| **1,719 modernization items** (UP006/UP045/UP035) + style families (`N806`, `TRY003`, `SIM102`, `RET505` …) | Rewriting 1,700 type annotations is the opposite of a minimal fix and would bury the real defects. Not applied. |
+| **`symbol_profile_config.py` divergent constants** | **Correcting my own error:** §J called this file "(unused)" — it is not. It lives at `jarvis/intelligence/`, not `jarvis/data/`, and is imported by `dynamic_levels.py`, `decision_engine.py`, `strategy_selector.py`, `winrate_targeting.py`, `exit_policy.py` and `backtesting/engine.py`. Its duplicated pip/contract/spread fields *do* disagree with `symbol_registry` (WTI `contract_size` 1000 vs 100; SOLUSD 1 vs 10; US500 `pip_size` 0.1 vs 1.0) — but they are **dead**: verified that no production read of `cfg.contract_size` / `cfg.pip_size` / `cfg.pip_value_per_lot` / `cfg.typical_spread_pips` / `cfg.digits` exists anywhere in `jarvis/` or `tools/`. Only geometry/timing fields are read. Latent, not live — nothing deleted. |
+| **Loopback auth bypass** | Kept by explicit earlier decision. Still the largest open security item. |
+
+#### Process note
+
+A shared-file collision misattributed three of one worker's edits into another worker's commit:
+`7c67d74` (typed as RUF012) also contains the swallowed-exception fixes at `remote_auth.py:70`,
+`server.py:496` and `strategy_selector.py:67`, because both workers edited the same three files and
+staging a *file* stages every change in it. Nothing was lost — all three commits landed
+(`7c67d74 → e48ba49 → b30281b`) and the tree is clean. But when workers share a tree, stage by
+**hunk**, or give each worker disjoint files.
 
 ---
 
