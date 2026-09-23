@@ -430,7 +430,17 @@ class OnlineMLPredictor:
         Extracts features and outcome from a closed trade record and triggers online SGD parameter update.
         """
         try:
-            is_win = 1 if trade_record.get("is_win", 0) > 0 or trade_record.get("pnl", 0.0) > 0 else 0
+            # An UNCLOSED row carries NULL, not 0.0/0. `None > 0` raised TypeError
+            # (swallowed into a warning), but the honest reading is "no outcome
+            # yet": refuse to learn from it rather than coerce it into a loss.
+            raw_win = trade_record.get("is_win")
+            raw_pnl = trade_record.get("pnl")
+            if raw_win is None and raw_pnl is None:
+                return
+            is_win = 1 if (
+                (raw_win is not None and raw_win > 0)
+                or (raw_pnl is not None and raw_pnl > 0)
+            ) else 0
             raw_feats = trade_record.get("ml_features")
             r_mult = float(trade_record.get("r_multiple", 1.0) or 1.0)
             if isinstance(raw_feats, str):

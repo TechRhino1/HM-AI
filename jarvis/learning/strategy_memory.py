@@ -17,6 +17,14 @@ class StrategyRegimeMemory:
         # regime -> strategy -> stats
         regime_stats: Dict[str, Dict[str, Dict[str, Any]]] = {}
         for t in trades:
+            # An UNCLOSED row has no outcome: `pnl` and `is_win` are NULL, not
+            # 0.0/0. The old `else` branch filed every open trade as a LOSS,
+            # deflating the win rate and inflating `gross_loss`; and a NULL `pnl`
+            # in `pnls` makes the `sum()` below raise. Neither is a fact about the
+            # strategy, so an unmeasured row is skipped rather than counted.
+            pnl = t.get("pnl")
+            if pnl is None:
+                continue
             reg = t.get("regime", "UNKNOWN")
             strat = t.get("strategy", "UNKNOWN")
             
@@ -25,11 +33,11 @@ class StrategyRegimeMemory:
             if strat not in regime_stats[reg]:
                 regime_stats[reg][strat] = {"wins": 0, "losses": 0, "pnls": []}
 
-            if t.get("is_win", 0) == 1:
+            if t.get("is_win") == 1:
                 regime_stats[reg][strat]["wins"] += 1
             else:
                 regime_stats[reg][strat]["losses"] += 1
-            regime_stats[reg][strat]["pnls"].append(t.get("pnl", 0.0))
+            regime_stats[reg][strat]["pnls"].append(pnl)
 
         result = {}
         for reg, strats in regime_stats.items():

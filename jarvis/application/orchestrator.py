@@ -380,9 +380,14 @@ class JarvisOrchestrator:
             # pass None (written as NULL) when it never sampled this ticket.
             excursions = self.position_monitor.pop_excursions(ticket)
             mfe, mae = excursions if excursions else (None, None)
+            # A price of 0 means the event did not carry one; pass it as None so
+            # the column stays NULL ("not recorded") rather than 0.0, which would
+            # claim the trade exited at zero — the same reason the `executed_trades`
+            # write below does it. `pnl` is a genuine 0.0 for a scratch trade and
+            # is passed through.
             self.trade_memory.update_closed_trade(
                 ticket=ticket,
-                exit_price=exit_price,
+                exit_price=exit_price if exit_price > 0 else None,
                 pnl=pnl,
                 is_win=is_win,
                 mfe=mfe,

@@ -209,6 +209,25 @@ class TradeMemory:
     def record_trade(self, trade_data: Dict[str, Any]):
         with self._lock:
             cur = self._conn.cursor()
+            # The OUTCOME does not exist yet at open. `exit_price`, `pnl` and
+            # `is_win` are therefore written NULL — never 0.0/0. A 0.0 P&L is a
+            # real break-even trade and `dict.get()` returns 0.0 for a missing
+            # key, so 0.0 cannot stand for both "closed flat" and "never closed".
+            # Measured consequence of the old `.get(..., 0.0)` defaults: 42/93
+            # rows in `data/jarvis_trade_memory.db` read `exit_price=0, pnl=0`,
+            # indistinguishable from a scratch loser.
+            #
+            # `is_win` is derived from `pnl` ONLY when a caller actually supplies
+            # one — at open nobody can. `0` already means "loss", so an unknown
+            # outcome must not borrow it; an explicit `is_win` from the caller is
+            # respected (it is the caller's measurement, not ours to override).
+            pnl = trade_data.get("pnl")
+            if trade_data.get("is_win") is not None:
+                is_win = int(trade_data["is_win"])
+            elif pnl is not None:
+                is_win = 1 if pnl > 0 else 0
+            else:
+                is_win = None
             # Named columns, NOT `VALUES` with 22 bare placeholders. A positional insert
             # is pinned to this version's exact column count, so it fails outright against
             # a file that has one more column than the code knows about — which is exactly
@@ -230,12 +249,13 @@ class TradeMemory:
                 trade_data.get("timestamp", datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")),
                 trade_data.get("type", "BUY"),
                 trade_data.get("entry", 0.0),
-                trade_data.get("exit", 0.0),
+                # NULL when not supplied — a missing exit is not a price of 0.
+                trade_data.get("exit"),
                 trade_data.get("sl", 0.0),
                 trade_data.get("tp", 0.0),
                 trade_data.get("lots", 0.01),
-                trade_data.get("pnl", 0.0),
-                1 if trade_data.get("pnl", 0.0) > 0 else 0,
+                pnl,
+                is_win,
                 trade_data.get("regime", "NEUTRAL"),
                 trade_data.get("strategy", "TREND_FOLLOWING"),
                 trade_data.get("model_confidence", 0.5),
@@ -307,13 +327,30 @@ class TradeMemory:
     def update_closed_trade(
         self,
         ticket: int,
-        exit_price: float,
-        pnl: float,
-        is_win: int,
+        exit_price: Optional[float] = None,
+        pnl: Optional[float] = None,
+        is_win: Optional[int] = None,
         mfe: Optional[float] = None,
         mae: Optional[float] = None
-    ):
-        """Updates trade outcome fields in SQLite when position closes (§17).
+    ) -> bool:
+        """Write a trade's OUTCOME onto the row written when it OPENED (§17).
+
+        This is the other half of :meth:`record_trade`, the counterpart of
+        ``SQLiteTradeDB.record_trade_exit``. It must **UPDATE** the row keyed on
+        ``ticket``, never re-insert it: ``record_trade`` is ``INSERT OR REPLACE``,
+        so routing a close through it would wipe the entry geometry, the feature
+        vector and the decision context that the open wrote.
+
+        **`None` means "not recorded" and is stored as NULL — never as 0.0.**
+        A ``0.0`` P&L is a real break-even trade; a missing one is not, and
+        ``dict.get()`` returns 0.0 for a missing key, so allowing the two to share
+        a value is exactly the ambiguity that made every open row look like a
+        scratch. ``COALESCE`` means a later call that does not know the outcome
+        cannot erase one that is already stored.
+
+        ``is_win`` is optional. When omitted it is derived from ``pnl``
+        (``pnl > 0``), and when ``pnl`` is unknown it stays NULL — ``0`` already
+        means "loss" and must not be borrowed for "unknown".
 
         `mfe` / `mae` are maximum favourable / adverse excursion in PRICE UNITS.
         `None` means NOT MEASURED and is written as NULL — it must never be
@@ -324,6 +361,8 @@ class TradeMemory:
         is the first moment the question can be answered at all, and this is the only place
         every caller converges. `COALESCE` keeps an explicit label supplied at open when the
         geometry cannot decide, so a row is never downgraded from labelled to NULL.
+
+        Returns True if a row was found and updated.
         """
         with self._lock:
             cur = self._conn.cursor()
@@ -331,21 +370,32 @@ class TradeMemory:
                 "SELECT entry_price, sl, tp, trade_type FROM trade_records WHERE ticket = ?",
                 (int(ticket),)
             ).fetchone()
-            label = None
-            if row:
-                label = derive_triple_barrier_label(
-                    entry=row[0], exit_price=exit_price,
-                    sl=row[1], tp=row[2], trade_type=row[3],
-                )
+            if row is None:
+                # A close for a row that was never opened. Updating nothing is
+                # correct; INSERTing one would fabricate an entry that never
+                # happened. Mirrors `record_trade_exit` returning False.
+                return False
+            label = derive_triple_barrier_label(
+                entry=row[0], exit_price=exit_price,
+                sl=row[1], tp=row[2], trade_type=row[3],
+            )
+            # Derive the win flag only when the caller did not state it AND the
+            # P&L is actually known. `pnl` None -> `is_win` None, not 0.
+            if is_win is None and pnl is not None:
+                is_win = 1 if float(pnl) > 0 else 0
             cur.execute("""
                 UPDATE trade_records
-                SET exit_price = ?, pnl = ?, is_win = ?, mfe = ?, mae = ?,
+                SET exit_price = COALESCE(?, exit_price),
+                    pnl = COALESCE(?, pnl),
+                    is_win = COALESCE(?, is_win),
+                    mfe = COALESCE(?, mfe),
+                    mae = COALESCE(?, mae),
                     triple_barrier_label = COALESCE(?, triple_barrier_label)
                 WHERE ticket = ?
             """, (
-                float(exit_price),
-                float(pnl),
-                int(is_win),
+                None if exit_price is None else float(exit_price),
+                None if pnl is None else float(pnl),
+                None if is_win is None else int(is_win),
                 None if mfe is None else float(mfe),
                 None if mae is None else float(mae),
                 label,
@@ -355,3 +405,4 @@ class TradeMemory:
             # A closed trade is the most valuable row in the table; make sure it
             # is in the `.db` itself, not only the WAL.
             self._checkpoint_locked()
+            return True

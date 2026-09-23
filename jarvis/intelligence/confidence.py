@@ -83,12 +83,19 @@ class ConfidenceCalibrationEngine:
             raw = record.get("raw_win_prob")
             if raw is None:
                 continue
+            # An UNCLOSED row has no outcome: `is_win` is NULL. `int(None)` used to
+            # raise, and counting it as a loss would poison the curve — so skip it
+            # BEFORE it is counted as usable, or `usable` would credit a sample
+            # that never reached a bin.
+            raw_win = record.get("is_win")
+            if raw_win is None:
+                continue
             try:
                 predicted_prob = float(raw)
             except (TypeError, ValueError):
                 continue
             usable += 1
-            is_win = int(record.get("is_win", 0)) == 1
+            is_win = int(raw_win) == 1
 
             for b in bins:
                 # The top bin is closed so a forecast of exactly 1.0 is not dropped.
