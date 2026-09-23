@@ -187,6 +187,26 @@ Approved scope was **phases 1–4 now, entry-model + FVG deferred**, and **keep 
 | **3 — Refactor reorg** | move `timeout_guard.py`, remove 9 unused imports, collapse wrappers | `timeout_guard.py` → new `jarvis/common/` (byte-identical, no shim, 6 import sites updated); 9 unused imports removed | **Wrapper consolidation NOT done** — `jarvis.bat` ≡ `JARVIS.cmd` (byte-identical) and `HM_start.bat` ≈ `HM_start.ps1` are daily-use entry points; deleting them needs your sign-off. |
 | **4 — Scalability** | hoist pool; move compute outside lock; per-IP throttle; metrics | `ThreadPoolExecutor` hoisted to a module singleton (16 workers, `atexit` shutdown) | **"Move compute outside the lock" was correctly SKIPPED with evidence**: the heavy compute is *already* outside the broker lock — the lock is held only around native MT5 calls (`mt5_client.py:90,223,…`; `data_feed.py:360-366`) and `orchestrator.py` contains zero broker-lock references. Per-IP throttle and metrics surface deferred to phase 6. |
 
+### Two defects the new tests caught in my own Phase 2 code (fixed in `523f47e`)
+
+Writing the tests was worth it on its own — both of these shipped in `35f13bf` and neither was
+visible from reading the code.
+
+1. **`/health` answered "ok" about subsystems it had not probed.** `_send_health` stores a probe
+   exception as `{"error": ...}`, but the verdict was read back with `broker_lock.get("held")` and
+   `guard.get("wedged")`. Those keys are absent from an error dict, so both defaulted to *healthy*
+   and the endpoint returned `200 / "ok"` even though it could not reach the broker lock or the
+   guard at all. Only the DB probe could degrade the answer — the docstring promised otherwise.
+   A monitor polling `/health` would have been told everything was fine by an endpoint that had
+   looked at nothing. Now a probe that raised, or that returned no verdict key, counts as degraded.
+2. **A revoked token stayed revoked past its own expiry.** `validate_token` tested membership in
+   `_revoked_tokens` *before* sweeping expired entries, so a token whose revocation window had
+   closed was still refused on the first call and only became usable once some unrelated validation
+   happened to trigger the sweep. The sweep now runs first.
+
+Both were pinned by tests as known behaviour first, then fixed — the tests were updated to assert
+the corrected contract rather than deleted, so neither can silently come back.
+
 ### Note on `get_remote_mobile_access.py`
 
 One of the 16 deleted files **printed a hardcoded admin password**. It is gone from the working tree, but it remains in git history — **rotate that credential**.
@@ -210,7 +230,7 @@ default `pytest` run.
 
 | Check | Result |
 |---|---|
-| `pytest` | **3004 passed / 0 failed / 20 deselected** (junit `tests=3018 failures=0 errors=0 skipped=1`) |
+| `pytest` | **3062 passed / 0 failed / 1 xfailed / 20 deselected** (was 3004 before this work; +58 new tests) |
 | `tools/verify_ui_layout.js` | **345/345** |
 | `tools/verify_mobile_dock.js` | **24/24** stable across 3 consecutive runs |
 | Interaction smoke test | **ALL INTERACTIONS OK** stable across 3 consecutive runs |
