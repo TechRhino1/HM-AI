@@ -317,8 +317,14 @@ class JarvisOrchestrator:
 
     def _on_trade_closed(self, data):
         ticket = data.get("ticket")
-        pnl = float(data.get("pnl", 0.0))
-        is_win = 1 if pnl > 0 else 0
+        # `pnl` and `is_win` are OPTIONAL. A close event that carries no P&L used to
+        # fall back to 0.0, which is a *genuine* value — it recorded a real break-even
+        # and, via `is_win = 1 if pnl > 0 else 0`, filed the trade as a LOSS. That
+        # phantom loss then fed the circuit breaker, the bandit and the ML label.
+        # 0.0 means "measured, broke even"; None means "not measured".
+        raw_pnl = data.get("pnl", None)
+        pnl = None if raw_pnl is None else float(raw_pnl)
+        is_win = None if pnl is None else (1 if pnl > 0 else 0)
         exit_price = float(data.get("exit_price", 0.0))
         new_equity = float(data.get("equity", 0.0))
 
@@ -432,7 +438,9 @@ class JarvisOrchestrator:
         # because the implementation coerces it and an explicit None would be
         # indistinguishable from a measured +1R. Skipping the update entirely would
         # throw away a real labelled sample to avoid guessing a step size.
-        if pending and "features" in pending:
+        # An unmeasured outcome is not a label. Training on `is_win=None` would teach
+        # the model that a data gap is a loss.
+        if pending and "features" in pending and is_win is not None:
             if r_multiple is None:
                 self.ml_predictor.update_online(pending["features"], is_win)
             else:
@@ -446,17 +454,24 @@ class JarvisOrchestrator:
         # term instead of fabricating one. (Passing None used to be coerced to +1R
         # by `float(r_multiple or 1.0)`, so an unmeasured trade was banked as a
         # winning one.)
-        self.strategy_bandit.record_outcome(
-            strategy=strategy,
-            is_win=is_win,
-            r_multiple=r_multiple,
-            regime=regime_name,
-            style=trade_style
-        )
+        # A bandit reward of None is not a reward. Skipping keeps an unmeasured close
+        # from being counted as a loss against the strategy that produced it.
+        if is_win is not None:
+            self.strategy_bandit.record_outcome(
+                strategy=strategy,
+                is_win=is_win,
+                r_multiple=r_multiple,
+                regime=regime_name,
+                style=trade_style
+            )
 
         # 4. Update Circuit Breaker & Drawdown Guard
         trade_symbol = pending.get("symbol", data.get("symbol", "")) if pending else data.get("symbol", "")
-        self.circuit_breaker.record_trade_result(is_win == 1, symbol=trade_symbol, regime=regime_name)
+        # The dangerous one: `is_win == 1` was False for an unmeasured close, so a
+        # data gap registered as a LOSS and could help trip the circuit breaker on
+        # losses that were never observed. Withhold the sample instead.
+        if is_win is not None:
+            self.circuit_breaker.record_trade_result(is_win == 1, symbol=trade_symbol, regime=regime_name)
         if new_equity > 0:
             self.drawdown_guard.update_equity_benchmarks(new_equity, float(data.get("balance", new_equity)))
 
@@ -470,9 +485,10 @@ class JarvisOrchestrator:
         # invented outright — either way the log claimed a measurement that the
         # learning loop did not have.
         r_display = "UNKNOWN" if r_multiple is None else f"{r_multiple:+.2f}R"
+        pnl_display = "UNKNOWN" if pnl is None else f"${pnl:.2f}"
         logger.info(
             f"🔄 Closed-trade self-learning loop completed for #{ticket}: "
-            f"PnL=${pnl:.2f}, Win={is_win}, R={r_display}, Strat={strategy}, Regime={regime_name}, Style={trade_style}"
+            f"PnL={pnl_display}, Win={is_win}, R={r_display}, Strat={strategy}, Regime={regime_name}, Style={trade_style}"
         )
 
     @staticmethod
