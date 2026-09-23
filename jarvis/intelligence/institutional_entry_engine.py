@@ -507,8 +507,8 @@ class InstitutionalEntryEngine:
                     for col in ["open", "high", "low", "close"]:
                         if col in df.columns:
                             df[col] = df[col].astype(float) * scale
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("Price-scale rescale failed; frame left inconsistent with target price: %s", e)
         return df
 
     def _estimate_atr(self, df: Optional[pd.DataFrame], default_atr: float = 1.0) -> float:

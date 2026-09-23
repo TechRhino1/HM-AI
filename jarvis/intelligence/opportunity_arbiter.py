@@ -203,8 +203,8 @@ class UniversalOpportunityArbiter:
             try:
                 hist_mult = self.self_learning.get_regime_multiplier(reg_upper)
                 mult = (mult * 0.7) + (hist_mult * 0.3)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Self-learning regime multiplier unavailable for {reg_upper}: {e}")
 
         return round(float(mult), 3)
 

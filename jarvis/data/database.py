@@ -669,13 +669,13 @@ class SQLiteTradeDB:
                 if "[sl" in raw_comment:
                     try:
                         sl_val = float(raw_comment.split("[sl")[1].split("]")[0].strip())
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug(f"Could not parse [sl] tag from comment {raw_comment!r}: {e}")
                 if "[tp" in raw_comment:
                     try:
                         tp_val = float(raw_comment.split("[tp")[1].split("]")[0].strip())
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug(f"Could not parse [tp] tag from comment {raw_comment!r}: {e}")
 
                 # Find the row this position belongs to.
                 #

@@ -137,7 +137,8 @@ def fetch_nse_historical(symbol: str, days: int = 180) -> Optional[List[Dict[str
                     "close": float(row["CH_CLOSING_PRICE"]),
                     "volume": int(row.get("CH_TOT_TRADED_QTY", 0) or 0),
                 })
-            except Exception:
+            except Exception as e:
+                logger.debug("Skipping malformed NSE row for %s: %s", sym, e)
                 continue
         return out if len(out) >= 30 else None
     except Exception as e:

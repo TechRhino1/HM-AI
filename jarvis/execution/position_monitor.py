@@ -608,8 +608,8 @@ class PositionMonitorEngine:
                             elif pos.type == "SELL" and (new_sl == 0 or be_cand < new_sl) and be_cand > c_price:
                                 new_sl = be_cand
                                 actions.append(f"TIME_DECAY_BE@{new_sl:.4f}")
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Regime time-decay evaluation failed for #{pos.ticket} ({symbol}): {e}")
 
         # Monotonic ratchet enforcement (SL only moves closer to price, never backward)
         if pos.type == "BUY":
@@ -820,8 +820,8 @@ class PositionMonitorEngine:
                         if current_sl == 0 or be < current_sl:
                             logger.info(f"🔄 Regime invalidation (losing) for #{pos.ticket} → BE @ {be:.4f}")
                             return be, f"REGIME_INVALIDATION_BE@{be:.4f}"
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Regime invalidation check failed for #{pos.ticket}: {e}")
 
         return current_sl, None
 

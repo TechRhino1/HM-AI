@@ -240,14 +240,14 @@ class DynamicMarketDataHydrator:
             try:
                 from jarvis.india.universe import INDIA_UNIVERSE
                 baseline_universe = INDIA_UNIVERSE
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("India universe unavailable for hydration baseline: %s", exc)
         else:
             try:
                 from jarvis.stocks.universe import STOCK_UNIVERSE
                 baseline_universe = STOCK_UNIVERSE
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Stock universe unavailable for hydration baseline: %s", exc)
 
         # Build dynamic profile for each uncached symbol
         with self._cache_lock:

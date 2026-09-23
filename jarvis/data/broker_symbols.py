@@ -443,8 +443,8 @@ def resolve_broker_symbol(symbol: str, verbose: bool = False, mt5_module=None) -
                 if verbose:
                     print(f"  [broker-symbol] {sym} -> {n} (discovered)")
                 return n
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Fuzzy broker-symbol scan failed for %s: %s", sym, e)
 
     _FAILED[sym] = True
     if verbose:

@@ -235,8 +235,8 @@ class TradingViewDataProvider:
         self.request_timeout = request_timeout
         try:
             socket.setdefaulttimeout(1.0)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("Could not set default socket timeout: %s", exc)
         self._user_agent = (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
             "AppleWebKit/537.36 (KHTML, like Gecko) "

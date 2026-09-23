@@ -185,8 +185,8 @@ class JarvisConfig:
         if env_risk:
             try:
                 cfg.risk.max_risk_per_trade_pct = float(env_risk)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"Ignoring invalid JARVIS_MAX_RISK_PCT={env_risk!r}: {e}")
         return cfg
 
 SETTINGS = JarvisConfig.load()

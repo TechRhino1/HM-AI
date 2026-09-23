@@ -93,8 +93,8 @@ def _derive_offset(mt5_module, symbols: Iterable[str], clock: float) -> Optional
         from jarvis.data.broker_symbols import ensure_mt5_terminal  # local: avoid import cycle
 
         ensure_mt5_terminal(mt5_module=mt5_module)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("ensure_mt5_terminal failed during broker-offset derivation: %s", e)
 
     # 2. Ask about the symbol the broker actually knows.
     try:
@@ -112,7 +112,8 @@ def _derive_offset(mt5_module, symbols: Iterable[str], clock: float) -> Optional
             broker_sym = sym
         try:
             tick = mt5_module.symbol_info_tick(broker_sym)
-        except Exception:
+        except Exception as e:
+            logger.debug("symbol_info_tick failed for %s: %s", broker_sym, e)
             continue
         if tick is None:
             continue

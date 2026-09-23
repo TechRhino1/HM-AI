@@ -70,8 +70,8 @@ class AcquisitionEngine:
                 t_info = mt5.terminal_info()
                 if t_info and hasattr(t_info, "name") and t_info.name:
                     return str(t_info.name).replace(" ", "_")
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("Could not detect broker server name, falling back to MT5_DefaultBroker: %s", e)
         return "MT5_DefaultBroker"
 
     def fetch_contract_specs(self, symbol: str) -> Dict[str, Any]:
@@ -140,7 +140,8 @@ class AcquisitionEngine:
                 s_dt = pd.to_datetime(s_str, utc=True).to_pydatetime()
                 e_dt = pd.to_datetime(e_str, utc=True).to_pydatetime()
                 parsed_ranges.append((s_dt, e_dt))
-            except Exception:
+            except Exception as e:
+                logger.debug("Skipping unparseable stored range (%r, %r): %s", s_str, e_str, e)
                 continue
 
         if not parsed_ranges:

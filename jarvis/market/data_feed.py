@@ -435,8 +435,8 @@ class DataFeedEngine:
                 self._warmed.add(_broker_sym)
                 try:
                     mt5.symbol_select(_broker_sym, True)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning("symbol_select failed while warming cold history for %s: %s", _broker_sym, e)
                 deadline = time.time() + _COLD_SYNC_BUDGET_SEC
                 started = time.time()
                 while time.time() < deadline:

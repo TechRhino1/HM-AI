@@ -57,8 +57,8 @@ class IndiaMarketsService:
         try:
             from jarvis.data.dynamic_hydrator import DYNAMIC_HYDRATOR
             DYNAMIC_HYDRATOR.hydrate_batch(indices_syms, market="IN")
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("Index hydration failed, falling back to cached quotes: %s", exc)
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=16) as executor:
             future_to_sym = {
@@ -134,8 +134,8 @@ class IndiaMarketsService:
         try:
             from jarvis.data.dynamic_hydrator import DYNAMIC_HYDRATOR
             DYNAMIC_HYDRATOR.hydrate_batch(symbols, market="IN")
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("Universe hydration failed, falling back to cached quotes: %s", exc)
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=16) as executor:
             future_to_sym = {
@@ -471,8 +471,8 @@ class IndiaMarketsService:
                 if legs_raw:
                     try:
                         legs = json.loads(legs_raw)
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        logger.warning("Ignoring invalid legs parameter %r: %s", legs_raw, exc)
                 res = INDIA_OPTIONS.calculate_multi_leg_payoff(sym, legs=legs, days_to_target=days_tgt)
                 self._send_json(handler, res)
                 return True

@@ -49,8 +49,8 @@ class StockService:
             try:
                 from jarvis.data.dynamic_hydrator import DYNAMIC_HYDRATOR
                 DYNAMIC_HYDRATOR.hydrate_batch(symbols, market="US")
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning(f"Universe hydration failed, falling back to cached quotes: {exc}")
 
             results_map: Dict[str, Dict[str, Any]] = {}
             with concurrent.futures.ThreadPoolExecutor(max_workers=16) as executor:

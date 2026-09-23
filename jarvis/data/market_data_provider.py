@@ -398,7 +398,8 @@ def _try_nse(symbol: str, timeframe: str, num_bars: int) -> Optional[List[Dict[s
                         "close": float(r["close"]),
                         "volume": int(r.get("volume", 0) or 0),
                     })
-                except Exception:
+                except Exception as exc:
+                    logger.debug("Skipping malformed NSE row for %s: %s", symbol, exc)
                     continue
             out = out[-num_bars:]
             return out if out else None
