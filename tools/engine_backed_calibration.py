@@ -56,13 +56,15 @@ def main() -> int:
     ap.add_argument("--max-dd", type=float, default=MAX_DD_PCT)
     args = ap.parse_args()
 
-    report = json.load(open(args.report, encoding="utf-8"))
+    with open(args.report, encoding="utf-8") as _f:
+        report = json.load(_f)
     per_symbol = report.get("per_symbol") or {}
     if not per_symbol:
         print(f"no per_symbol data in {args.report}")
         return 2
 
-    doc = json.load(open(PROFILE_PATH, encoding="utf-8"))
+    with open(PROFILE_PATH, encoding="utf-8") as _f:
+        doc = json.load(_f)
     profiles = doc.get("profiles") or {}
 
     print("=" * 100)
@@ -103,7 +105,8 @@ def main() -> int:
               f"exp={exp:+.4f}R PF={pf:5.2f} DD={dd:5.2f}% -> "
               f"{'ADMIT' if passes else 'REFUSE: ' + prof['gate_fail_reason']}")
 
-    json.dump(doc, open(PROFILE_PATH, "w", encoding="utf-8"), indent=2)
+    with open(PROFILE_PATH, "w", encoding="utf-8") as _f:
+        json.dump(doc, _f, indent=2)
     print("-" * 100)
     print(f"engine-backed OOS written for {len(profiles)} symbols; {admitted} admitted")
     print()

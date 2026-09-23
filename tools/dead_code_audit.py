@@ -107,7 +107,8 @@ def dynamic_reference_scan() -> Dict[str, List[Tuple[str, int]]]:
                 continue
             p = os.path.join(dirpath, fn)
             try:
-                src = open(p, encoding="utf-8", errors="replace").read()
+                with open(p, encoding="utf-8", errors="replace") as _f:
+                    src = _f.read()
             except OSError:
                 continue
             rel = os.path.relpath(p, ROOT)
@@ -139,7 +140,8 @@ def build_graph() -> Tuple[Set[str], Dict[str, Set[str]]]:
             continue
         reachable.add(mod)
         try:
-            src = open(p, encoding="utf-8", errors="replace").read()
+            with open(p, encoding="utf-8", errors="replace") as _f:
+                src = _f.read()
         except OSError:
             continue
         deps = _local_deps_from_source(src, mod)
@@ -226,7 +228,8 @@ def main() -> int:
         for m in mods:
             p = file_map.get(m, "?")
             try:
-                n = sum(1 for _ in open(p, encoding="utf-8", errors="replace"))
+                with open(p, encoding="utf-8", errors="replace") as _f:
+                    n = sum(1 for _ in _f)
             except OSError:
                 n = 0
             print(f"    {m:58s} {n:5d} lines")
@@ -247,7 +250,8 @@ def main() -> int:
             for fn in os.listdir(tdir):
                 if fn.endswith(".py"):
                     try:
-                        s = open(os.path.join(tdir, fn), encoding="utf-8", errors="replace").read()
+                        with open(os.path.join(tdir, fn), encoding="utf-8", errors="replace") as _f:
+                            s = _f.read()
                     except OSError:
                         continue
                     if re.search(rf"\b{re.escape(target)}\b", s):

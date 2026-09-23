@@ -64,7 +64,8 @@ def main() -> int:
     args = [a.upper() for a in sys.argv[1:] if not a.startswith("--")]
     # The file is wrapped: {"version":..., "meta":..., "profiles":{symbol: {...}}}.
     # Operating on the top level would treat "version"/"meta" as symbols.
-    _doc = json.load(open(PROFILE_PATH))
+    with open(PROFILE_PATH) as _f:
+        _doc = json.load(_f)
     profiles = _doc.get("profiles") or {}
     syms = args or sorted(profiles.keys())
     cal = WRTargetCalibrator(target_wr=0.75, slippage_pips=0.5)
@@ -132,7 +133,8 @@ def main() -> int:
               f"exp={m['exp']:+.4f}R PF={m['pf']:5.2f} DD={m['dd']:5.2f}% -> "
               f"{'PASS (gate will ADMIT)' if passes else 'FAIL (gate will REFUSE)'}")
 
-    json.dump(_doc, open(PROFILE_PATH, "w"), indent=2)
+    with open(PROFILE_PATH, "w") as _f:
+        json.dump(_doc, _f, indent=2)
     print("-" * 104)
     print(f"updated {changed} profiles -> {PROFILE_PATH}")
     admitted = sum(1 for p in profiles.values()
