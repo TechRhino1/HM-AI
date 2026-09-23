@@ -1181,9 +1181,17 @@ class JarvisRequestHandler(BaseHTTPRequestHandler):
         except Exception:
             db_ok = False
 
+        # A probe that raised carries no verdict keys, so reading it back with
+        # .get("held") / .get("wedged") silently yields "healthy". Treat an
+        # unprobed subsystem as degraded: a monitor must never be told "ok" by an
+        # endpoint that could not actually look.
+        lock_failed = "error" in broker_lock or broker_lock.get("held") is None
+        guard_failed = "error" in guard or guard.get("wedged") is None
+
         lock_stale = bool(broker_lock.get("held")) and \
             float(broker_lock.get("age_sec") or 0.0) > self._HEALTH_LOCK_STALE_SEC
-        ok = db_ok and not lock_stale and not bool(guard.get("wedged"))
+        ok = (db_ok and not lock_stale and not bool(guard.get("wedged"))
+              and not lock_failed and not guard_failed)
         self._send_json({
             "status": "ok" if ok else "degraded",
             "broker_lock": broker_lock,

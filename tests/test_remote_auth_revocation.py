@@ -101,21 +101,31 @@ def test_an_expired_revocation_is_swept_and_stops_rejecting():
     assert RemoteAuthEngine.validate_token(stale_token) is not None
 
 
-def test_a_stale_revocation_still_refuses_until_a_sweep_runs():
-    """Documented ordering: the membership check precedes the sweep.
+def test_an_expired_revocation_is_swept_before_the_membership_check():
+    """A revocation must not outlive its own expiry.
 
-    ``validate_token`` returns early when the token is in ``_revoked_tokens``,
-    and the sweep only runs afterwards — so a token whose own revocation entry
-    has already lapsed is still refused on the first call, and is only freed
-    once some other validation triggers a sweep. In practice the token's
-    allow-list entry is removed by ``revoke_token``, so this cannot un-revoke a
-    live session; the test pins the ordering rather than endorsing it.
+    ``validate_token`` used to return early on membership in ``_revoked_tokens``
+    and only sweep expired entries afterwards, so a token whose revocation window
+    had already closed was still refused on the first call and was freed only once
+    some *other* validation happened to trigger the sweep. The sweep now runs
+    first, so the first call after expiry is already correct.
     """
     token = RemoteAuthEngine.create_session_token("tester")["token"]
     RemoteAuthEngine._revoked_tokens[token] = time.time() - 1.0
 
-    assert RemoteAuthEngine.validate_token(token) is None     # still refused
-    assert token in RemoteAuthEngine._revoked_tokens          # not yet swept
+    # Expired, so it is swept rather than honoured — on the very first call.
+    assert RemoteAuthEngine.validate_token(token) is not None
+    assert token not in RemoteAuthEngine._revoked_tokens
+
+
+def test_a_live_revocation_still_refuses_immediately():
+    """The sweep must only drop *expired* entries — a fresh revocation still blocks."""
+    token = RemoteAuthEngine.create_session_token("tester")["token"]
+    RemoteAuthEngine._revoked_tokens[token] = time.time() + 60.0
+
+    assert RemoteAuthEngine.validate_token(token) is None
+    assert token in RemoteAuthEngine._revoked_tokens
+    RemoteAuthEngine._revoked_tokens.pop(token, None)
 
 
 # ── failed-attempt pruning ──────────────────────────────────────────────────

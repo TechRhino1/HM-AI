@@ -346,20 +346,27 @@ class RemoteAuthEngine:
         if token.startswith("Bearer "):
             token = token[7:].strip()
 
+        now = time.time()
+
+        # Sweep expired revocations BEFORE testing membership. Testing first meant
+        # a token whose revocation window had already closed was still refused —
+        # it only became usable again once some *other* call happened to trigger
+        # the sweep. A revocation is only meant to outlast the token, not to
+        # outlive its own expiry.
+        revoked = cls._revoked_tokens
+        if isinstance(revoked, dict):
+            for stale in [t for t, exp in revoked.items() if exp <= now]:
+                del revoked[stale]
+
         if token in cls._revoked_tokens:
             return None
 
-        now = time.time()
         # Clean up expired tokens
         cls._tokens = {t: exp for t, exp in cls._tokens.items() if exp > now}
         # Sweep bookkeeping whose window has closed. A revoked token only needs to
         # be remembered until it could no longer validate anyway, and a failed-login
         # stamp only matters for an hour — neither is load-bearing forever, and
         # both used to grow without bound.
-        revoked = cls._revoked_tokens
-        if isinstance(revoked, dict):
-            for stale in [t for t, exp in revoked.items() if exp <= now]:
-                del revoked[stale]
         for key in list(cls._failed_attempts):
             recent = [t for t in cls._failed_attempts[key] if (now - t) < 3600.0]
             if recent:

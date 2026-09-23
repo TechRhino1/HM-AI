@@ -225,17 +225,15 @@ def test_a_raising_broker_probe_does_not_hide_the_other_subsystems(monkeypatch):
     assert "guard" in body and "db" in body
 
 
-def test_a_probe_exception_is_reported_but_does_not_degrade_the_status(monkeypatch):
-    """KNOWN GAP, pinned so a fix is visible.
+def test_an_unprobed_subsystem_degrades_the_status(monkeypatch):
+    """A health endpoint must never answer "ok" about something it could not look at.
 
     ``_send_health`` isolates each probe and records an exception as
-    ``{"error": ...}``, but only the DB probe feeds ``ok``. ``broker_lock`` and
-    ``guard`` are read back with ``.get("held")`` / ``.get("wedged")``, which are
-    absent from an error dict, so both default to a healthy verdict and the
-    endpoint still answers ``200`` / ``"ok"`` even though it could not probe the
-    broker lock or the guard at all. The docstring promises the opposite
-    ("a failure degrades the answer"). This test records the CURRENT behaviour;
-    when the degradation is fixed it will fail and should be updated.
+    ``{"error": ...}``. Reading that back with ``.get("held")`` / ``.get("wedged")``
+    finds nothing, so both probes used to default to a healthy verdict and the
+    endpoint answered ``200`` / ``"ok"`` even though it had not probed the broker
+    lock or the guard at all — a monitor would have been lied to. Fixed: a probe
+    that raised, or that returned no verdict key, now counts as degraded.
     """
     monkeypatch.setattr(server_module.sqlite3, "connect", lambda *a, **k: _FakeConnection())
 
@@ -248,13 +246,31 @@ def test_a_probe_exception_is_reported_but_does_not_degrade_the_status(monkeypat
     handler._send_health()
 
     body = handler.body()
-    # Both failures ARE reported in the body…
+    # Both failures are reported…
     assert "error" in body["broker_lock"]
     assert "error" in body["guard"]
-    # …yet the overall verdict is still "ok" with HTTP 200.
     assert body["db"] is True
-    assert body["status"] == "ok"
-    assert handler.last_status == 200
+    # …and the overall verdict degrades rather than claiming "ok".
+    assert body["status"] != "ok"
+    assert handler.last_status == 503
+
+
+def test_a_probe_returning_no_verdict_key_also_degrades(monkeypatch):
+    """Same failure mode without an exception: a dict with no `held`/`wedged` key.
+
+    The real probes always emit those keys, so an empty dict means the caller got
+    something unexpected — which must not be silently read as "healthy".
+    """
+    monkeypatch.setattr(server_module.sqlite3, "connect", lambda *a, **k: _FakeConnection())
+    monkeypatch.setattr(TimeoutGuard, "health", classmethod(lambda cls: {}))
+
+    handler = _RecordingHandler()
+    handler.mt5_client = _StubBroker(health={})
+    handler._send_health()
+
+    body = handler.body()
+    assert body["status"] != "ok"
+    assert handler.last_status == 503
 
 
 # ── reachable without a session ─────────────────────────────────────────────

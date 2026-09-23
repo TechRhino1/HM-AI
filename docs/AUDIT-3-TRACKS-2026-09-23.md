@@ -176,6 +176,36 @@ Each phase ends with `pytest` green and the layout verifier (`tools/verify_ui_la
 
 ---
 
+## Execution log — phases 1–4 (committed `35f13bf`)
+
+Approved scope was **phases 1–4 now, entry-model + FVG deferred**, and **keep the loopback auth bypass for now**. Everything below is merged and pushed; nothing touches the entry model.
+
+| Phase | Planned | Done | Delta |
+|---|---|---|---|
+| **1 — Cleanup** | Delete 10 scratch + 6 root `test_*`; archive 4 root DBs + 7 winrate-profiles; 3 security headers | Deleted **16** root scripts (the 10 scratch + 6 `test_*`); moved 7 root DBs to `data/_archive_root/` (gitignored); **deleted** the 7 calibration snapshots outright rather than archiving them (~690 KB) — only `config/winrate_profiles.json` is ever loaded, and all 7 remain recoverable from git history. Security headers shipped with Phase 2. | Archiving became deleting: a copy was made first, then the duplicates were dropped so the commit adds no redundant bytes. |
+| **2 — Observability + safety** | all items | `/health` + `/ready` (200/503, per-subsystem `broker_lock` / `guard` / `db`); `/api/diagnostics` dropped from the public allowlist; `X-Content-Type-Options`, `X-Frame-Options` and a CSP on every JSON, static and template response; token revocation with expiry pruning; **12-char password floor for ADMIN only**; WAL + `busy_timeout=5000` on both risk DBs | Password floor is admin-only: a global 12-char floor would have broken `tests/test_remote_auth.py:438` (10-char password) and `:445` (asserts "at least 6"). |
+| **3 — Refactor reorg** | move `timeout_guard.py`, remove 9 unused imports, collapse wrappers | `timeout_guard.py` → new `jarvis/common/` (byte-identical, no shim, 6 import sites updated); 9 unused imports removed | **Wrapper consolidation NOT done** — `jarvis.bat` ≡ `JARVIS.cmd` (byte-identical) and `HM_start.bat` ≈ `HM_start.ps1` are daily-use entry points; deleting them needs your sign-off. |
+| **4 — Scalability** | hoist pool; move compute outside lock; per-IP throttle; metrics | `ThreadPoolExecutor` hoisted to a module singleton (16 workers, `atexit` shutdown) | **"Move compute outside the lock" was correctly SKIPPED with evidence**: the heavy compute is *already* outside the broker lock — the lock is held only around native MT5 calls (`mt5_client.py:90,223,…`; `data_feed.py:360-366`) and `orchestrator.py` contains zero broker-lock references. Per-IP throttle and metrics surface deferred to phase 6. |
+
+### Note on `get_remote_mobile_access.py`
+
+One of the 16 deleted files **printed a hardcoded admin password**. It is gone from the working tree, but it remains in git history — **rotate that credential**.
+
+## Test coverage added for this work
+
+The mandate asked for tests covering the refactored behaviour *and* trade-entry logic. All new
+files live in `tests/`, are hermetic (no MT5, no sockets, no real DBs), and are collected by the
+default `pytest` run.
+
+| File | Asserts |
+|---|---|
+| `tests/test_entry_geometry_invariants.py` | **Trade-entry logic.** Entry is the raw observed ask/bid — the written proof that entries are *not* snapped to support/resistance (§B). Stop side and sign for BUY and SELL. `risk_dist == abs(entry − sl_price)`, the regression guard for the ~7× risk blow-up where the sizer priced risk off a 0.7-pip stop while the post-fill re-anchor applied a floored 5-pip distance. TP side, RR self-consistency, and the refuse-don't-fabricate path for unobserved and negative prices. Two **characterisation** tests pin the known defect: the floor is `max(3 × spread, 0.10 × ATR)` today, and an `xfail` asserts the Phase 5 target of ≥ 1.11 × ATR so it flips to XPASS the moment the floor is raised. |
+| `tests/test_health_endpoint.py` | `/health` and `/ready` are reachable unauthenticated, return 200 with `broker_lock` / `guard` / `db` / `ts`, degrade to 503 when a subsystem fails, and probe each dependency independently instead of raising. |
+| `tests/test_security_headers.py` | `nosniff` and `X-Frame-Options: DENY` on JSON, static and template responses, and a CSP that permits the CDN hosts the dashboard actually fetches from. |
+| `tests/test_remote_auth_revocation.py` | A revoked token is rejected; expired revocations and >1 h `_failed_attempts` are pruned; the ADMIN-only 12-char password floor, including the deliberate asymmetry that a non-admin may still use 6–11 chars. |
+| `tests/test_risk_db_pragmas.py` | Both risk DBs apply `journal_mode=WAL` and `busy_timeout=5000` on *every* open — the defect was a one-time pragma in `_init_db` that never reached `_save_state`. |
+| `tests/test_scan_executor_singleton.py` | The scan pool is a module-level `ThreadPoolExecutor` with `max_workers == 16`, and `scan_all_modes` submits to it rather than building a pool per call. |
+
 ## Test status today
 
 | Check | Result |
