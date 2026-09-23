@@ -23,6 +23,11 @@ is that we no longer know the *mechanical* cause — the stop floor was a false 
 **Consequence:** the top-ranked fix in §D is withdrawn. Phase 5 (stop-floor hardening) is **not
 recommended**, and Phase 7 (FVG) is answered **no**. See §F for what replaces them.
 
+**Later, and still open:** §J's spread-calibration result — the adverse number that justified
+*withholding* that change — **did not reproduce** on re-measurement (§M). Treat §J as unresolved,
+not settled. Also in §M: the EV `spread_cost` term does not reach the gates at all, which
+corrects a claim made earlier in this report.
+
 ---
 
 ## Headline
@@ -396,19 +401,77 @@ a `spread=19` column gives bit-identical `bid` 1.0920881633749384, `ask` 1.09215
 `current_spread_pips` 0.7 — while `live_spread_pips` becomes 1.9. That is the whole point: the
 number is now honest, and nothing prices, sizes or gates on it.
 
-**Deliberately NOT done.** `decision_engine.py:261` (`spread_cost`) is untouched. I initially
-described this step as "zero decisions change" *including* the EV term, which was wrong — `ev`
-feeds four live gates (`decision_engine.py:364`, `:411`, `:413`, `:660`), and the real spread is
-~2.9× the registry value for EURUSD, so it would have moved real reject decisions. Deferred
-pending an A/B. Steps 2 (geometry) and 3 (gates) also remain deferred: feeding the real spread
-into `current_spread_pips` would simultaneously widen stops, raise two AI-score hurdles and
-**freeze position management** — the real spread exceeds `typical×2` on 100% of M1 bars for
-EURUSD/USDJPY/AUDUSD and 94% for GBPUSD (`position_monitor.py:290`).
+**Deliberately NOT done.** `decision_engine.py:261` (`spread_cost`) is untouched — but note my
+original reason for holding it back was **wrong**, and measuring it corrected me. See next.
 
 Tests: `tests/test_live_spread_reporting.py` (22 hermetic) — conversion for a 5-digit FX symbol
 and one where `pip_size ≠ point`, absent/non-finite/zero/negative → `None`, `log_trade`
 preference and fallback, a context lacking the field, and the strict bid/ask/`current_spread`
 regression guard.
+
+### M. CORRECTION — the EV `spread_cost` term does **not** reach the gates, and changing it is inert
+
+I held back `decision_engine.py:261` because I believed `ev` feeds four live gates. **That was
+wrong**, and the A/B proved it (`reports/ev_spread_cost_ab_findings.md`,
+`tools/ev_spread_cost_ab.py`).
+
+There are **two** EV computations, and they are not the same value:
+
+| | Where | Feeds |
+|---|---|---|
+| Blended EV | `decision_engine.py:261` (in `_compute_blended_probability`, 179-266) | the AI-dissection pillar (`:874`) and the master-confluence predicate (`:904`) only |
+| Strategy EV | `decision_engine.py:954` — a **second, separate** `current_spread_pips` cost copy | `ev = selected_eval["ev"]` at **`:1030`**, which *overwrites* the blended EV |
+
+`_apply_quality_gate` (268-688) holds the gates I named — `:364`, `:411`, `:413`, `:660` — and it
+is called at **`:1065`, i.e. after the overwrite at `:1030`**. So those gates read the *strategy*
+EV. The line-261 EV never reaches them.
+
+Measured, 20 symbols / H1 / 183d / **46,939 candidates**, three arms:
+
+| Arm | Selected | Total R | E[R] |
+|---|---|---|---|
+| A — baseline (registry constant) | 7,177 | −308.493 | −0.04298 |
+| B — EV-only real (line 261 swapped) | 7,179 | −310.505 | −0.04325 |
+| **B′ pure** — the isolated cost term | **7,177** | **−308.493** | **−0.04298** |
+
+**A vs B′ is bit-identical: 0 added, 0 dropped, 7,177 common, ΔTotal R = 0.0.** The 2-trade
+movement in B comes from the ML "Spread Friction Ratio" feature
+(`online_ml_predictor.py:215`), not from the cost term. Blended EV moved for 32,234 candidates;
+the final EV survived for only 20.
+
+Changing line **954** instead — the seam that actually reaches the gates — moves them
+(`:364` 12, `:413` 12, `:660` 162 crossings) and yields **+6 trades, +0.3 R**. Also immaterial.
+
+**Conclusion:** the EV cost term is not where the money is. Consistent with §G — neither stop
+geometry nor modelled cost is what loses money here. Line 261 can be shipped as a pure
+correctness fix (honest cost in the blended EV, zero measured P&L impact, does not touch the
+four named gates), but it should carry an explicit "no measured benefit" note.
+
+### ⚠ UNRESOLVED — the §J spread-calibration measurement did not reproduce
+
+The A/B included a **reference arm** precisely to validate the harness, and it **failed**.
+
+- **§J claimed:** feeding the real spread everywhere → EXECUTE 2,440 → 2,839 (+16%), Total R
+  −115.0 → −240.3 (**adverse**). That adverse result is why spread calibration was withheld.
+- **This run measured:** 7,177 → 6,876 selected (−4.2%), Total R −308.5 → −219.9
+  (**favourable**); GBPUSD 652 → 407. A second attempt to reproduce §J's literal change
+  ("correct the registry to observed") was also favourable: Total R −206.7.
+
+There is also a ~3× scale gap on the *same* 46,939-candidate universe — 7,177 selected here vs
+§J's 2,440 EXECUTE — which says §J ran under a materially different selection configuration
+(stricter EXECUTE/gate set, and/or the 2.0 s analyst-timeout degraded path noted in §J3, and/or
+`backtesting/engine.py`'s scalar `spread=2.0`, which gp11 §5 flags as disagreeing with
+`signal_scan`).
+
+**Status: unresolved.** The "withhold spread calibration" decision rests on a measurement that
+does not reproduce, so it is not confirmed either way — do not treat §J's adverse number as
+settled, and do not treat this run's favourable number as a green light either. It needs a
+re-run under a matched config before any spread change ships. This does **not** affect the
+A-vs-B′ conclusion above, which is a same-bar, same-process paired comparison.
+
+Determinism was verified: two identical cross-process runs are byte-identical. The unseeded
+`np.random.beta` in `ensemble_bandit.py:36` / `strategy_bandit.py:89,101` is a red herring —
+those methods are never called on the scan path.
 
 ---
 
