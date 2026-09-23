@@ -240,6 +240,70 @@ spread exceeds `max` on 6–11% of M1 bars for every major, (c) the floor's spre
 ~2.7× too tight, and (d) `spread_ratio` at `:147-148` is pinned at 1.0 because current always equals
 typical — so the `gamma_spread` term is inert too.
 
+### J. The last two levers — both measured MATERIAL and therefore **withheld**
+
+Both remaining candidate fixes were measured and **neither was shipped.** The gate applied throughout
+this audit was: ship if the change is immaterial, withhold and report if it materially changes trade
+selection or P&L. Both crossed that line, so both are **your decision, not mine.**
+
+#### J1. BUY/SELL spread symmetry — material, and *favourable*
+
+SELL charges `spread_dist` in its structural stop; BUY does not, so SELL stops are ~one spread wider
+for identical structure. Making BUY symmetric widens every BUY stop by exactly one spread — pooled
+median **0.175×ATR, 7.3% of the risk distance**. The floor absorbs almost nothing (it binds on only
+0.9% of BUY trades).
+
+| Metric | Value |
+|---|---|
+| ΔE[R] per trade | **+0.0055 to +0.0086** (favourable) |
+| Paired t-statistic | **+3.9 to +5.1** |
+| Trades changing exit reason | **406–733 (0.9–1.6%)** |
+| Trade count | −2% to −4% |
+
+6–9× the inert ΔE benchmark and ~140–240× the "3 outcomes in 46,939" benchmark — so **not** an
+inert lever. It is fully predicted by the existing width curve, with no anomaly.
+
+**Scale, stated honestly:** against a ~0.11R/trade loss, +0.006R is roughly a **5% improvement. It
+does not make the system profitable.** It makes BUY consistent with SELL, which happens also to be
+slightly favourable.
+
+**The asymmetry is at 7 sites, not 3:** `:363`, `:365` (structural), `:368` (SCALP),
+`:373/:377/:381` (DAY_TRADING caps), `:399` (SWING cap). A three-site fix would leave DAY_TRADING and
+SWING asymmetric, so this is **all-or-nothing**.
+
+Tests are written and proven non-vacuous: **30 of 43 fail against pre-fix code**; 43/43 pass with it.
+Patch held at `.scratch/spread_symmetry_fix.patch`. Suite would be 3154 passed / 0 failures.
+
+#### J2. Spread calibration — material, and *adverse* — withheld
+
+Measured impact of correcting the registry to the observed spreads:
+
+* Live stop: negligible (EURUSD median risk_dist ×1.009; GBPUSD/AUDUSD/GBPJPY ×1.000).
+* Backtest: **EXECUTE totals 2440 → 2839 (+16%); total R −115.0 → −240.3.**
+  EURUSD 14→20 · GBPUSD 383→648 (+69%) · AUDUSD 52→78 · EURJPY 200→285 · WTI 1329→1286.
+
+Correcting `typical` did not simply add cost — it feeds the Forex-Prime-Session, AI-Multi-Score and
+Calibrated-Win-Prob gates, so it changed *selection*, and the result was more negative. Withheld.
+
+#### J3. The root cause behind J2 — live never sees the real spread
+
+`build_context` sets `bid = close` and `ask = close + current_spread_pips * pip_size`
+(`market_context.py:79-80`), and every live caller passes
+`current_spread_pips = spec.typical_spread_pips` (`orchestrator.py:679`, `server.py:257`,
+`dynamic_levels.py:590`).
+
+So at `dynamic_levels.py:139` the condition `ask > 0 and bid > 0` is **always true**, and
+`spread_dist` resolves to `typical * pip_size` — **the measured spread is never consulted and the
+fallback branch is unreachable live.** The consequence: the spread rejection filter and the blowout
+guard are **dead**, because `spread_ratio ≡ 1` by construction. Fixing *that* (feeding the real
+per-bar quoted spread) is a separate, more fundamental change than correcting the constants, and
+carries its own gate.
+
+**Also found:** a second divergent copy of the same constants in `symbol_profile_config.py` (unused);
+the scan pipeline is nondeterministic across processes (GBPUSD 383 vs 468 under load, resolved by
+raising the analyst timeout 2s→60s); and `test_spread_cap_admits_...` only checks the D1 file's p95,
+not the trading timeframe.
+
 ### G. The pattern behind all three negative results
 
 Three separate "fix the stop" levers were measured, and all three are inert:
