@@ -20,7 +20,7 @@ from jarvis.analysts.volatility_analyst import VolatilityAnalyst
 from jarvis.analysts.macro_analyst import MacroAnalyst
 from jarvis.analysts.risk_analyst import RiskAnalyst
 from jarvis.analysts.devil_advocate import DevilAdvocateAnalyst
-from jarvis.application.timeout_guard import TimeoutGuard
+from jarvis.common.timeout_guard import TimeoutGuard
 
 def _analyst_role(role_name: str):
     """The AnalystRole for a role name, falling back to the raw string.

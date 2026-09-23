@@ -9,6 +9,7 @@ import logging
 import mimetypes
 import math
 import socketserver
+import sqlite3
 from datetime import datetime, timezone, timedelta
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
@@ -364,9 +365,15 @@ class JarvisRequestHandler(BaseHTTPRequestHandler):
                 "/positions", "/positions.html",
                 "/api/telemetry_state", "/api/telemetry", "/api/candles", "/api/rates",
                 "/api/radar", "/api/market-status", "/api/news", "/api/history",
-                "/api/tunnel_info", "/api/diagnostics", "/api/pending_orders",
-                "/api/stream/telemetry", "/api/auth/me", "/api/auth/verify"
+                "/api/tunnel_info", "/api/pending_orders",
+                "/api/stream/telemetry", "/api/auth/me", "/api/auth/verify",
+                # Probes: no session, and no reliance on the loopback bypass.
+                "/health", "/ready"
             }
+            # NOTE: /api/diagnostics is deliberately NOT public. It returns the
+            # account snapshot, so it now requires a session — the loopback
+            # bypass still serves local tooling, but a remote caller cannot read
+            # balances unauthenticated.
             # NOTE: /api/intelligence/* and /api/backtest/* are deliberately NOT
             # listed here. Page shells must load before auth, but the intelligence
             # surface exposes trading intent and can start CPU-heavy jobs, so it
@@ -383,7 +390,9 @@ class JarvisRequestHandler(BaseHTTPRequestHandler):
                 self._send_json({"status": "UNAUTHORIZED", "error": "Authentication required"}, status_code=401)
                 return
 
-            if path in ("/", "/index.html", "/dashboard", "/dashboard.html"):
+            if path in ("/health", "/ready"):
+                self._send_health()
+            elif path in ("/", "/index.html", "/dashboard", "/dashboard.html"):
                 self._serve_dashboard_ui()
             elif path in ("/console", "/console.html"):
                 self._serve_console_ui()
@@ -1103,12 +1112,93 @@ class JarvisRequestHandler(BaseHTTPRequestHandler):
             except Exception:
                 pass
 
+    # Response headers applied to every JSON, HTML and static response.
+    #
+    # CSP is deliberately wider than `default-src 'self'`. The pages load Google
+    # Fonts, jsDelivr (Bootstrap / Chart.js / lightweight-charts) and, on demand,
+    # TradingView's tv.js; the favicons are `data:` URIs. A bare `default-src
+    # 'self'` blocks all of those and would regress every page, so the directive
+    # names exactly the origins the UI actually uses and nothing else. Inline
+    # styles and scripts are allowed because the dashboard uses both.
+    _SECURITY_HEADERS = (
+        ("X-Content-Type-Options", "nosniff"),
+        ("X-Frame-Options", "DENY"),
+        ("Content-Security-Policy",
+         "default-src 'self'; "
+         "img-src 'self' data:; "
+         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net; "
+         "font-src 'self' data: https://fonts.gstatic.com; "
+         "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://s3.tradingview.com; "
+         "frame-src 'self' https://*.tradingview.com; "
+         "connect-src 'self' https://cdn.jsdelivr.net https://*.tradingview.com wss://*.tradingview.com"),
+    )
+
+    def _send_security_headers(self):
+        for name, value in self._SECURITY_HEADERS:
+            self.send_header(name, value)
+
+    #: A broker lock held longer than this is not a slow call, it is a wedged one:
+    #: `BrokerLock` gives up waiting after 10s (broker_lock.DEFAULT_WAIT_SEC), so
+    #: past that point callers are already failing. Kept in step with that module.
+    _HEALTH_LOCK_STALE_SEC = 10.0
+
+    @classmethod
+    def _history_db_path(cls) -> str:
+        """The canonical history DB (``data/jarvis_history.db``), taken from the
+        single resolver in ``jarvis.data.database`` — not a second copy of it."""
+        from jarvis.data.database import TRADE_DB
+        return TRADE_DB.db_path
+
+    def _send_health(self):
+        """Liveness/readiness probe for ``/health`` and ``/ready``.
+
+        Never raises: a probe that 500s tells a monitor nothing, so each
+        dependency is isolated and a failure degrades the answer instead of
+        propagating. 200 only when all three checks pass, else 503.
+        """
+        try:
+            broker_lock = self.mt5_client.broker_lock_health()
+        except Exception as exc:
+            broker_lock = {"error": str(exc)}
+        try:
+            # Phase 3 relocated this module (jarvis.application -> jarvis.common).
+            # Accept either location so the probe is correct whether the move is
+            # present or not.
+            try:
+                from jarvis.common.timeout_guard import TimeoutGuard
+            except ImportError:
+                from jarvis.application.timeout_guard import TimeoutGuard
+            guard = TimeoutGuard.health()
+        except Exception as exc:
+            guard = {"error": str(exc)}
+        try:
+            conn = sqlite3.connect(self._history_db_path())
+            try:
+                conn.execute("SELECT 1").fetchone()
+            finally:
+                conn.close()
+            db_ok = True
+        except Exception:
+            db_ok = False
+
+        lock_stale = bool(broker_lock.get("held")) and \
+            float(broker_lock.get("age_sec") or 0.0) > self._HEALTH_LOCK_STALE_SEC
+        ok = db_ok and not lock_stale and not bool(guard.get("wedged"))
+        self._send_json({
+            "status": "ok" if ok else "degraded",
+            "broker_lock": broker_lock,
+            "guard": guard,
+            "db": db_ok,
+            "ts": datetime.now(timezone.utc).isoformat(),
+        }, status_code=200 if ok else 503)
+
     def _send_json(self, data: Any, status_code: int = 200, cookies: Optional[list] = None):
         try:
             payload = json.dumps(data, default=str).encode("utf-8")
             self.send_response(status_code)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Content-Length", str(len(payload)))
+            self._send_security_headers()
             cors_origin = self._allowed_cors_origin(self.headers.get("Origin", ""))
             if cors_origin:
                 self.send_header("Access-Control-Allow-Origin", cors_origin)
@@ -1139,6 +1229,7 @@ class JarvisRequestHandler(BaseHTTPRequestHandler):
                     self.send_response(200)
                     self.send_header("Content-Type", mime_type)
                     self.send_header("Content-Length", str(len(content)))
+                    self._send_security_headers()
                     if is_vendor:
                         self.send_header("Cache-Control", "public, max-age=604800, immutable")
                     else:
@@ -1174,6 +1265,7 @@ class JarvisRequestHandler(BaseHTTPRequestHandler):
                 self.send_response(200)
                 self.send_header("Content-Type", mime_type)
                 self.send_header("Content-Length", str(len(content)))
+                self._send_security_headers()
                 if is_vendor:
                     self.send_header("Cache-Control", "public, max-age=604800, immutable")
                 else:
@@ -1200,6 +1292,7 @@ class JarvisRequestHandler(BaseHTTPRequestHandler):
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
                 self.send_header("Content-Length", str(len(content_bytes)))
+                self._send_security_headers()
                 self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
                 self.send_header("Pragma", "no-cache")
                 self.send_header("Expires", "0")

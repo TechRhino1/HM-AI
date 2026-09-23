@@ -6,12 +6,14 @@ import time
 import json
 import logging
 import threading
+import atexit
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from typing import Dict, List, Any, Optional, Tuple
 
-from jarvis.application.state_manager import StateManager, GLOBAL_STATE
+from jarvis.application.state_manager import GLOBAL_STATE
 from jarvis.application.radar_sort import radar_sort_key
-from jarvis.application.event_bus import EventBus, GLOBAL_EVENT_BUS
+from jarvis.application.event_bus import GLOBAL_EVENT_BUS
 from jarvis.market.data_feed import DataFeedEngine
 from jarvis.data.broker_symbols import terminal_live
 from jarvis.market.market_context import MarketContextEngine
@@ -34,7 +36,7 @@ from jarvis.data.symbol_registry import is_crypto
 from jarvis.data.symbol_registry import resolve as _resolve_sym
 from jarvis.risk.circuit_breaker import CircuitBreaker
 from jarvis.risk.drawdown import DrawdownGuard
-from jarvis.risk.account_tier import is_micro_account, get_max_lot_cap
+from jarvis.risk.account_tier import get_max_lot_cap
 from jarvis.config.settings import verify_execution_mode, SETTINGS
 from jarvis.config.paths import mode_scoped_db_path
 from jarvis.market.sessions import SessionEngine
@@ -42,6 +44,19 @@ from jarvis.execution.entry_policy import evaluate_entry
 from jarvis.intelligence.winrate_targeting import load_profiles
 
 logger = logging.getLogger("JARVIS_Orchestrator")
+
+# ── Shared scan pool ────────────────────────────────────────────────────────
+# `scan_all_modes` used to build a fresh ThreadPoolExecutor on every call
+# (`max(4, min(32, len(tasks)))` workers), so every radar tick paid pool-creation
+# cost and the live loop and the read-only preview endpoint could not share
+# threads. One process-wide pool is enough: the work submitted is unchanged,
+# only the pool's lifetime moves. `max_workers=16` bounds thread count well under
+# the OS limit. `wait=False` at exit so a worker wedged in a native broker call
+# cannot hold interpreter shutdown open — the broker lock already bounds that
+# wait on its own.
+_executor = ThreadPoolExecutor(max_workers=16, thread_name_prefix="jarvis-scan")
+atexit.register(_executor.shutdown, wait=False)
+
 
 class JarvisOrchestrator:
     def __init__(
@@ -960,8 +975,6 @@ class JarvisOrchestrator:
         and order submission while leaving the decision and every authorization
         gate intact.
         """
-        from concurrent.futures import ThreadPoolExecutor, as_completed
-
         active_styles = list(styles) if styles else ["SWING", "DAY_TRADING", "SCALP"]
         active_symbols = list(symbols) if symbols else list(self.symbols)
         tasks = [(sym, style) for style in active_styles for sym in active_symbols]
@@ -970,18 +983,20 @@ class JarvisOrchestrator:
         if not tasks:
             return None, [], []
 
-        with ThreadPoolExecutor(max_workers=max(4, min(32, len(tasks))), thread_name_prefix="radar_worker") as executor:
-            future_to_task = {
-                executor.submit(self.run_cycle_for_symbol, sym, style, dry_run): (sym, style)
-                for sym, style in tasks
-            }
-            for fut in as_completed(future_to_task):
-                sym, style = future_to_task[fut]
-                try:
-                    res = fut.result()
-                    raw_results.append((sym, style, res))
-                except Exception as e:
-                    logger.error(f"Parallel scan error for {sym} ({style}): {e}", exc_info=True)
+        # Submit to the module-level pool (`_executor`). `as_completed` still
+        # waits for every submitted future, so the sweep is complete before the
+        # arbitration below — only the pool's lifetime changed, not the work.
+        future_to_task = {
+            _executor.submit(self.run_cycle_for_symbol, sym, style, dry_run): (sym, style)
+            for sym, style in tasks
+        }
+        for fut in as_completed(future_to_task):
+            sym, style = future_to_task[fut]
+            try:
+                res = fut.result()
+                raw_results.append((sym, style, res))
+            except Exception as e:
+                logger.error(f"Parallel scan error for {sym} ({style}): {e}", exc_info=True)
 
         # 1. Evaluate every opportunity through the Universal Opportunity Arbiter
         candidates = []

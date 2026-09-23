@@ -3,7 +3,7 @@ HM Algo 2.0 — Multi-Timeframe Market Context Synthesizer.
 Orchestrates Market Structure, Liquidity, Volatility, Momentum, and Session intelligence across multiple timeframes.
 """
 from datetime import datetime, timezone
-from typing import Dict, Any, Optional
+from typing import Dict, Optional
 import pandas as pd
 
 from jarvis.data.schemas import MarketContext

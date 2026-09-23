@@ -1,7 +1,7 @@
 import threading
 import time
 import unittest
-from jarvis.application.timeout_guard import TimeoutGuard, timeout_guarded
+from jarvis.common.timeout_guard import TimeoutGuard, timeout_guarded
 
 
 def _wait_until(predicate, timeout=5.0, interval=0.02):

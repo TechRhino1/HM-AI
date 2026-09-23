@@ -40,7 +40,7 @@ where an ATR multiple was compared against a pip count.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, List, Optional
 
 
 # ─────────────────────────────────────────────────────────────────────────────

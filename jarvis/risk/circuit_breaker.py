@@ -67,10 +67,24 @@ class CircuitBreaker:
             self._init_db()
             self._load_state()
 
+    def _connect(self) -> sqlite3.Connection:
+        """Open the state DB with WAL and a busy timeout.
+
+        Connections here are per-call — every method opens and closes its own —
+        so the PRAGMAs have to be applied on each open; setting them once in
+        `_init_db` would not reach `_save_state`. WAL lets a reader and a writer
+        coexist, and `busy_timeout` makes a writer WAIT for the other instead of
+        raising `database is locked` at the first moment of contention.
+        """
+        conn = sqlite3.connect(self.db_path)
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=5000")
+        return conn
+
     def _init_db(self):
         if not self.db_path:
             return
-        conn = sqlite3.connect(self.db_path)
+        conn = self._connect()
         try:
             with conn:
                 conn.execute('''
@@ -90,7 +104,7 @@ class CircuitBreaker:
     def _load_state(self):
         if not self.db_path:
             return
-        conn = sqlite3.connect(self.db_path)
+        conn = self._connect()
         try:
             with conn:
                 cursor = conn.execute('SELECT consecutive_losses, is_tripped, tripped_timestamp, trip_reason FROM circuit_state WHERE id = 1')
@@ -106,7 +120,7 @@ class CircuitBreaker:
     def _save_state(self):
         if not self.db_path:
             return
-        conn = sqlite3.connect(self.db_path)
+        conn = self._connect()
         try:
             with conn:
                 conn.execute('''

@@ -14,7 +14,7 @@ import numpy as np
 import pandas as pd
 from datetime import datetime, timezone
 from typing import Dict, Optional, Any
-from jarvis.application.timeout_guard import TimeoutGuard
+from jarvis.common.timeout_guard import TimeoutGuard
 
 import threading
 

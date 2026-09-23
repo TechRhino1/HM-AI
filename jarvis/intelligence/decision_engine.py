@@ -5,7 +5,6 @@ Synthesizes multi-agent confluences, applies Devil's Advocate risk penalties, ca
 from typing import Dict, List, Any, Optional
 from datetime import datetime, timezone
 import logging
-import numpy as np
 
 logger = logging.getLogger("JARVIS_DecisionEngine")
 
@@ -37,7 +36,7 @@ from jarvis.intelligence.symbol_profile_config import get_symbol_profile_config
 from jarvis.learning.fractional_diff import FractionalDifferentiationTransformer
 from jarvis.learning.ensemble_bandit import EnsembleStrategyBandit
 from jarvis.intelligence.meta_labeler import MetaLabeler
-from jarvis.intelligence.gate_policy import AdaptiveGatePolicy, HARD_GATES
+from jarvis.intelligence.gate_policy import AdaptiveGatePolicy
 from jarvis.intelligence.ai_dissector import AIDissector
 from jarvis.intelligence.realtime_optimizer import RealtimeOptimizer
 from jarvis.intelligence.master_confluence import MasterConfluenceEngine

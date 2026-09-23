@@ -16,7 +16,7 @@ from jarvis.config.paths import mode_scoped_db_path
 from jarvis.config.settings import SETTINGS
 from jarvis.risk.position_sizing import PositionSizer
 from jarvis.risk.drawdown import DrawdownGuard
-from jarvis.risk.exposure import ExposureManager, BASE_MAX_TRADES_PER_SYMBOL, HARD_MAX_TRADES_PER_SYMBOL, MAX_PORTFOLIO_RISK_PCT
+from jarvis.risk.exposure import ExposureManager, HARD_MAX_TRADES_PER_SYMBOL
 from jarvis.risk.circuit_breaker import CircuitBreaker
 from jarvis.risk.trade_guard import TradeGuard
 from jarvis.risk.portfolio_heat import PortfolioHeatEngine, PortfolioHeatResult

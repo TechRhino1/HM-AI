@@ -10,7 +10,7 @@ import threading
 from typing import Dict, List, Optional, Any
 from datetime import datetime, timezone
 
-from jarvis.application.timeout_guard import TimeoutGuard
+from jarvis.common.timeout_guard import TimeoutGuard
 from jarvis.data.broker_time import broker_utc_offset
 from jarvis.data.schemas import AccountSnapshot, PositionSnapshot
 from jarvis.execution.broker_lock import DEFAULT_WAIT_SEC, TrackedRLock

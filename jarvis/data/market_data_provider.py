@@ -408,7 +408,7 @@ def _try_nse(symbol: str, timeframe: str, num_bars: int) -> Optional[List[Dict[s
             return None
 
     try:
-        from jarvis.application.timeout_guard import TimeoutGuard
+        from jarvis.common.timeout_guard import TimeoutGuard
         return TimeoutGuard.run_sync(_fetch, timeout_sec=0.5, default=None, task_name=f"NSE_Historical_{symbol}")
     except Exception as exc:
         logger.debug("NSE timeout guard execution failed for %s: %s", symbol, exc)

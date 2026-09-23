@@ -89,13 +89,32 @@ logger.info(
 )
 
 
+class _RevokedTokens(dict):
+    """Revoked session tokens, each carrying the moment its revocation may lapse.
+
+    Dict-shaped (``{token: exp}``) so expired revocations can be swept, but it
+    also answers the ``add`` / ``discard`` calls the set it replaced did — both
+    the call sites and the existing coverage use that interface. A revocation
+    only needs to outlive its own session: once the token could no longer
+    validate anyway, remembering it forever is unbounded growth, not safety.
+    """
+
+    def add(self, token: str) -> None:
+        self[token] = time.time() + RemoteAuthEngine._token_ttl
+
+    def discard(self, token: str) -> None:
+        self.pop(token, None)
+
+
 class RemoteAuthEngine:
     """
     Secure Authentication and Session Engine for HM Algo 2.0 Remote Web Terminals.
     Includes rate limiting, temporary lockout against brute-force attacks, and persistent HMAC signing.
     """
     _tokens: Dict[str, float] = {}       # token -> expiration timestamp
-    _revoked_tokens: set = set()          # set of revoked tokens (logged out)
+    # token -> the moment the revocation itself may be forgotten (dict-shaped;
+    # see _RevokedTokens — it still answers the old set interface).
+    _revoked_tokens: Dict[str, float] = _RevokedTokens()
     _token_ttl: float = 8 * 3600.0       # Short-lived browser session
 
     # Failed login attempts tracker for brute force protection
@@ -333,6 +352,20 @@ class RemoteAuthEngine:
         now = time.time()
         # Clean up expired tokens
         cls._tokens = {t: exp for t, exp in cls._tokens.items() if exp > now}
+        # Sweep bookkeeping whose window has closed. A revoked token only needs to
+        # be remembered until it could no longer validate anyway, and a failed-login
+        # stamp only matters for an hour — neither is load-bearing forever, and
+        # both used to grow without bound.
+        revoked = cls._revoked_tokens
+        if isinstance(revoked, dict):
+            for stale in [t for t, exp in revoked.items() if exp <= now]:
+                del revoked[stale]
+        for key in list(cls._failed_attempts):
+            recent = [t for t in cls._failed_attempts[key] if (now - t) < 3600.0]
+            if recent:
+                cls._failed_attempts[key] = recent
+            else:
+                del cls._failed_attempts[key]
         # A valid signature alone is not a session.  Requiring the server-side
         # allow-list makes logout effective and invalidates sessions on restart.
         if token not in cls._tokens:
@@ -396,10 +429,23 @@ class RemoteAuthEngine:
         if not user:
             return False, "Current password verification failed"
 
-        if len(new_password.strip()) < 6:
-            return False, "New password must be at least 6 characters long"
+        # Minimum length for a NEW password. The privileged ADMIN account — the
+        # credential that guards the live terminal — carries the 12-character
+        # floor used elsewhere in this module (`_init_default_users` requires 12
+        # for the opt-in trader/demo accounts, and 8 for the admin env override).
+        # Non-admin accounts keep the historical 6-character floor, which the
+        # existing coverage pins; raising it globally would require that coverage
+        # to change first, which is out of scope here.
+        required = 12 if str(cls._users.get(user_key, {}).get("role", "")).upper() == "ADMIN" else 6
+        if len(new_password.strip()) < required:
+            return False, f"New password must be at least {required} characters long"
 
         pwd_hash = cls._hash_password(new_password.strip())
+        # NOTE: only the in-memory `_users` record is updated. There is no
+        # persistence layer for a changed password, so the change is reverted on
+        # the next restart — and, for the admin account, by the next
+        # `_init_default_users()` re-sync. Fixing that needs `.jarvis_admin_pass`
+        # handling and is deliberately out of scope for this task.
         cls._users[user_key]["password_hash"] = pwd_hash
         return True, "Password updated successfully"
 
