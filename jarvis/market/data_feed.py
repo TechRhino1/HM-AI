@@ -375,7 +375,20 @@ class DataFeedEngine:
                 d = pd.DataFrame(rates)
                 d["time"] = pd.to_datetime(d["time"], unit="s")
                 d.rename(columns={"tick_volume": "volume"}, inplace=True)
-                out = d[["time", "open", "high", "low", "close", "volume"]].copy()
+                cols = ["time", "open", "high", "low", "close", "volume"]
+                if "spread" in d.columns:
+                    # MT5's `copy_rates_from_pos` returns a per-bar `spread`
+                    # column measured in **points** (integer). Keep it, but do
+                    # NOT convert here: the canonical points→pips conversion is
+                    #   pips = spread_points * 10**-digits / pip_size
+                    # and is applied by the consumer (the same formula the
+                    # backtest scan uses, backtesting/signal_scan.py:170-180).
+                    # Reporting only — nothing prices, sizes or gates on this
+                    # column; the decision path still uses the registry
+                    # constant. Guarded because the fallback read and any
+                    # non-MT5 source need not carry the column.
+                    cols.append("spread")
+                out = d[cols].copy()
                 out.attrs["data_source"] = "LIVE_MT5"
                 off = broker_utc_offset(mt5_module=mt5, symbols=[_broker_sym])
                 v, a = classify_bar_freshness(

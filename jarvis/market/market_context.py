@@ -4,6 +4,7 @@ Orchestrates Market Structure, Liquidity, Volatility, Momentum, and Session inte
 """
 from datetime import datetime, timezone
 from typing import Dict, Optional
+import math
 import pandas as pd
 
 from jarvis.data.schemas import MarketContext
@@ -29,13 +30,42 @@ class MarketContextEngine:
         self.momentum_engine = momentum_engine or MomentumEngine()
         self.order_flow_engine = order_flow_engine or InstitutionalVolumeOrderFlowEngine()
 
+    @staticmethod
+    def _live_spread_pips_from_frame(df: pd.DataFrame, spec) -> Optional[float]:
+        """MT5 points → pips, using the canonical conversion.
+
+        ``pips = spread_points * 10**-digits / pip_size`` — the same formula the
+        backtest scan uses (``backtesting/signal_scan.py:170-180``). Returns
+        ``None`` when the frame carries no ``spread`` column, the last value is
+        non-finite or non-positive, or the spec's ``pip_size``/``digits`` are
+        unusable — so callers can tell "measured" from "not measured".
+        """
+        if df is None or getattr(df, "empty", True) or "spread" not in df.columns:
+            return None
+        try:
+            raw = float(df["spread"].iloc[-1])
+        except (TypeError, ValueError, IndexError):
+            return None
+        if not math.isfinite(raw) or raw <= 0:
+            return None
+        try:
+            pip = float(getattr(spec, "pip_size", 0.0) or 0.0)
+            digits = int(getattr(spec, "digits", 0) or 0)
+        except (TypeError, ValueError):
+            return None
+        if pip <= 0 or digits <= 0:
+            return None
+        pips = raw * (10.0 ** -digits) / pip
+        return pips if math.isfinite(pips) else None
+
     def build_context(
         self,
         symbol: str,
         mtf_data: Dict[str, pd.DataFrame],
         current_spread_pips: float = 2.0,
         max_allowed_spread_pips: float = 35.0,
-        trade_style: str = "SWING"
+        trade_style: str = "SWING",
+        live_spread_pips: Optional[float] = None
     ) -> MarketContext:
         """
         Synthesizes multi-timeframe market data into a unified MarketContext object.
@@ -74,7 +104,16 @@ class MarketContextEngine:
 
         from jarvis.data.symbol_registry import resolve as _resolve_sym
         _spec = _resolve_sym(symbol)
-        
+
+        # Reporting only. `data_feed.fetch_rates` keeps MT5's per-bar `spread`
+        # column (in **points**); convert to pips with the canonical formula the
+        # backtest already uses (backtesting/signal_scan.py:170-180):
+        #     pips = spread_points * 10**-digits / pip_size
+        # This never feeds bid/ask or the `current_spread_pips` handed to the
+        # volatility engine, so no gate, stop or size moves.
+        if live_spread_pips is None:
+            live_spread_pips = self._live_spread_pips_from_frame(df_primary, _spec)
+
         latest_close = float(df_primary["close"].iloc[-1]) if not df_primary.empty else 0.0
         bid = latest_close
         ask = latest_close + (current_spread_pips * _spec.pip_size)
@@ -214,5 +253,6 @@ class MarketContextEngine:
             mtf_confluence_score=mtf_confluence_pct,
             mtf_alignment=mtf_alignment,
             order_flow=order_flow,
-            trade_style=style
+            trade_style=style,
+            live_spread_pips=live_spread_pips
         )

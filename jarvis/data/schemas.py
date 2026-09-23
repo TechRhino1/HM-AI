@@ -172,6 +172,10 @@ class MarketContext:
     mtf_alignment: Dict[str, str] = field(default_factory=dict)
     order_flow: Dict[str, Any] = field(default_factory=dict)
     trade_style: str = "SWING"
+    # Real per-bar spread measured by the feed, converted to pips. Reporting
+    # only: it feeds TRADE_DB.log_trade and UI strings, never a gate, stop or
+    # size. `None` means the feed carried no spread column (or it was unusable).
+    live_spread_pips: Optional[float] = None
 
 @dataclass
 class RegimeOutput:

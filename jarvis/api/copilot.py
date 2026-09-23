@@ -504,9 +504,14 @@ class JarvisCopilot:
             return ReasoningEngine.generate_explanation(latest_decisions[sym])
         elif sym in contexts:
             ctx = contexts[sym]
+            _live = getattr(ctx, "live_spread_pips", None)
+            _spread_txt = (
+                f"{_live:.2f} pips (live)" if _live is not None
+                else f"{ctx.volatility.current_spread_pips} pips"
+            )
             return (
                 f"**Market Context for {sym}**\n"
-                f"- Price: {self._px(sym, ctx.current_price)} (Spread: {ctx.volatility.current_spread_pips} pips)\n"
+                f"- Price: {self._px(sym, ctx.current_price)} (Spread: {_spread_txt})\n"
                 f"- Structure: {ctx.structure.bias} (Zone: {ctx.structure.discount_premium_zone})\n"
                 f"- Momentum Score: {ctx.momentum.trend_score} (ADX: {ctx.momentum.adx:.1f}, RSI: {ctx.momentum.rsi:.1f})\n"
                 f"- Volatility: {ctx.volatility.state} (ATR: {ctx.volatility.atr:.4f})\n"

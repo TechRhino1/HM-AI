@@ -169,7 +169,17 @@ class ExecutionEngine:
                 adx_val = float(ctx.momentum.adx) if ctx and ctx.momentum else 0.0
                 plus_di = float(ctx.momentum.plus_di) if ctx and ctx.momentum else 0.0
                 minus_di = float(ctx.momentum.minus_di) if ctx and ctx.momentum else 0.0
-                spread_pips = float(ctx.volatility.current_spread_pips) if ctx and ctx.volatility else 0.0
+                # Reporting only: prefer the real per-bar spread the feed
+                # measured (points→pips) over the registry constant, so trade
+                # analytics record what was actually quoted. `getattr` keeps a
+                # context built before this field existed working. No decision
+                # reads this value.
+                _live_spread = getattr(ctx, "live_spread_pips", None) if ctx else None
+                spread_pips = (
+                    float(_live_spread)
+                    if _live_spread is not None
+                    else (float(ctx.volatility.current_spread_pips) if ctx and ctx.volatility else 0.0)
+                )
                 mtf_str = json.dumps(ctx.mtf_alignment) if ctx and ctx.mtf_alignment else ""
                 threats_json = json.dumps(decision.risk_factors or [])
                 features_json = json.dumps({

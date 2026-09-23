@@ -689,6 +689,19 @@ class JarvisOrchestrator:
         )
         self.state_manager.update_market_context(symbol, context)
 
+        # Reporting only: record BOTH the real per-bar spread the feed carried
+        # (points→pips, or None if absent) and the registry constant the live
+        # gates still use. This is the measurement that tells us how far apart
+        # they are. No new MT5 call here (a terminal that is down would hold
+        # the GIL); `context.live_spread_pips` comes from the frames we already
+        # fetched.
+        logger.info(
+            "Spread measurement %s [%s]: live=%s pips, registry_typical=%s pips "
+            "(reporting only; no gate, stop or size consumes either).",
+            symbol, active_trade_style,
+            context.live_spread_pips, _spec.typical_spread_pips,
+        )
+
         # 3. Classify Market Regime (thread-safe, isolated per symbol and trade style)
         regime_key = f"{symbol}_{active_trade_style}"
         with self._regime_state_lock:
