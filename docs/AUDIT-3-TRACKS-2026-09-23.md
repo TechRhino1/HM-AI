@@ -372,6 +372,46 @@ to prove inert. The remaining work that actually changes what we know is **measu
 
 ---
 
+### L. The real spread is now carried and reported — Steps 0 + 1 (`faf2587`)
+
+Investigation: `reports/gp11_real_spread_investigation.md`. The real spread was available
+**twice and discarded both times** — `mt5_client.py:563` computes it only at order-send, and
+`data_feed.py:378` projected the `spread` column away. Every live caller passed the registry
+constant, so `spread_ratio ≡ 1` and **no spread gate could ever fire**; and
+`TRADE_DB.log_trade(spread_pips=…)` persisted the constant rather than the spread actually
+quoted, making the trade journal fiction.
+
+Shipped, **reporting only**:
+
+- `market/data_feed.py` keeps MT5's per-bar `spread` (in **points**, not converted, guarded for
+  sources without it). `market/market_context.py` converts via the canonical
+  `points × 10⁻ᵈⁱᵍⁱᵗˢ / pip_size` — the same formula the backtest already uses — into a new
+  `MarketContext.live_spread_pips`, `None` when not measured.
+- `execution_engine.py` writes it to the trade journal; `copilot.py` shows it marked "live";
+  the orchestrator logs live and registry side by side. No new MT5 call anywhere.
+
+**Zero decisions change.** `bid`, `ask` and `volatility.current_spread_pips` are untouched —
+verified independently of the worker's own test: building a context on EURUSD with and without
+a `spread=19` column gives bit-identical `bid` 1.0920881633749384, `ask` 1.0921581633749384,
+`current_spread_pips` 0.7 — while `live_spread_pips` becomes 1.9. That is the whole point: the
+number is now honest, and nothing prices, sizes or gates on it.
+
+**Deliberately NOT done.** `decision_engine.py:261` (`spread_cost`) is untouched. I initially
+described this step as "zero decisions change" *including* the EV term, which was wrong — `ev`
+feeds four live gates (`decision_engine.py:364`, `:411`, `:413`, `:660`), and the real spread is
+~2.9× the registry value for EURUSD, so it would have moved real reject decisions. Deferred
+pending an A/B. Steps 2 (geometry) and 3 (gates) also remain deferred: feeding the real spread
+into `current_spread_pips` would simultaneously widen stops, raise two AI-score hurdles and
+**freeze position management** — the real spread exceeds `typical×2` on 100% of M1 bars for
+EURUSD/USDJPY/AUDUSD and 94% for GBPUSD (`position_monitor.py:290`).
+
+Tests: `tests/test_live_spread_reporting.py` (22 hermetic) — conversion for a 5-digit FX symbol
+and one where `pip_size ≠ point`, absent/non-finite/zero/negative → `None`, `log_trade`
+preference and fallback, a context lacking the field, and the strict bid/ask/`current_spread`
+regression guard.
+
+---
+
 ## Track 2 — Refactor
 
 ### Inventory
@@ -587,7 +627,7 @@ default `pytest` run.
 
 | Check | Result |
 |---|---|
-| `pytest` | **3161 passed / 0 failed / 0 errors / 1 skipped / 1 xfailed / 20 deselected** (junit root `tests=3198, failures=0, errors=0`). Was 3004 before this work. |
+| `pytest` | **3183 passed / 0 failed / 0 errors / 1 skipped / 1 xfailed / 20 deselected** (junit root `tests=3220, failures=0, errors=0`). Was 3004 before this work. |
 | `ruff check` (`ruff.toml`, `F` + `E9`) | **clean** — 0 findings |
 | `compileall jarvis tools tests` | exit 0 |
 | `tools/verify_ui_layout.js` | **345/345** |
