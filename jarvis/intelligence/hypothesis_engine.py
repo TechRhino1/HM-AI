@@ -3,7 +3,7 @@ HM Algo 2.0 — Competing Hypothesis & Invalidation Engine.
 Constructs competing theses (Primary vs Alternative) and explicit invalidation criteria ("What would change my mind?").
 """
 from typing import Dict
-from jarvis.data.schemas import MarketContext, RegimeOutput, AnalystReport, DevilAdvocateReport, CompetingHypotheses
+from jarvis.data.schemas import MarketContext, RegimeOutput, AnalystReport, DevilAdvocateReport, CompetingHypotheses, answered_reports
 
 class HypothesisEngine:
     """Generates rigorous dialectical market hypotheses and invalidation levels."""
@@ -20,8 +20,13 @@ class HypothesisEngine:
         mom = context.momentum
         c_price = context.current_price
 
+        # Only analysts that actually ran. A fallback report's `evidence` is the
+        # string "<ROLE> timeout / neutral fallback" -- a note about OUR process,
+        # not about the market. Quoting it here would present a process failure
+        # as primary market evidence.
+        live_reports = answered_reports(analyst_reports)
         primary_evidence = []
-        for role, rep in analyst_reports.items():
+        for rep in live_reports:
             if rep.evidence:
                 primary_evidence.extend(rep.evidence[:2])
 
@@ -35,9 +40,12 @@ class HypothesisEngine:
         structural_invalidation_distance = 0.0
 
         # §18: Calculate dynamic confluence base from analyst votes, momentum, and MTF alignment
-        bull_score = sum(r.score for r in analyst_reports.values() if r.bias == "BULLISH")
-        bear_score = sum(r.score for r in analyst_reports.values() if r.bias == "BEARISH")
-        total_score = max(1.0, sum(r.score for r in analyst_reports.values()))
+        # Bias-filtered sums are already safe (a fallback is NEUTRAL), but
+        # `total_score` is the denominator of this confluence ratio, so an
+        # invented 50.0 in it would dilute every real analyst's contribution.
+        bull_score = sum(r.score for r in live_reports if r.bias == "BULLISH")
+        bear_score = sum(r.score for r in live_reports if r.bias == "BEARISH")
+        total_score = max(1.0, sum(r.score for r in live_reports))
 
         # MTF alignment bonus
         mtf_align = getattr(context, "mtf_alignment", {})

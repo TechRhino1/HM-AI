@@ -123,7 +123,19 @@ class ParallelAnalystCluster:
                     # `get_news_calendar`. Deliberately not done here.
                     confidence=0.0,
                     evidence=[f"{role_name} timeout / neutral fallback"],
-                    risk_factors=[]
+                    risk_factors=[],
+                    # STRUCTURAL marker, not just a prose note. `evidence` above
+                    # is read unfiltered by `hypothesis_engine` and would be
+                    # quoted as primary market evidence; `score=50.0` is
+                    # averaged into `ai_score` (decision_engine.py:737) and
+                    # summed into the confluence denominator
+                    # (hypothesis_engine.py:40). Both consumers now filter on
+                    # this flag via `schemas.answered_reports`, so a dead
+                    # analyst is *not counted* rather than counted as a neutral
+                    # reading. That is still fail-open -- the trade is not
+                    # blocked -- it simply proceeds without this analyst's
+                    # opinion instead of with an invented one.
+                    is_fallback=True,
                 )
 
         try:

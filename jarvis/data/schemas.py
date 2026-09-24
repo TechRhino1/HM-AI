@@ -197,6 +197,31 @@ class AnalystReport:
     risk_factors: List[str] = field(default_factory=list)
     execution_time_ms: float = 0.0
     metadata: Dict[str, Any] = field(default_factory=dict)
+    # True when this report was NOT produced by the analyst -- it is the
+    # substitute emitted when the analyst timed out or raised
+    # (`parallel_runner.run_all_parallel`). Such a report is an invention, not a
+    # reading: its `score` is a hardcoded neutral, and it must not be averaged
+    # into `ai_score`, summed into a confluence denominator, or quoted as
+    # evidence. Defaults to False so every real analyst construction is
+    # unaffected and older objects stay readable.
+    is_fallback: bool = False
+
+
+def answered_reports(reports: Any) -> List["AnalystReport"]:
+    """The reports that came from an analyst that actually ran.
+
+    A fallback report carries a fabricated neutral score (50.0). Averaging it
+    into `ai_score` is the same defect as scoring a fabricated news calendar:
+    an invented value entering a hard gate. Every consumer that sums or
+    averages analyst scores must go through this, so the two front ends cannot
+    drift apart.
+
+    Accepts a mapping or any iterable of reports. Reports lacking the attribute
+    (older objects, test doubles) are treated as real, which preserves the
+    pre-existing behaviour for everything except the one fallback constructor.
+    """
+    values = reports.values() if hasattr(reports, "values") else reports
+    return [r for r in values if not getattr(r, "is_fallback", False)]
 
 @dataclass
 class DevilAdvocateReport:

@@ -19,6 +19,7 @@ from jarvis.data.schemas import (
     TradeQualityGateResult,
     MarketRegime,
     is_observed_price,
+    answered_reports,
 )
 from jarvis.intelligence.strategy_selector import StrategySelector
 from jarvis.intelligence.hypothesis_engine import HypothesisEngine
@@ -687,6 +688,33 @@ class DecisionEngine:
 
         return TradeQualityGateResult(passed=gate_passed, checks=gate_checks, failing_reasons=failing_reasons)
 
+    def _blended_ai_score(self, analyst_reports: Dict[str, AnalystReport],
+                          symbol: str = "") -> float:
+        """The plain mean of the analyst scores -- over analysts that RAN.
+
+        A timed-out analyst is substituted by `parallel_runner` with a hardcoded
+        NEUTRAL 50.0 report. Counting that as a reading is the same defect as
+        scoring a fabricated news calendar: an invented value entering a hard
+        gate (70/72/75/78/80/82/85, all in this module). Measured context: the
+        cluster's 2.0s budget is smaller than the socket timeout of the news
+        fetch MACRO calls synchronously, so on a merely slow network the
+        fallback is the EXPECTED outcome, not an edge case.
+
+        Fail-open is preserved -- a partial panel still trades, on a SMALLER
+        panel rather than a padded one. The degenerate case (nothing answered)
+        yields 0.0, which fails every gate: that is the correct reading of "no
+        analyst answered", and the alternative -- substituting a neutral 50 --
+        would be inventing the very reading we are missing.
+        """
+        answered = answered_reports(analyst_reports)
+        if not answered:
+            if analyst_reports:
+                logger.warning("[%s] All %d analyst reports are fallbacks -- "
+                               "ai_score forced to 0.0 (no analyst answered).",
+                               symbol, len(analyst_reports))
+            return 0.0
+        return sum(r.score for r in answered) / len(answered)
+
     def evaluate(
         self,
         context: MarketContext,
@@ -734,7 +762,7 @@ class DecisionEngine:
         )
         best_strategy = max(strategy_probs.items(), key=lambda x: x[1])[0]
 
-        ai_score = sum(r.score for r in analyst_reports.values()) / max(1, len(analyst_reports)) if analyst_reports else 0.0
+        ai_score = self._blended_ai_score(analyst_reports, context.symbol)
 
         of_res = {"signal": "NEUTRAL", "strength": 0.0, "institutional_activity": False}
         if mtf_data and "primary" in mtf_data and not mtf_data["primary"].empty:
