@@ -288,6 +288,32 @@ _MANUAL_TAG_RX = re.compile(r"(?:manual|desk)")
 
 logger = logging.getLogger("JARVIS_Database")
 
+
+def _bracket_side_ok(action: str, entry: float, value: float, *, is_stop: bool) -> bool:
+    """True when a bracket price sits on the correct side of the entry.
+
+    `sl`/`tp` reach `sync_mt5_history` by string-parsing the broker order comment
+    (`[sl...]` / `[tp...]`), so they are only as trustworthy as that comment.
+    Measured on data/jarvis_history.db: 24 rows carried a stop on the WRONG side
+    of entry — 14 BUY with `sl >= entry`, 10 SELL with `sl <= entry` — and the 20
+    closed ones among them were **20 winners totalling +37.38**, which a genuine
+    stop cannot produce. That is the signature of the TAKE-PROFIT level having
+    been parsed into the `sl` field. A bracket that disagrees with the direction
+    makes every risk, R-multiple and expectancy figure computed from it wrong, so
+    it is refused rather than stored.
+
+    A non-positive value means "no tag was parsed". That is not a claim about the
+    market, so it is left alone — this function only rejects a value that is
+    demonstrably on the wrong side.
+    """
+    if value <= 0.0:
+        return True
+    if action == "BUY":
+        return value < entry if is_stop else value > entry
+    if action == "SELL":
+        return value > entry if is_stop else value < entry
+    return False
+
 class SQLiteTradeDB:
     def __init__(self, db_path="jarvis_history.db"):
         # Anchor relative paths on the repo data dir; a CWD-relative path meant
@@ -700,6 +726,35 @@ class SQLiteTradeDB:
                         tp_val = float(raw_comment.split("[tp")[1].split("]")[0].strip())
                     except Exception as e:
                         logger.debug(f"Could not parse [tp] tag from comment {raw_comment!r}: {e}")
+
+                # A parsed bracket is only as good as the comment it came from.
+                # `trade_guard.validate_pre_execution` already refuses an inverted
+                # bracket at order build time, so a wrong-side value reaching this
+                # point cannot have come from a valid order — the parse picked up
+                # the wrong number (typically the target, which sits on the other
+                # side of entry). Storing it would corrupt every risk and
+                # R-multiple figure derived from the row.
+                #
+                # Only checked when the entry deal is in the window: without it
+                # `entry_p` falls back to `target_deal.price`, which for a closed
+                # position is the EXIT price, and the comparison would be against
+                # the wrong reference. In that case the value is left as-is rather
+                # than judged against a number we do not have.
+                if entry_deal is not None:
+                    if not _bracket_side_ok(side, entry_p, sl_val, is_stop=True):
+                        logger.warning(
+                            "Refusing a parsed stop for position %s: sl=%s is on the "
+                            "wrong side of entry=%s for a %s order (comment=%r).",
+                            pid, sl_val, entry_p, side, raw_comment,
+                        )
+                        sl_val = 0.0
+                    if not _bracket_side_ok(side, entry_p, tp_val, is_stop=False):
+                        logger.warning(
+                            "Refusing a parsed target for position %s: tp=%s is on the "
+                            "wrong side of entry=%s for a %s order (comment=%r).",
+                            pid, tp_val, entry_p, side, raw_comment,
+                        )
+                        tp_val = 0.0
 
                 # Find the row this position belongs to.
                 #
