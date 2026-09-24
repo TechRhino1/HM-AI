@@ -639,6 +639,23 @@ visibility half — the analyst fallback no longer claims `confidence=0.50` it d
 the rule the Devil's Advocate fallback in the same function already followed. See
 `jarvis/analysts/parallel_runner.py` and `tests/test_parallel_runner.py`.
 
+**The measurement, however, no longer has the confound.** `spread_ab.frozen_news()` takes one snapshot
+of the news calendar and serves it for the whole scan, so the network cannot change the scan's own
+output mid-run and both arms are frozen from the same snapshot. This makes the instrument
+deliberately *more* reproducible than production — it is an instrument, not a model of production —
+and it does not hide the defect: `--no-freeze-news` reproduces production behaviour on demand, so the
+drift is measurable rather than merely asserted. The cache `salt` became `v3-frozen-news-on|off`,
+because a frozen-news scan and a live-news scan are different measurements of the same symbol and
+reusing one for the other would reintroduce exactly the confound freezing removes.
+`tests/test_scan_news_freeze.py` (7 tests) pins it, including the negative control that an unfrozen
+stale cache *does* fetch — without which the freeze test could pass for the wrong reason. Sabotaging
+the freeze turns 4 of the 7 red.
+
+Both `tools/` files were also normalised to pure ASCII: they had accumulated 6 corrupted em-dash
+sequences (`\xe2\x80?`) that made ruff fail with `E902` and aborted a run before any measurement
+happened, and the corruption reappeared in text that was not being edited. The class of failure is
+removed rather than repaired again.
+
 
 ### N. "Fix all issues" pass — triaged by defect class, not by lint count
 
