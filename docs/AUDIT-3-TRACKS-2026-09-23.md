@@ -1101,6 +1101,88 @@ rather than tuned away.
 
 ---
 
+## §P. Can any parameter make this profitable? **Measured: no.**
+
+§J answered "is the spread lever good?" (§J: no, adverse). §O answered "is the
+news input real?" (§O: no, fabricated). Neither answers the question the user
+actually asked — *can tuning make the P&L positive?* This does, and the answer
+is no, with two independent lines of evidence.
+
+### First, the gate cannot even be audited
+
+`signal_scan.py` says it plainly: *"DecisionObject exposes `model_confidence` …
+There is therefore no separate 'blended AI score' on the object."* The hard gate
+`ai_score >= min_score` (70/72/75/78/80/82/85) is **never persisted**. Nothing
+records what `ai_score` a trade actually had, so the gate's contribution to the
+outcome **cannot be evaluated from stored data at all** — an observability gap
+in its own right, and the reason the analysis below uses the variables that
+*are* recorded (`SCORE_COLUMNS`: `score` = calibrated win probability,
+`master_score`, `dissection_score`, `ev`).
+
+### Evidence 1 — no recorded variable separates winners from losers
+
+Replayed every executed candidate (n=2347, 8 symbols, 183d) and bucketed R by
+quintile of each selectivity variable. **No variable's best slice is positive**,
+at `tp_r` 1.0, 1.5 or 2.0 — 16 combinations, 15 negative and one at chance.
+Worse, the ordering is **inverted**: the *highest* buckets are the *worst*.
+
+| Variable | Best slice | Worst slice |
+|---|---|---|
+| `score` (calibrated win p) | q2 +35.1 (t=+1.31) | **q4 −71.5 (t=−2.78)** |
+| `master_score` | q2 +2.4 (t=+0.09) | **q5 −61.6 (t=−2.49)** |
+| `dissection_score` | q1 +41.0 (t=+1.47) | **q5 −81.6 (t=−3.96)** |
+| `ev` | q2 +0.7 (t=+0.03) | **q5 −48.7 (t=−1.87)** |
+
+Raising the gate does not select better trades. It selects **worse** ones, and
+significantly so. `meta_label_prob` is unpopulated (1 distinct value).
+
+### Evidence 2 — the exit model looks like it saves it, and does not
+
+Sweeping `tp_r` upward on the 8-symbol 183d set produced the first positive
+aggregate of the whole audit:
+
+| `tp_r` | 1.0 | 1.5 | 2.0 | 3.0 | 4.0 | 5.0 | 6.0 |
+|---|---|---|---|---|---|---|---|
+| total R | −93.2 | −136.4 | −7.9 | **+89.2** | **+131.1** | **+230.9** | **+258.5** |
+
+Monotone, large, and exactly the kind of result that gets shipped. Three checks
+killed it:
+
+1. **The instrument was validated first.** `tools/audit_selectivity_edge.py`
+   reproduces §J's own figure **exactly** on the same cache — `−196.7 R, n=1505`
+   at `tp_r=3.0`, against §J's `−196.673`. So the tool is faithful; the
+   difference is not a tool artefact.
+2. **It reverses out-of-sample.** On the 365-day set the same sweep is
+   monotonically **worse**: −203.5 → −187.0 → −196.7 → −337.1 → −402.6 → −428.9
+   → −397.5 (`tp_r` 1.5 → 8.0).
+3. **Same 4 symbols, both windows → negative everywhere.** Restricting the 183d
+   set to the 4 symbols the two windows share removes the effect entirely
+   (−188.4, −211.1, −201.7, −197.1). So it was never the exit model.
+
+**It was one symbol.** Per-symbol at `tp_r=6.0`: **WTI +328.9 R**, on **1257 of
+2347 trades — 54% of the population**. Everything else is negative or trivial
+(AUDUSD −19.4, GBPUSD −108.4, GBPJPY −87.0, BTCUSD +19.2). WTI's bars are real
+MT5 data, and it simply **trended 68 → 117 in that window** — a single-symbol,
+single-window trend that a wide TP harvests and nothing else does. The memory
+already flags WTI as a symbol this broker does not offer, with a divergent
+`contract_size` (1000 vs 100).
+
+### The answer
+
+**No parameter setting makes this population profitable.** Not the gate (the
+ranking is inverted), not the exit model (it is WTI, and it reverses OOS), not
+the cost model (§J: adverse). The losses are not a misconfiguration to be
+tuned out — they are what a negative-expectancy entry produces. **The lever is
+the entry model itself, which is a strategy change, not a fix**, and
+`AUDIT-2026-09.md` already measured that the current entry signal has no edge
+(0/20 symbols meet DSR > 0.95).
+
+`tools/audit_selectivity_edge.py` — reusable, with `--cache`, `--symbols` and
+`--summary-only` so a sweep cannot silently confound a window change with a
+symbol-set change.
+
+---
+
 ## Test status today
 
 | Check | Result |
