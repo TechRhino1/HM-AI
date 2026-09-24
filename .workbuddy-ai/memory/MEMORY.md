@@ -1,8 +1,6 @@
 # HM-AI / HM Algo 2.0 — index
 
-Injected every session, **hard-truncated at ~6,520 bytes** — stay under or the tail is lost. (That
-figure is the stated limit; an 8,208-byte version was in fact injected in full on 2026-09-24, so treat
-it as unverified. `UI / mobile` was split into `UI-MOBILE.md` anyway, to keep the tail off the cliff.)
+Injected every session; the **tail** is what gets lost, so detail belongs in the files below, not here.
 Rules only; detail elsewhere: **`MASTER_PLAN.md`** (backlog M0–M5), **`AGENT_SYSTEM.md`** (multi-agent),
 **`TRAPS.md`** (every trap), `AUDIT-2026-09.md` (signal quality), `AUDIT-TRADES-2026-09.md` (trade data),
 `YYYY-MM-DD.md` (sessions), `AUDIT-3-TRACKS-2026-09-23.md` (§J, 3-track audit). Skills:
@@ -14,6 +12,15 @@ Rules only; detail elsewhere: **`MASTER_PLAN.md`** (backlog M0–M5), **`AGENT_S
 Loses money on real MT5 data; 3/20 beat always-long vs 5 by chance; **DSR > 0.95 met by 0/20** (94,937
 rows = **327 independent bets**). **`AUDIT-2026-09.md`**. **Consume `spread_pips`, never raw `spread` ×
 `pip_size`.**
+
+## The news calendar is a FABRICATED input — **check `is_fallback`**
+
+Both live feeds are down (FairEconomy **429**, MyFxBook **403 Cloudflare** — `urllib` runs no JS), so the
+engine substituted a **hardcoded 7-event plan** and **padded** short real feeds with it, unlabelled. It cost
+MACRO a constant **−25** (**−4.2 on `ai_score`**, a hard gate) and handed out **+8.0 / +0.20 conviction**
+via `evaluate_post_news_sweep_reaction`. Now stamped; every consumer must check `is_fallback`.
+**§O, `AUDIT-3-TRACKS-2026-09-23.md`.** *Generalises: "a labelled fallback beats an unlabelled
+fabrication" — a fallback that invents data must say so.*
 
 ## Environment
 
@@ -41,7 +48,7 @@ is dashboard-only. Routes: **`TRAPS.md`**.
 
 ## Baselines
 
-**pytest junit `tests=3308 failures=0 errors=0 skipped=2`, 0 failing testcases** (2026-09-24) — green,
+**pytest junit `tests=3339 failures=0 errors=0 skipped=2`, 0 failing testcases** (2026-09-24) — green,
 not tolerated. Parse `--junit-xml`; the harness truncates stdout so `-rf` never prints. **The sandbox's
 bulk-delete guard is per-TURN and cumulative** — after enough deletions a suite run returns ~169 bogus
 `errors` (`SAFE_DELETE_BULK_REJECTED`), which is NOT a regression; a clean run needs an intact budget.
