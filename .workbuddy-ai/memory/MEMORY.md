@@ -15,12 +15,11 @@ rows = **327 independent bets**). **`AUDIT-2026-09.md`**. **Consume `spread_pips
 
 ## The news calendar is a FABRICATED input — **check `is_fallback`**
 
-Both live feeds are down (FairEconomy **429**, MyFxBook **403 Cloudflare** — `urllib` runs no JS), so the
-engine substituted a **hardcoded 7-event plan** and **padded** short real feeds with it, unlabelled. It cost
-MACRO a constant **−25** (**−4.2 on `ai_score`**, a hard gate) and handed out **+8.0 / +0.20 conviction**
-via `evaluate_post_news_sweep_reaction`. Now stamped; every consumer must check `is_fallback`.
-**§O, `AUDIT-3-TRACKS-2026-09-23.md`.** *Generalises: "a labelled fallback beats an unlabelled
-fabrication" — a fallback that invents data must say so.*
+Both live feeds are down (FairEconomy **429**, MyFxBook **403 Cloudflare**), so the engine substituted a
+**hardcoded 7-event plan** and **padded** short real feeds with it, unlabelled. It cost MACRO a constant
+**−25** (**−4.2 on `ai_score`**, a hard gate) and handed out **+8.0 / +0.20 conviction** via
+`evaluate_post_news_sweep_reaction`. Now stamped; consumers must check `is_fallback`.
+**§O, `AUDIT-3-TRACKS-2026-09-23.md`.** *A fallback that invents data must say so.*
 
 ## Environment
 
@@ -59,8 +58,8 @@ swallows whatever it wraps. That, not `--basetemp`, is why pytest "succeeded" wi
 
 `NO_PROXY='*' <python> -c "import pytest,sys; sys.exit(pytest.main(['-q','--junit-xml=.scratch/pytest.xml']))"`
 
-~3.5 min. **A command that "succeeds" instantly with no output — suspect the wrapper, not the payload.**
-`nohup &` / `run_in_background` do not survive here. `tools/` — 12 harnesses, all green.
+~3.5 min (now **~7.8 min**). **A command that "succeeds" instantly with no output — suspect the wrapper,
+not the payload.** `nohup &` / `run_in_background` do not survive here. `tools/` — 12 harnesses, all green.
 
 ## Measurement instruments
 
@@ -73,10 +72,8 @@ swallows whatever it wraps. That, not `--basetemp`, is why pytest "succeeded" wi
   VOLUME effect**: 412 extra trades at an unchanged ~−0.2 R each. **Trade count, not entry quality, is
   the lever here.**
 * **A wall-clock timeout on GIL-bound thread work is load-dependent.** `ParallelAnalystCluster` allows
-  MACRO 2.0s while the news fetch it calls allows 5–6s against a 90s TTL (a miss measured 1.32s = 66% of
-  the budget), so the fallback fires on a merely slow network and substitutes a **fabricated** score-50
-  into a live decision. One symbol+registry gave EXEC **51 / 53 / 56**. Retract any "deterministic" claim
-  made under load.
+  MACRO 2.0s while the news fetch allows 5–6s against a 90s TTL, so the fallback fires on a merely slow
+  network. One symbol+registry gave EXEC **51 / 53 / 56**. Retract any "deterministic" claim under load.
 * **A fallback must not claim confidence it does not have**, and say plainly when a fix is visibility only
   — `AnalystReport.confidence` has no consumer in `jarvis/`.
 
@@ -111,8 +108,6 @@ swallows whatever it wraps. That, not `--basetemp`, is why pytest "succeeded" wi
 
 ## UI / mobile
 
-Detail: **`UI-MOBILE.md`** (split out 2026-09-24 — it was being truncated off the tail of this
-index). The two that bite most: **check which stylesheet a page loads before believing a fix
-landed** (only `dashboard.html` loads `ios_mobile.css`; `/` *looks* fixed while `/stocks /india
-/options /console` run their own sheets), and **a server-rendered control whose handler is
-defined by a later blocking script is dead on arrival** (reads as *intermittent*).
+Detail: **`UI-MOBILE.md`**. Two that bite most: **check which stylesheet a page loads before believing a
+fix landed** (only `dashboard.html` loads `ios_mobile.css`), and **a server-rendered control whose handler
+is defined by a later blocking script is dead on arrival** (reads as *intermittent*).
