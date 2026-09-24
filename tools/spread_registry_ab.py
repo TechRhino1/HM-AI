@@ -51,9 +51,37 @@ CORRECTED: Dict[str, Dict[str, float]] = {
 }
 
 
+#: The registry as it ships, captured at import BEFORE any override is applied.
+#: This is what makes `apply_registry(None)` a genuine restore — see the note on
+#: `apply_registry` below.
+_PRISTINE: Dict[str, Any] = dict(reg._REGISTRY)
+
+
 def apply_registry(overrides: Dict[str, Dict[str, float]] | None) -> None:
+    """Rebuild the registry from the PRISTINE snapshot, with `overrides` applied.
+
+    The original built `new[key] = spec` from the CURRENT `_REGISTRY`:
+
+        for key, spec in reg._REGISTRY.items():
+            ov = (overrides or {}).get(key)
+            new[key] = dataclasses.replace(spec, **ov) if ov else spec
+
+    so `apply_registry(None)` was a no-op, not a restore. Once
+    `apply_registry(CORRECTED)` had run, every later `apply_registry(None)` left
+    the corrected specs in place — and because both `main()` and the
+    reconciliation driver call `apply_registry(None)` before the INCUMBENT scan
+    of every symbol, **only the first symbol scanned ever had a genuine incumbent
+    arm**. Every other symbol was measured corrected-vs-corrected.
+
+    Measured directly (`.scratch/probe_j_harness.py`): pristine AUDUSD
+    `typical_spread_pips` 0.9 -> after CORRECTED 2.3 -> after
+    `apply_registry(None)` **2.3, not 0.9**.
+
+    Always rebuilding from `_PRISTINE` makes the A arm genuinely incumbent, and
+    makes the call idempotent, which is what the name always promised.
+    """
     new = {}
-    for key, spec in reg._REGISTRY.items():
+    for key, spec in _PRISTINE.items():
         ov = (overrides or {}).get(key)
         new[key] = dataclasses.replace(spec, **ov) if ov else spec
     reg._REGISTRY.clear()

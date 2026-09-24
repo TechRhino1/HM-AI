@@ -178,7 +178,11 @@ class TestAnalystFallback:
         reports, _ = cl.run()
         assert reports["MOMENTUM"].score == 50.0
         assert reports["MOMENTUM"].bias == "NEUTRAL"
-        assert reports["MOMENTUM"].confidence == 0.50
+        # Was 0.50. A fallback must not claim confidence it does not have -- the
+        # same rule the Devil's Advocate fallback already follows. See
+        # `test_the_analyst_fallback_claims_no_confidence` for why the budget
+        # makes this path far more reachable than "a slow analyst" suggests.
+        assert reports["MOMENTUM"].confidence == 0.0
 
     def test_a_timing_out_analyst_is_replaced(self):
         cl = Cluster(timeout_sec=0.05)
@@ -212,6 +216,29 @@ class TestAnalystFallback:
         cl.behaviour["RISK"] = ("raise", "boom")
         reports, _ = cl.run()
         assert reports["RISK"].risk_factors == []
+
+    def test_the_analyst_fallback_claims_no_confidence(self):
+        """A substituted report must not assert confidence it does not have.
+
+        Why this is not cosmetic book-keeping: the cluster's budget
+        (`timeout_sec=2.0`) is SMALLER than the socket timeout of a dependency
+        MACRO calls synchronously -- `jarvis/market/news.py` allows 5s and 6s,
+        and a cache miss was measured at 1.32s against a 90s TTL. So on every
+        cache miss the analyst has ~0.7s of margin left for its own CPU work,
+        competing with six other analysts for the GIL. The fallback is therefore
+        not a rare edge case; it is the expected result of a merely slow network.
+        """
+        cl = Cluster()
+        cl.behaviour["MACRO"] = ("raise", "boom")
+        reports, _ = cl.run()
+        assert reports["MACRO"].confidence == 0.0
+        assert reports["MACRO"].confidence != 0.50
+
+    def test_a_real_analyst_still_carries_its_confidence(self):
+        """Negative control: the fallback's 0.0 must not leak onto real reports."""
+        cl = Cluster()
+        reports, _ = cl.run()
+        assert reports["STRUCTURE"].confidence == 0.9
 
     def test_the_fallback_role_is_the_enum_not_a_bare_string(self):
         """AnalystReport.role is typed AnalystRole. AnalystRole is a str-Enum so a

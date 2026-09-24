@@ -104,7 +104,24 @@ class ParallelAnalystCluster:
                     symbol=context.symbol,
                     bias="NEUTRAL",
                     score=50.0,
-                    confidence=0.50,
+                    # 0.0, not the 0.50 this used to claim. Same reasoning as the
+                    # Devil's Advocate fallback below: a fallback must not assert
+                    # confidence it does not have. It matters more here than it
+                    # looks, because the budget (2.0s) is SMALLER than the socket
+                    # timeout of a dependency MACRO calls synchronously (the news
+                    # fetch in `jarvis/market/news.py` allows 5s and 6s, and was
+                    # measured at 1.32s on a cache miss against a 90s TTL). So the
+                    # fallback is not a rare edge case on a cache miss -- it is
+                    # the expected outcome whenever the network is merely slow.
+                    #
+                    # Honest scope of this change: `AnalystReport.confidence` has
+                    # no consumer anywhere in `jarvis/` (every `.confidence` read
+                    # is `regime.confidence` or `decision.model_confidence`), so
+                    # this is a VISIBILITY fix, not a cure. The cure is to stop
+                    # the analyst from blocking on the fetch at all -- a
+                    # background refresh, or propagating this deadline into
+                    # `get_news_calendar`. Deliberately not done here.
+                    confidence=0.0,
                     evidence=[f"{role_name} timeout / neutral fallback"],
                     risk_factors=[]
                 )

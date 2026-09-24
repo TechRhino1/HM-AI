@@ -120,8 +120,16 @@ def scan_universe(symbols: List[str], corrected: Dict[str, Dict[str, float]], tf
     import hashlib
     import pickle
 
+    # `salt` MUST be bumped whenever the harness's measurement semantics change.
+    # The first version of this key covered only (symbols, table, tf, window), so
+    # fixing the registry-override leak in `apply_registry` -- which changes the
+    # A-arm result for every symbol after the first -- would have silently reused
+    # scans taken with the BUGGY harness. A cache key that does not cover the
+    # instrument is a cache that lies.
+    salt = "v2-pristine-registry-restore"
     key = hashlib.sha256(json.dumps(
-        {"s": sorted(symbols), "c": corrected, "tf": tf, "w": window}, sort_keys=True
+        {"s": sorted(symbols), "c": corrected, "tf": tf, "w": window, "salt": salt},
+        sort_keys=True,
     ).encode()).hexdigest()[:16]
     cache_path = os.path.join(REPO, ".scratch", f"j_scan_cache_{key}.pkl")
 
