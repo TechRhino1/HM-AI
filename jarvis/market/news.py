@@ -95,6 +95,9 @@ class LiveNewsEngine:
     #: How long to stop asking after a 429. FairEconomy's cooldown is minutes,
     #: so the 90s cache TTL would otherwise re-trigger it on every expiry.
     RATE_LIMIT_BACKOFF_SEC: float = 600.0
+    #: How long to stop asking a source that answered 403/401/404. That is a
+    #: block, not a blip, and MyFxBook's is a JS challenge urllib cannot pass.
+    BLOCKED_SOURCE_BACKOFF_SEC: float = 3600.0
     
     COUNTRY_MAP: ClassVar[Dict[str, str]] = {
         "United States": "USD", "US": "USD", "Euro Area": "EUR", "Eurozone": "EUR", "Germany": "EUR",
@@ -118,6 +121,9 @@ class LiveNewsEngine:
         #: Monotonic stamp before which FairEconomy must not be asked again,
         #: set after an HTTP 429 so the cooldown can actually elapse.
         self._fe_backoff_until: float = 0.0
+        #: Same, for MyFxBook, which answers 403 behind a Cloudflare challenge
+        #: that urllib cannot pass -- so the request is pure waste on every fetch.
+        self._mfb_backoff_until: float = 0.0
 
     def get_news_calendar(self, force_refresh: bool = False,
                           max_wait: float | None = None) -> List[Dict[str, Any]]:
@@ -294,6 +300,8 @@ class LiveNewsEngine:
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
         }
+        if time.monotonic() < self._mfb_backoff_until:
+            return []
         try:
             req = urllib.request.Request(self.MYFXBOOK_URL, headers=headers)
             with urllib.request.urlopen(req, context=self._ctx, timeout=6) as resp:
@@ -354,7 +362,21 @@ class LiveNewsEngine:
             
             return parsed
         except Exception as e:
-            logger.debug(f"MyFxBook news fetch error: {e}")
+            # MyFxBook sits behind a Cloudflare challenge that `urllib` can never
+            # pass -- it executes no JavaScript. Measured: HTTP 403, body
+            # "Just a moment...", every time. So this is not a transient error,
+            # and retrying it on every news fetch costs ~0.5s of the ~1.26s the
+            # fetch takes -- 40% of the MACRO analyst's 2.0s budget, spent on a
+            # request that cannot succeed. Back off hard; if the challenge ever
+            # lapses, the next attempt after the window will find out.
+            if getattr(e, "code", None) in (403, 401, 404):
+                self._mfb_backoff_until = time.monotonic() + self.BLOCKED_SOURCE_BACKOFF_SEC
+                logger.warning(
+                    "MyFxBook is blocked (HTTP %s, Cloudflare challenge). Skipping it "
+                    "for %.0fs -- urllib cannot pass a JavaScript challenge.",
+                    getattr(e, "code", None), self.BLOCKED_SOURCE_BACKOFF_SEC)
+            else:
+                logger.debug(f"MyFxBook news fetch error: {e}")
             return []
 
     def _organize_news_feed(self, events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:

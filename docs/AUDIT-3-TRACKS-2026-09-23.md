@@ -1026,6 +1026,25 @@ bug whether it fires 1% or 100% of the time, which is why the fix stands.
 What I have **not** measured is the true firing rate in production; the probes
 cannot answer that, because probing is what triggers it.
 
+### The failure path blows the analyst's budget by 7.5×
+
+This is what ties §O to the original MACRO concern, and it is now measured. The
+cluster allows `MacroAnalyst` **2.0s**; `_fetch_all_live_sources` tries both
+sources **sequentially** with 5s and 6s socket timeouts. On the failure path:
+
+| Fetch | Measured |
+|---|---|
+| cold — pays for both sources | **14.98s** |
+| MyFxBook backed off | **3.91s** |
+| healthy — FairEconomy only | **~1.0s** |
+
+So whenever the feed is unhealthy the analyst cannot possibly finish, and is
+replaced by the **fabricated score-50 NEUTRAL** report — the failure mode §O
+opened with. `MyFxBook` is now backed off for an hour after its first 403
+(it cannot succeed), which removes one request from *every* fetch and cuts the
+failure path to 3.91s. Still over budget — which is why `max_wait` exists and
+why wiring it remains an open call.
+
 ### Fixed — `is_fallback`, following `tradingview_provider`'s own precedent
 
 The codebase already had the right idiom: *"A labelled fallback beats an

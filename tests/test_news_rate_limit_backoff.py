@@ -98,3 +98,62 @@ def test_a_fresh_engine_is_not_backed_off(monkeypatch):
     eng._fetch_faireconomy_feed()
     fresh = LiveNewsEngine()
     assert fresh._fe_backoff_until == 0.0
+
+
+# --------------------------------------------------------------------------
+# MyFxBook is BLOCKED, not flaky -- so it must not be retried every fetch
+# --------------------------------------------------------------------------
+
+class _Forbidden(Exception):
+    code = 403
+
+
+def test_a_403_arms_the_myfxbook_backoff(monkeypatch):
+    eng = _engine(monkeypatch, _Counter(_Forbidden()))
+    assert eng._mfb_backoff_until == 0.0
+    eng._fetch_myfxbook_feed()
+    assert eng._mfb_backoff_until > 0.0
+
+
+def test_the_myfxbook_backoff_stops_the_wasted_request(monkeypatch):
+    """It answers 403 every time, so each retry is ~0.5s of the MACRO budget."""
+    counter = _Counter(_Forbidden())
+    eng = _engine(monkeypatch, counter)
+    eng._fetch_myfxbook_feed()
+    assert counter.calls == 1
+    for _ in range(5):
+        eng._fetch_myfxbook_feed()
+    assert counter.calls == 1
+
+
+def test_the_myfxbook_backoff_expires(monkeypatch):
+    counter = _Counter(_Forbidden())
+    eng = _engine(monkeypatch, counter)
+    eng._fetch_myfxbook_feed()
+    eng._mfb_backoff_until = 0.0
+    eng._fetch_myfxbook_feed()
+    assert counter.calls == 2
+
+
+def test_a_non_blocking_status_does_not_arm_it(monkeypatch):
+    """A 500 is not a block; do not sit out an hour for it."""
+    eng = _engine(monkeypatch, _Counter(_ServerError()))
+    eng._fetch_myfxbook_feed()
+    assert eng._mfb_backoff_until == 0.0
+
+
+def test_a_blocked_myfxbook_costs_the_fetch_nothing(monkeypatch):
+    """THE POINT: `_fetch_all_live_sources` must stop paying for a dead source.
+
+    Two requests per cycle, one of which cannot succeed, was ~0.5s of the
+    ~1.26s fetch -- 40% of the analyst's 2.0s budget.
+    """
+    counter = _Counter(_Forbidden())
+    eng = _engine(monkeypatch, counter)
+    eng._fetch_myfxbook_feed()          # learns the block
+    before = counter.calls
+
+    eng._fetch_all_live_sources()
+    # FairEconomy is asked, MyFxBook is not.
+    assert counter.calls - before == 1, (
+        f"a blocked source was retried: {counter.calls - before} requests")
