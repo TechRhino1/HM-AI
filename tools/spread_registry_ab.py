@@ -248,6 +248,8 @@ def main() -> int:
     ap.add_argument("--symbols", default=",".join(CORRECTED))
     ap.add_argument("--skip-live", action="store_true")
     ap.add_argument("--out", default=None)
+    ap.add_argument("--no-freeze-news", action="store_true",
+                    help="do NOT freeze the macro news calendar during the scan.")
     args = ap.parse_args()
 
     tf = args.tf.upper()
@@ -255,10 +257,13 @@ def main() -> int:
     out = {"config": {"tf": tf, "window": args.window, "symbols": syms, "corrected": CORRECTED},
            "per_symbol": {}}
 
-    for sym in syms:
-        df = load_bars(sym, tf, args.window)
-        if df is None:
-            print(f"[skip] {sym}: no bars", flush=True)
+    with frozen_news() if not args.no_freeze_news else contextlib.nullcontext():
+        print("[news] calendar frozen for the scan" if not args.no_freeze_news
+              else "[news] NOT frozen -- reproducing production behaviour", flush=True)
+        for sym in syms:
+            df = load_bars(sym, tf, args.window)
+            if df is None:
+                print(f"[skip] {sym}: no bars", flush=True)
             continue
 
         apply_registry(None)
