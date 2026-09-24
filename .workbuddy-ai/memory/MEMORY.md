@@ -38,7 +38,7 @@ is dashboard-only. Routes: **`TRAPS.md`**.
 
 ## Baselines
 
-**pytest 3004 passed / 0 failed / 20 deselected** (junit `tests=3018 failures=0 errors=0 skipped=1`) —
+**pytest junit `tests=3267 failures=0 errors=0 skipped=2`, 0 failing testcases** (2026-09-24) —
 green, not tolerated. Parse `--junit-xml`; the harness truncates stdout so `-rf` never prints.
 
 **NEVER wrap a command in `env`** — `env FOO=bar python -c "print(1)"` prints **nothing**, exit 0: it
@@ -58,6 +58,10 @@ swallows whatever it wraps. That, not `--basetemp`, is why pytest "succeeded" wi
 * **MT5 times are BROKER-SERVER time, not UTC** — `jarvis/data/broker_time.py`. Probes: `curl --noproxy '*'`.
 * **A frontend reading a key the server never sends renders the empty state on success** (3×). **A refused
   order is answered with HTTP 200** — decide from the body's `status`, never `res.ok`.
+* **A test can pin a bug, so a green suite is not evidence the bug is gone.** `test_forecast_not_overwritten`
+  asserted the buggy `timestamp = ?` literal — it would have gone red *on the fix*. When you fix a defect,
+  grep the suite for the buggy literal. **`fetch_recent_trades` fires a real sync and stamps
+  `_last_mt5_sync`** — a test that reads a row through it first gets its own sync throttled to a no-op.
 * **Back up `jarvis_history.db` with `sqlite3.Connection.backup()`, never `cp`** (WAL + live writer).
 * **`executed_trades.timestamp` is not the entry time** — `database.py:287` overwrites it with the EXIT
   time; **neither column is safe**. `tools/audit_trades.py`. **Shared defect? grep the other front end.**
