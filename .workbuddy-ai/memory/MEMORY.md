@@ -19,9 +19,8 @@ Whenever the live fetch fails the engine substitutes a **hardcoded 7-event plan*
 feeds with it, unlabelled. It cost MACRO a constant **−25** (**−4.2 on `ai_score`**, a hard gate) and
 handed out **+8.0 / +0.20 conviction** via `evaluate_post_news_sweep_reaction`. Now stamped; consumers
 must check `is_fallback`. MyFxBook is dead to `urllib` (403 Cloudflare JS); FairEconomy merely
-**rate-limits** — **my own probing caused the 429 I first reported as an outage**. *§O,
-`AUDIT-3-TRACKS-2026-09-23.md`.* **A measurement that says "broken, always" is suspect — five
-instruments failed that way this session.**
+**rate-limits** — **my own probing caused the 429 I first called an outage**. *§O, `AUDIT-3-TRACKS-2026-09-23.md`.*
+**A measurement that says "broken, always" is suspect — five instruments failed that way here.**
 
 ## Environment
 
@@ -73,9 +72,8 @@ not the payload.** `nohup &` / `run_in_background` do not survive here. `tools/`
   first. Corrected, §J is **ADVERSE** (−47…−87 R, 7/8 symbols, 5/5 exit models) — and **96% of it is a
   VOLUME effect**: 412 extra trades at an unchanged ~−0.2 R each. **Trade count, not entry quality, is
   the lever here.**
-* **A wall-clock timeout on GIL-bound thread work is load-dependent.** `ParallelAnalystCluster` allows
-  MACRO 2.0s while the news fetch allows 5–6s against a 90s TTL, so the fallback fires on a merely slow
-  network. One symbol+registry gave EXEC **51 / 53 / 56**. Retract any "deterministic" claim under load.
+* **A wall-clock timeout on GIL-bound thread work is load-dependent.** MACRO gets 2.0s while the news
+  fetch allows 5–6s, so the fallback fires on a merely slow network. Retract any "deterministic" claim.
 * **A fallback must not claim confidence it does not have**, and say plainly when a fix is visibility only
   — `AnalystReport.confidence` has no consumer in `jarvis/`.
 
