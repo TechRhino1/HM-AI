@@ -1238,6 +1238,86 @@ lower `ai_score` depending on whether the real analyst would have scored above o
 
 ---
 
+## R — A backoff cannot deduplicate a concurrent burst
+
+Found while reading the startup log of a live launch (`HM_start.py live`), not by a test.
+
+### The symptom was one log line, nine times
+
+```
+=== MyFxBook warning count ===        9
+=== distinct seconds ===              [2026-09-24 16:36:39]
+```
+
+Nine identical `MyFxBook is blocked (HTTP 403 ...)` warnings, all inside the same second. A
+working backoff cannot produce that — the second caller is supposed to be skipped.
+
+### Why the backoff could not prevent it
+
+`GLOBAL_NEWS_ENGINE = LiveNewsEngine()` (`news.py:931`) is the **only** instantiation site: one
+shared engine, not one per analyst. A scan reaches it from many threads at once — `MacroAnalyst`
+calls `get_news_calendar()` once per candidate (`macro_analyst.py:67`), and
+`ParallelAnalystCluster` runs `max_workers=8`, giving **9 concurrent callers** (8 workers plus
+the scan loop). That is exactly the observed count.
+
+The important part is *why this is not a missing lock*. **A backoff is armed only AFTER the
+first request fails.** At t=0 every thread reads `_mfb_backoff_until` as `0.0` and passes the
+guard; the arm lands only when the first request returns, ~0.5s later. A lock around the guard
+cannot help, because at t=0 there is nothing yet to observe. The synchronous path had no
+in-flight guard at all — `_refresh_in_flight` existed only on the bounded `max_wait` path.
+
+The cost is not the log noise. **Nine duplicate requests to a source that is rate-limiting us is
+what earns the 429 in the first place** — the backoff was then treating a symptom the engine
+caused. Secondarily, nine threads each spend ~0.5s on a request that cannot succeed, inside the
+MACRO analyst's 2.0s budget, competing for the GIL.
+
+### Fixed — a single-flight claim
+
+`_fetch_single_flight(timeout)`: the first caller claims `_refresh_in_flight` under the lock and
+fetches; everyone else waits on a shared `threading.Event` (`_fetch_done`) and is served the
+leader's result from `_cached_news`, so followers receive **real data**, not an empty list.
+`SYNC_FOLLOW_TIMEOUT_SEC = 30.0` bounds the wait so a wedged leader degrades instead of hanging
+(the socket timeouts sum to 11s). The bounded path shares the same claim and signals
+`_fetch_done` **before** clearing `_refresh_in_flight`, so a synchronous caller arriving in that
+window waits on an already-set event instead of becoming a second leader.
+
+**Evidence — mutation, 9 threads.**
+
+| | with fix | claim removed |
+|---|---|---|
+| requests | `{'faireconomy': 1, 'myfxbook': 1}` | `{'faireconomy': 9, 'myfxbook': 9}` |
+| tests red | — | **4** |
+
+### Two things this change taught me, both recorded because they are easy to get wrong
+
+**1. My first concurrency test was measuring scheduling luck.** The burst-count test initially
+asserted `calls == 1` on a plain 9-thread burst — and it **stayed green with the single-flight
+claim removed**. The guard/arm lock, added in the same change, arms the backoff fast enough that
+the first failure often lands before the later threads reach the guard. The test was passing for
+a reason unrelated to the fix. Corrected by holding the stubbed request open
+(`_Recorder(hold=0.3)`) so every thread that will pass the guard does so before the first arm
+lands. **A concurrency test with no hold inside the critical section measures the scheduler, not
+the code.**
+
+**2. The guard/arm lock is not the fix, and I checked rather than assumed.** Removing it turns
+**no test red** — CPython stores a float attribute atomically, so there is no torn read to catch.
+It is coherence hardening, kept so the guard/arm pair is correct by construction rather than by
+relying on the interpreter's guarantees, and the code now says so explicitly. Only the
+single-flight claim is load-bearing. Reporting the lock as the fix would have been a claim I
+could not have supported.
+
+**A third, smaller one:** `_organize_news_feed` **pads** a short real feed with the hardcoded
+calendar, so a returned calendar legitimately contains currencies the live feed never sent (the
+engine logs `PARTLY fabricated: 6 of 7 events are SYNTHETIC`). Assert **containment**, never set
+equality, on that result — two of my own new tests failed on this before it was understood.
+
+**Tests:** `tests/test_news_concurrent_single_flight.py` — 15 tests, including a deterministic
+`_BarrierRecorder` control that pins the defect by construction (no request may return until all
+N have entered, so all N are past the guard). Verification for this change: **409 passed, 1
+skipped** across the news, provenance, analyst, decision and engine suites; ruff clean.
+
+---
+
 ## Test status today
 
 | Check | Result |

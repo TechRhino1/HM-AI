@@ -9,22 +9,22 @@ Rules only; detail elsewhere: **`MASTER_PLAN.md`** (backlog M0–M5), **`AGENT_S
 
 ## Signal quality — **the entry signal has no measured edge.**
 
-Loses money on real MT5 data; 3/20 beat always-long vs 5 by chance; **DSR > 0.95 met by 0/20** (94,937
-rows = **327 independent bets**). **`AUDIT-2026-09.md`**. **Consume `spread_pips`, never raw `spread` ×
+Loses money on real MT5 data; **DSR > 0.95 met by 0/20** (94,937 rows = **327 independent bets**). **`AUDIT-2026-09.md`**. **Consume `spread_pips`, never raw `spread` ×
 `pip_size`.** **No parameter makes it profitable (§P, measured):** the ranking variables are **inverted**
 (top quintile of `score`/`master_score`/`dissection_score` is the WORST, t to −3.96); the wide-TP "rescue"
 is **WTI alone** (54% of trades) and **reverses out-of-sample**; the cost lever is adverse (§J). **The
 lever is the entry model — a strategy change, not a fix.** The gate `ai_score` is **never persisted** —
 unauditable. `tools/audit_selectivity_edge.py`.
 
-## The news calendar is a FABRICATED input — **check `is_fallback`**
+## The news calendar is FABRICATED; its backoff cannot dedupe a burst
 
-Whenever the live fetch fails the engine substitutes a **hardcoded 7-event plan** and **pads** short real
-feeds with it, unlabelled. It cost MACRO a constant **−25** (**−4.2 on `ai_score`**, a hard gate) and
-handed out **+8.0 / +0.20 conviction** via `evaluate_post_news_sweep_reaction`. Now stamped; consumers
-must check `is_fallback`. MyFxBook is dead to `urllib` (403 Cloudflare JS); FairEconomy merely
-**rate-limits** — **my own probing caused the 429 I first called an outage**. *§O, `AUDIT-3-TRACKS-2026-09-23.md`.*
-**A measurement that says "broken, always" is suspect — five instruments failed that way here.**
+**Check `is_fallback`** — the engine substitutes a **hardcoded 7-event plan** when the live fetch fails and
+**pads** short real feeds with it, so a returned calendar holds currencies no feed sent (cost MACRO **−25**
+= **−4.2 on `ai_score`**, a hard gate).
+**§R: a backoff arms only AFTER a failure, so it cannot collapse a concurrent burst** — one shared
+`GLOBAL_NEWS_ENGINE`, 9 cluster callers, 9 identical warnings in 1s. Fixed by a **single-flight claim, not a
+lock** (removing the lock reddens nothing; removing the claim reddens **4**). **A
+concurrency test without a hold measures scheduling luck.** *Detail: `TRAPS.md` §O / §R.*
 
 ## Environment
 
@@ -55,7 +55,7 @@ is dashboard-only. Routes: **`TRAPS.md`**.
 **pytest junit `tests=3350 failures=0 errors=0 skipped=2`, 0 failing testcases** (2026-09-24) — green,
 not tolerated. Parse `--junit-xml`; the harness truncates stdout so `-rf` never prints. **The sandbox's
 bulk-delete guard is per-TURN and cumulative** — after enough deletions a suite run returns ~169 bogus
-`errors` (`SAFE_DELETE_BULK_REJECTED`), which is NOT a regression; a clean run needs an intact budget.
+`errors` (`SAFE_DELETE_BULK_REJECTED`), NOT a regression; a clean run needs an intact budget.
 
 **NEVER wrap a command in `env`** — `env FOO=bar python -c "print(1)"` prints **nothing**, exit 0: it
 swallows whatever it wraps. That, not `--basetemp`, is why pytest "succeeded" with an empty log.
@@ -63,7 +63,7 @@ swallows whatever it wraps. That, not `--basetemp`, is why pytest "succeeded" wi
 
 `NO_PROXY='*' <python> -c "import pytest,sys; sys.exit(pytest.main(['-q','--junit-xml=.scratch/pytest.xml']))"`
 
-~3.5 min (now **~7.8 min**). **A command that "succeeds" instantly with no output — suspect the wrapper,
+**~7.8 min**. **A command that "succeeds" instantly with no output — suspect the wrapper,
 not the payload.** `nohup &` / `run_in_background` do not survive here. `tools/` — 12 harnesses, all green.
 
 ## Measurement instruments
@@ -73,6 +73,7 @@ is a cache that lies. **Check the instrument before believing the number** — �
 reading was an artefact, and corrected §J is **ADVERSE** (−47…−87 R, 7/8 symbols), **96% of it a VOLUME
 effect**. **A wall-clock timeout on GIL-bound work is load-dependent** — MACRO gets 2.0s, so retract any
 "deterministic" claim. **A fallback must not claim confidence it lacks**; say when a fix is visibility only.
+**A "broken, always" reading is suspect — 5 instruments failed that way here.**
 *Narrative detail: `TRAPS.md` → "Measurement instruments".*
 
 ## Rules worth repeating
@@ -86,16 +87,15 @@ effect**. **A wall-clock timeout on GIL-bound work is load-dependent** — MACRO
 * **A test can pin a bug, so a green suite is not evidence the bug is gone.** `test_forecast_not_overwritten`
   asserted the buggy `timestamp = ?` literal; `test_parallel_runner` asserted the old `confidence == 0.50` —
   both would have gone red *on the fix*. When you fix a defect, grep the suite for the buggy literal.
-  **`fetch_recent_trades` fires a real sync and stamps `_last_mt5_sync`** — a test that reads a row through
-  it first gets its own sync throttled to a no-op.
 * **Back up `jarvis_history.db` with `sqlite3.Connection.backup()`, never `cp`** (WAL + live writer).
 * **`executed_trades.timestamp` is not the entry time** — `database.py:287` overwrote it with the EXIT time
   (fixed 2026-09-24); **neither column is safe**. `tools/audit_trades.py`. **Shared defect? grep the other front end.**
 * **`curl -s -o /dev/null -w '%{http_code}'` exits 23** — an `&&` chain on it silently skips later steps.
 * **A price must be finite AND `> 0`.** `_is_finite(0.0)` is True; an empty frame gives `bid = 0.0`, from
   which a **negative** stop passed the last gate.
-* **`fetch_recent_trades` calls `sync_mt5_history` on every read** — tests get real broker deals. Fix at the
-  fixture boundary with `monkeypatch.setattr`, not by guarding production (broke 4 tests).
+* **`fetch_recent_trades` calls `sync_mt5_history` on every read** and stamps `_last_mt5_sync` — so tests get
+  real broker deals, and a test that reads a row through it first gets its own sync throttled to a no-op. Fix
+  at the fixture boundary with `monkeypatch.setattr`, not by guarding production (broke 4 tests).
 * **Unknown R: withhold a recorded quantity, default a hyperparameter.** Bandit `rewards` is in R → leave it;
   in `update_online` R only weights the gradient → omit the arg (`None` ⇒ +1R). AI6.
 * **Never count a mutation as evidence until it turns something red** — it may be unreachable, and mutations

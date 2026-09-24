@@ -104,6 +104,11 @@ class LiveNewsEngine:
     #: How long to stop asking a source that answered 403/401/404. That is a
     #: block, not a blip, and MyFxBook's is a JS challenge urllib cannot pass.
     BLOCKED_SOURCE_BACKOFF_SEC: float = 3600.0
+    #: How long a synchronous caller may follow another thread's in-flight fetch
+    #: before giving up and serving the cache. The two socket timeouts sum to
+    #: 11s, so this is slack, not a real deadline -- it only exists so a wedged
+    #: leader cannot pin a caller forever.
+    SYNC_FOLLOW_TIMEOUT_SEC: float = 30.0
     
     COUNTRY_MAP: ClassVar[Dict[str, str]] = {
         "United States": "USD", "US": "USD", "Euro Area": "EUR", "Eurozone": "EUR", "Germany": "EUR",
@@ -130,6 +135,16 @@ class LiveNewsEngine:
         #: Same, for MyFxBook, which answers 403 behind a Cloudflare challenge
         #: that urllib cannot pass -- so the request is pure waste on every fetch.
         self._mfb_backoff_until: float = 0.0
+        #: Set while a live fetch is running, cleared when it lands. A scan
+        #: spawns one MACRO analyst per candidate and the cluster runs 8
+        #: workers, so nine callers can reach a cold cache at once -- and
+        #: `GLOBAL_NEWS_ENGINE` is a single shared instance. Without this they
+        #: all read the backoff as 0.0 before any of them can arm it, all nine
+        #: request, all nine get 403, and all nine log: measured as nine
+        #: identical "MyFxBook is blocked" warnings inside one second. The nine
+        #: concurrent requests are also what EARNS FairEconomy's 429.
+        self._fetch_done = threading.Event()
+        self._fetch_done.set()          # nothing in flight at construction
 
     def get_news_calendar(self, force_refresh: bool = False,
                           max_wait: float | None = None) -> List[Dict[str, Any]]:
@@ -159,19 +174,17 @@ class LiveNewsEngine:
                 return self._organize_news_feed(self._cached_news)
 
         if max_wait is None:
-            events = self._fetch_all_live_sources()
+            # Single-flight: a concurrent burst makes ONE network pass, not one
+            # per caller. See `_fetch_single_flight` -- nine duplicate requests
+            # is a correctness problem, not a performance one.
+            events = self._fetch_single_flight(self.SYNC_FOLLOW_TIMEOUT_SEC)
             # Instrumented: `synthetic` here means the deterministic calendar,
             # which drives a hard MACRO gate. Counting it is the only way to
             # know how often that gate is decided by data no feed produced.
             NEWS_CALENDAR_SERVED.inc(origin="live" if events else "synthetic")
-            if not events:
-                events = self._generate_dynamic_calendar()
-
             with self._lock:
-                if events:
-                    self._cached_news = events
-                    self._last_fetch_time = time.time()
-                return self._organize_news_feed(self._cached_news or self._generate_dynamic_calendar())
+                return self._organize_news_feed(
+                    self._cached_news or self._generate_dynamic_calendar())
 
         # Bounded path. Prefer stale REAL data to a synthetic calendar, and never
         # block longer than the caller's budget.
@@ -184,6 +197,7 @@ class LiveNewsEngine:
                 NEWS_CALENDAR_SERVED.inc(origin="synthetic")
                 return self._organize_news_feed(self._generate_dynamic_calendar())
             self._refresh_in_flight = True
+            self._fetch_done.clear()
             # A caller on a latency budget (the MACRO analyst has 2.0s) is served
             # whatever is already cached while the refresh runs. Counting that is
             # what separates "we have real news" from "we have a calendar".
@@ -204,6 +218,11 @@ class LiveNewsEngine:
                                "keeping the cached calendar.", type(exc).__name__, exc)
             finally:
                 with self._lock:
+                    # Signal followers BEFORE clearing the flag. A synchronous
+                    # caller that sees the flag still set then waits on an event
+                    # that is already set and returns immediately, instead of
+                    # becoming a second leader and duplicating this request.
+                    self._fetch_done.set()
                     self._refresh_in_flight = False
                 done.set()
 
@@ -217,6 +236,68 @@ class LiveNewsEngine:
         # case that still returns the deterministic calendar. The refresh thread
         # will populate the cache for the next caller.
         return self._organize_news_feed(self._generate_dynamic_calendar())
+
+    def _fetch_single_flight(self, timeout: float | None) -> List[Dict[str, Any]]:
+        """Run the live fetch exactly ONCE for a concurrent burst of callers.
+
+        Returns the events now in the cache. An empty list means no live data is
+        available and the caller should fall back to the deterministic calendar.
+
+        WHY THIS IS A CORRECTNESS FIX, NOT AN OPTIMISATION. `GLOBAL_NEWS_ENGINE`
+        is one shared instance, and a scan reaches it from many threads at once
+        (one MACRO analyst per candidate, 8 cluster workers). The per-source
+        backoffs cannot deduplicate that burst, because a backoff is only armed
+        AFTER the first request fails -- so every thread reads `0.0`, passes the
+        guard, and issues its own request before any of them can arm anything.
+        Measured on a live start: nine identical "MyFxBook is blocked (HTTP 403)"
+        warnings, all stamped 16:36:39.
+
+        Two costs, both real:
+
+        * Nine duplicate requests to a source that is rate-limiting us is what
+          EARNS the 429 in the first place. The backoff then treats a symptom we
+          caused.
+        * Nine threads spend ~0.5s each on a request that cannot succeed, inside
+          a 2.0s analyst budget, competing for the GIL.
+
+        The leader does the work and publishes the result to the cache; followers
+        wait for the leader rather than repeating it. `timeout` bounds the wait so
+        a wedged leader cannot pin a caller forever -- on expiry the follower
+        serves whatever is cached, which is exactly what it would have had anyway.
+        """
+        with self._lock:
+            if self._refresh_in_flight:
+                waiting_on = self._fetch_done
+            else:
+                self._refresh_in_flight = True
+                self._fetch_done.clear()
+                waiting_on = None
+
+        if waiting_on is not None:
+            waiting_on.wait(timeout)
+            with self._lock:
+                return list(self._cached_news)
+
+        try:
+            events = self._fetch_all_live_sources()
+            if events:
+                with self._lock:
+                    self._cached_news = events
+                    self._last_fetch_time = time.time()
+            return events
+        except Exception as exc:
+            # A feed that raises must not take the caller down with it; the
+            # caller decides what to do with an empty result.
+            logger.warning("News fetch failed (%s: %s); keeping the cached calendar.",
+                           type(exc).__name__, exc)
+            with self._lock:
+                return list(self._cached_news)
+        finally:
+            # Always release the claim, on every path, or every later caller
+            # would follow a leader that no longer exists.
+            with self._lock:
+                self._fetch_done.set()
+                self._refresh_in_flight = False
 
     def _fetch_all_live_sources(self) -> List[Dict[str, Any]]:
         """Fetches from FairEconomy and MyFxBook, merging and deduplicating."""
@@ -250,10 +331,17 @@ class LiveNewsEngine:
         # does not make the feed reliable -- it stops us from being the reason
         # it stays down. Measured: isolated call 200 / 10,849 bytes, and at 90s
         # spacing 0, 0, 80, 80 items while recovering from a burst.
-        now_mono = time.monotonic()
-        if now_mono < self._fe_backoff_until:
-            NEWS_FETCHES.inc(source="faireconomy", outcome="skipped")
-            return []
+        # Read the window under the lock. The arm below happens on another
+        # thread's failure, so the pair is a check-then-act that is only correct
+        # if the two halves cannot interleave. `_fetch_single_flight` is what
+        # actually collapses a concurrent burst to one request; this keeps the
+        # state coherent for the sequential case, where a second caller must
+        # reliably observe the arm. (Coherence hardening, not the fix -- see the
+        # note on the MyFxBook guard below.)
+        with self._lock:
+            if time.monotonic() < self._fe_backoff_until:
+                NEWS_FETCHES.inc(source="faireconomy", outcome="skipped")
+                return []
         _fe_timer = NEWS_FETCH_LATENCY.time(source="faireconomy")
         try:
             req = urllib.request.Request(self.FAIRECONOMY_URL, headers=headers)
@@ -312,7 +400,8 @@ class LiveNewsEngine:
             # A 429 is not a transient glitch -- it is a cooldown. Backing off is
             # what lets the feed come back; hammering is what kept it 429-ing.
             if getattr(e, "code", None) == 429:
-                self._fe_backoff_until = time.monotonic() + self.RATE_LIMIT_BACKOFF_SEC
+                with self._lock:
+                    self._fe_backoff_until = time.monotonic() + self.RATE_LIMIT_BACKOFF_SEC
                 NEWS_FETCHES.inc(source="faireconomy", outcome="rate_limited")
                 logger.warning(
                     "FairEconomy rate-limited (HTTP 429). Backing off for %.0fs; "
@@ -328,9 +417,21 @@ class LiveNewsEngine:
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
         }
-        if time.monotonic() < self._mfb_backoff_until:
-            NEWS_FETCHES.inc(source="myfxbook", outcome="skipped")
-            return []
+        # Read the window under the lock -- same torn check-then-act as
+        # FairEconomy above. This is the one that was measured: nine concurrent
+        # callers all read 0.0, all requested, and produced nine identical
+        # warnings in one second.
+        #
+        # Honest scope: this lock is COHERENCE hardening, not the fix. A mutation
+        # that removes it turns no test red, because CPython stores a float
+        # attribute atomically. What actually collapses the burst is
+        # `_fetch_single_flight` -- removing THAT turns four tests red. The lock
+        # is kept so the guard/arm pair is correct by construction rather than by
+        # relying on the interpreter's guarantees.
+        with self._lock:
+            if time.monotonic() < self._mfb_backoff_until:
+                NEWS_FETCHES.inc(source="myfxbook", outcome="skipped")
+                return []
         _mfb_timer = NEWS_FETCH_LATENCY.time(source="myfxbook")
         try:
             req = urllib.request.Request(self.MYFXBOOK_URL, headers=headers)
@@ -403,7 +504,8 @@ class LiveNewsEngine:
             # request that cannot succeed. Back off hard; if the challenge ever
             # lapses, the next attempt after the window will find out.
             if getattr(e, "code", None) in (403, 401, 404):
-                self._mfb_backoff_until = time.monotonic() + self.BLOCKED_SOURCE_BACKOFF_SEC
+                with self._lock:
+                    self._mfb_backoff_until = time.monotonic() + self.BLOCKED_SOURCE_BACKOFF_SEC
                 NEWS_FETCHES.inc(source="myfxbook", outcome="blocked")
                 logger.warning(
                     "MyFxBook is blocked (HTTP %s, Cloudflare challenge). Skipping it "
