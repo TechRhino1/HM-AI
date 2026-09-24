@@ -15,10 +15,18 @@ import pandas as pd
 from datetime import datetime, timezone
 from typing import Dict, Optional, Any
 from jarvis.common.timeout_guard import TimeoutGuard
+from jarvis.common.bounded_cache import BoundedTTLCache
+from jarvis.observability import log_event
+from jarvis.observability.instruments import MT5_RATES_FETCHES, MT5_RATES_LATENCY, CACHE_ENTRIES
 
 import threading
 
 logger = logging.getLogger("JARVIS_DataFeed")
+
+#: Ceiling on the rates cache. A scan covers (symbols x timeframes x styles);
+#: 512 leaves room for the whole configured universe several times over while
+#: still bounding memory when a caller supplies keys we have never seen.
+_MAX_CACHE_ENTRIES = 512
 
 try:
     import MetaTrader5 as mt5
@@ -229,8 +237,15 @@ class DataFeedEngine:
     def __init__(self, mt5_client: Any = None, timeout_sec: float = 3.0):
         self.mt5_client = mt5_client
         self.timeout_sec = timeout_sec
-        self._cache: Dict[str, Dict[str, Any]] = {}
         self._cache_ttl_sec = 8.0
+        # Bounded, not a plain dict. The key is built from caller-supplied
+        # values (`symbol`, `timeframe`, `num_bars`), and one of them arrives
+        # straight off an HTTP query string — so an unbounded dict here is a
+        # memory growth path driven by remote input. See
+        # `jarvis/common/bounded_cache.py`.
+        self._cache = BoundedTTLCache(max_entries=_MAX_CACHE_ENTRIES,
+                                      ttl_sec=self._cache_ttl_sec,
+                                      name="data_feed.rates")
         # One warning per symbol/timeframe: a stalled feed repeats on every poll
         # and would otherwise bury the rest of the log.
         self._stale_warned: set = set()
@@ -307,10 +322,9 @@ class DataFeedEngine:
     def fetch_rates(self, symbol: str, timeframe: str = "H1", num_bars: int = 300, include_current_bar: bool = False) -> pd.DataFrame:
         cache_key = f"{symbol}_{timeframe}_{num_bars}_{include_current_bar}"
         now = time.time()
-        if cache_key in self._cache:
-            entry = self._cache[cache_key]
-            if now - entry["timestamp"] < self._cache_ttl_sec:
-                return entry["df"]
+        entry = self._cache.get(cache_key)
+        if entry is not None and now - entry["timestamp"] < self._cache_ttl_sec:
+            return entry["df"]
 
         def _fetch():
             if not MT5_AVAILABLE or self.mt5_client is None or getattr(self.mt5_client, "mode", "dry_run") == "dry_run":
@@ -473,12 +487,17 @@ class DataFeedEngine:
             df.attrs["freshness"] = FRESHNESS_UNKNOWN
             return df
 
-        df_result = TimeoutGuard.run_sync(
-            _fetch,
-            timeout_sec=self.timeout_sec,
-            default=_fallback_gen,
-            task_name=f"DataFeed_fetch_{symbol}_{timeframe}"
-        )
+        # Instrumented: the fetch is the only place that learns whether the bars
+        # a decision will be taken on came from a broker or from the synthetic
+        # generator. Nothing downstream re-checks, so if this is not counted
+        # here, a fully synthetic session is indistinguishable from a live one.
+        with MT5_RATES_LATENCY.time(timeframe=str(timeframe)) as _fetch_timer:
+            df_result = TimeoutGuard.run_sync(
+                _fetch,
+                timeout_sec=self.timeout_sec,
+                default=_fallback_gen,
+                task_name=f"DataFeed_fetch_{symbol}_{timeframe}"
+            )
 
         if "data_source" not in df_result.attrs:
             df_result.attrs["data_source"] = "SYNTHETIC_FALLBACK"
@@ -486,8 +505,22 @@ class DataFeedEngine:
             # A frame of unknown origin must not read as verified.
             df_result.attrs["freshness"] = FRESHNESS_UNKNOWN
 
+        source = str(df_result.attrs.get("data_source") or "SYNTHETIC_FALLBACK").lower()
+        MT5_RATES_FETCHES.inc(timeframe=str(timeframe), source=source)
+        log_event(
+            logger,
+            logging.WARNING if source != "live_mt5" else logging.DEBUG,
+            "rates_fetched",
+            f"{symbol} {timeframe}: {source}",
+            symbol=symbol,
+            timeframe=str(timeframe),
+            source=source,
+            duration_ms=_fetch_timer.elapsed_ms,
+        )
+
         self._note_health(df_result, symbol, timeframe)
         self._cache[cache_key] = {"df": df_result, "timestamp": now}
+        CACHE_ENTRIES.set(len(self._cache), cache="data_feed.rates")
         return df_result
 
     def fetch_multi_timeframe(

@@ -28,8 +28,29 @@ from jarvis.data.symbol_registry import resolve as resolve_symbol
 from jarvis.market.sessions import SessionEngine
 from jarvis.api.remote_auth import RemoteAuthEngine
 from jarvis.config.settings import SETTINGS
+from jarvis.common.bounded_cache import BoundedTTLCache
+from jarvis.observability import bind, new_request_id, unbind
+from jarvis.observability.instruments import HTTP_LATENCY, HTTP_REQUESTS
+from jarvis.observability.metrics import REGISTRY
 
 logger = logging.getLogger("JARVIS_WebServer")
+
+
+def _status_class(status_code: int) -> str:
+    """`2xx` / `4xx` / `5xx`. A status code is not a usable metric label: one
+    per code would be unbounded and unreadable, and the interesting question is
+    almost always "did this fail, and was it our fault"."""
+    try:
+        return f"{int(status_code) // 100}xx"
+    except (TypeError, ValueError):
+        return "unk"
+
+
+def _bound_route() -> str:
+    """The route bound by `do_GET`/`do_POST`, or `unbound` off the web path."""
+    from jarvis.observability.context import ROUTE, bound
+
+    return str(bound().get(ROUTE) or "unbound")
 
 
 class JarvisRequestHandler(BaseHTTPRequestHandler):
@@ -53,7 +74,13 @@ class JarvisRequestHandler(BaseHTTPRequestHandler):
     orchestrator: Optional[Any] = None
     _bg_thread_started: bool = False
     _bg_lock = threading.Lock()
-    _CANDLES_CACHE: ClassVar[Dict[str, Tuple[Dict[str, Any], float]]] = {}
+    # Bounded. The key is `f"{sym}_{tf}"` and `sym` is read straight off the
+    # query string, so the old plain dict grew one entry per distinct symbol a
+    # caller asked for and never removed one. 256 entries covers every
+    # symbol/timeframe pair the UI can render at once, many times over.
+    _CANDLES_CACHE: ClassVar[BoundedTTLCache] = BoundedTTLCache(
+        max_entries=256, ttl_sec=1.0, name="server.candles"
+    )
     
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     root_dir = os.path.dirname(base_dir)
@@ -348,11 +375,42 @@ class JarvisRequestHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         logger.debug(f"{self.address_string()} - {format % args}")
 
+    @staticmethod
+    def _normalize_route(path: str) -> str:
+        """Collapse a request path into a bounded set of metric label values.
+
+        The path arrives from the client and is therefore unvalidated input.
+        Using it directly as a metric label lets any caller mint a new time
+        series per request, which is a memory leak with a metrics-shaped hat.
+        Non-API paths collapse to a coarse bucket; an over-long or non-ASCII
+        path collapses to `other`.
+        """
+        if not isinstance(path, str) or not path:
+            return "empty"
+        if not path.startswith("/api/") or len(path) > 64:
+            return "page" if path in ("/", "/index.html") else "other"
+        try:
+            path.encode("ascii")
+        except UnicodeEncodeError:
+            return "other"
+        # One dynamic id in the middle of a path is still unbounded, so keep the
+        # prefix (the route) and drop the tail (the parameter).
+        head = path.split("?")[0]
+        return head if head.count("/") <= 4 else "/".join(head.split("/")[:5]) + "/*"
+
     def do_GET(self):
         JarvisRequestHandler.start_background_syncer()
         parsed = urlparse(self.path)
         path = parsed.path
         query = parse_qs(parsed.query)
+
+        # One correlation id per request. Bound here rather than in a wrapper so
+        # every log line this request causes — including ones emitted deep in the
+        # market or execution layer — carries the same id and can be recovered
+        # with a single grep.
+        _route = self._normalize_route(path)
+        _request_timer = HTTP_LATENCY.time(route=_route)
+        _bind_token = bind(request_id=new_request_id(), route=_route)
 
         try:
             public_get_endpoints = {
@@ -770,6 +828,8 @@ class JarvisRequestHandler(BaseHTTPRequestHandler):
                     "account": snap["account"],
                     "timestamp": snap["timestamp"]
                 })
+            elif path == "/api/metrics":
+                self._send_metrics(query)
             else:
                 self.send_error(404, "Endpoint not found")
         except (ConnectionResetError, ConnectionAbortedError, BrokenPipeError):
@@ -780,6 +840,11 @@ class JarvisRequestHandler(BaseHTTPRequestHandler):
                 self._send_json({"error": str(e)}, status_code=500)
             except Exception:
                 pass
+        finally:
+            # Unbind even on the SSE path, which holds this thread for ~60s and
+            # would otherwise hand its request id to whatever runs next here.
+            unbind(_bind_token)
+            _request_timer.stop()
 
     def do_OPTIONS(self):
         try:
@@ -797,6 +862,10 @@ class JarvisRequestHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         parsed = urlparse(self.path)
         path = parsed.path
+
+        _route = self._normalize_route(path)
+        _request_timer = HTTP_LATENCY.time(route=_route)
+        _bind_token = bind(request_id=new_request_id(), route=_route)
 
         try:
             content_length = int(self.headers.get("Content-Length", 0))
@@ -1138,6 +1207,9 @@ class JarvisRequestHandler(BaseHTTPRequestHandler):
                 self._send_json({"error": str(e)}, status_code=500)
             except Exception:
                 pass
+        finally:
+            unbind(_bind_token)
+            _request_timer.stop()
 
     # Response headers applied to every JSON, HTML and static response.
     #
@@ -1227,6 +1299,36 @@ class JarvisRequestHandler(BaseHTTPRequestHandler):
             "ts": datetime.now(timezone.utc).isoformat(),
         }, status_code=200 if ok else 503)
 
+    def _send_metrics(self, query: Dict[str, list]) -> None:
+        """The scrape surface. Deliberately NOT in `public_get_endpoints`.
+
+        `/health` is public because a proxy has to be able to reach it, but a
+        metrics page enumerates the platform's internals — how many orders were
+        refused, how often the news calendar is synthetic — and that is not
+        information an anonymous caller needs. It is reachable from loopback by
+        the existing bypass, which is what a local scraper wants.
+
+        `?format=prometheus` returns text exposition; the default is JSON.
+        """
+        fmt = (query.get("format", ["json"])[0] or "json").strip().lower()
+        if fmt in ("prometheus", "text", "txt"):
+            body = REGISTRY.render_prometheus().encode("utf-8")
+            try:
+                self.send_response(200)
+                self.send_header("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self._send_security_headers()
+                self.end_headers()
+                self.wfile.write(body)
+            except (ConnectionResetError, ConnectionAbortedError, BrokenPipeError):
+                pass
+            return
+        self._send_json({
+            "metrics": REGISTRY.collect(),
+            "uptime_seconds": REGISTRY.uptime_seconds(),
+            "ts": datetime.now(timezone.utc).isoformat(),
+        })
+
     def _send_json(self, data: Any, status_code: int = 200, cookies: Optional[list] = None):
         try:
             payload = json.dumps(data, default=str).encode("utf-8")
@@ -1245,6 +1347,8 @@ class JarvisRequestHandler(BaseHTTPRequestHandler):
                         self.send_header("Set-Cookie", c)
             self.end_headers()
             self.wfile.write(payload)
+            HTTP_REQUESTS.inc(route=str(_bound_route()),
+                              status_class=_status_class(status_code))
         except (ConnectionResetError, ConnectionAbortedError, BrokenPipeError):
             pass
         except Exception as e:

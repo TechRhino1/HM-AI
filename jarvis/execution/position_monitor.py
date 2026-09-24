@@ -36,15 +36,13 @@ MONITOR_INTERVAL_SEC      = 2.0    # Monitor loop tick rate
 CONTEXT_CACHE_TTL_SEC     = 10.0   # Re-fetch market context every 10s per symbol
 EMERGENCY_SL_ATR_MULT     = 2.0    # Auto-SL for manual trades: 2× ATR from entry
 DANGEROUS_SL_ATR_MULT     = 3.0    # SL wider than 3× ATR → tighten to 2× ATR
-MICRO_VOLUME_THRESH        = 0.03   # Volume <= this is treated as micro-position
 
 # Profit-lock / trailing thresholds are NO LONGER defined here.
 # Every stop-ratchet decision is delegated to jarvis.execution.exit_policy, which
 # is the single source of truth shared with the backtester. The module-level
 # STAGE1/2/3 and STD_ATR_TRIGGER constants that used to live here drifted away
 # from the backtest values, which is precisely what made live results
-# irreproducible. Only the non-stop-related buffers remain.
-SR_ATR_BUFFER              = 0.20   # Structural S/R ratchet buffer (structure only)
+# irreproducible. Only the partial-exit defaults remain.
 PARTIAL_TP_TRIGGER_R       = 1.0    # Default partial TP trigger fallback (1.0R)
 PARTIAL_CLOSE_PCT          = 0.50   # 50% scale out at partial target
 

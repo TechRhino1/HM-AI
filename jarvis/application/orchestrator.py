@@ -42,6 +42,8 @@ from jarvis.config.paths import mode_scoped_db_path
 from jarvis.market.sessions import SessionEngine
 from jarvis.execution.entry_policy import evaluate_entry
 from jarvis.intelligence.winrate_targeting import load_profiles
+from jarvis.observability import log_event
+from jarvis.observability.instruments import DECISION_EVALUATIONS, DECISION_LATENCY
 
 logger = logging.getLogger("JARVIS_Orchestrator")
 
@@ -627,6 +629,10 @@ class JarvisOrchestrator:
                     "be current.",
                     symbol, active_trade_style, bad_role,
                 )
+            # No decision was reached at all. Counted, because "the engine is
+            # refusing to decide" is invisible in a log that only shows refusals
+            # as warnings, and indistinguishable from a quiet market in the UI.
+            DECISION_EVALUATIONS.inc(style=active_trade_style, outcome="refused")
             return {
                 "symbol": symbol,
                 "trade_style": active_trade_style,
@@ -665,6 +671,7 @@ class JarvisOrchestrator:
                         "(Further refusals for this symbol/style are not logged.)",
                         symbol, active_trade_style, bad_role, bad_source,
                     )
+                DECISION_EVALUATIONS.inc(style=active_trade_style, outcome="refused")
                 return {
                     "symbol": symbol,
                     "trade_style": active_trade_style,
@@ -730,14 +737,36 @@ class JarvisOrchestrator:
         dd_pct = 0.0
         if account and account.balance > 0 and account.equity < account.balance:
             dd_pct = ((account.balance - account.equity) / account.balance) * 100.0
-        decision = self.decision_engine.evaluate(
-            context, regime, analyst_reports, devil_report,
-            account_balance=account.equity if account else 10000.0,
-            current_drawdown_pct=dd_pct,
-            mtf_data=mtf_data,
-            recent_candles=self._df_to_candles(mtf_data.get("primary") if isinstance(mtf_data, dict) else None),
-            trade_style=active_trade_style
-        )
+        # Instrumented: `evaluate` is the one call that decides whether money
+        # moves, and it was entirely unmeasured — its duration, and how often it
+        # raised or refused, were both invisible. `_outcome` starts as "error" so
+        # the counter is correct even if the engine raises; the `finally` runs
+        # before the exception leaves this block.
+        _decision_timer = DECISION_LATENCY.time(style=active_trade_style)
+        _outcome = "error"
+        try:
+            with _decision_timer:
+                decision = self.decision_engine.evaluate(
+                    context, regime, analyst_reports, devil_report,
+                    account_balance=account.equity if account else 10000.0,
+                    current_drawdown_pct=dd_pct,
+                    mtf_data=mtf_data,
+                    recent_candles=self._df_to_candles(mtf_data.get("primary") if isinstance(mtf_data, dict) else None),
+                    trade_style=active_trade_style
+                )
+                _outcome = "trade" if getattr(decision, "execution_authorized", False) else "no_trade"
+        finally:
+            DECISION_EVALUATIONS.inc(style=active_trade_style, outcome=_outcome)
+            log_event(
+                logger,
+                logging.ERROR if _outcome == "error" else logging.INFO,
+                "decision_evaluated",
+                f"{symbol}: {_outcome}",
+                symbol=symbol,
+                style=active_trade_style,
+                outcome=_outcome,
+                duration_ms=_decision_timer.elapsed_ms,
+            )
         self.state_manager.record_decision(symbol, decision)
 
         # 6. Risk Engine Independent Authorization & Sizing (only if opportunity matches active trading style)

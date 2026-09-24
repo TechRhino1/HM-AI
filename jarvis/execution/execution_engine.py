@@ -7,6 +7,8 @@ from typing import Dict, Any
 from jarvis.data.schemas import DecisionObject
 from jarvis.execution.mt5_client import MT5Client
 from jarvis.application.state_manager import StateManager, GLOBAL_STATE
+from jarvis.observability import log_event
+from jarvis.observability.instruments import ORDERS_SUBMITTED, ORDER_LATENCY
 
 logger = logging.getLogger("JARVIS_ExecutionEngine")
 
@@ -53,10 +55,12 @@ class ExecutionEngine:
         """Dispatches authorized decision to MT5 or Paper Simulator."""
         if not decision.execution_authorized or lots <= 0:
             logger.warning(f"Execution rejected for {decision.symbol}: Not authorized or invalid lot size ({lots}).")
+            ORDERS_SUBMITTED.inc(mode=self._execution_mode(), status="BLOCKED")
             return {"status": "BLOCKED", "reason": "Execution unauthorized"}
 
         if self.state_manager.is_safe_mode:
             logger.warning(f"Execution blocked for {decision.symbol}: SAFE MODE is ACTIVE.")
+            ORDERS_SUBMITTED.inc(mode=self._execution_mode(), status="BLOCKED")
             return {"status": "BLOCKED", "reason": "Safe mode active"}
 
         mode = self.state_manager.execution_mode
@@ -66,6 +70,11 @@ class ExecutionEngine:
 
         order_kind = getattr(decision, "order_type", "MARKET").upper()
         use_limit = "LIMIT" in order_kind or "PENDING" in order_kind
+
+        # Instrumented: a REFUSED order is answered with HTTP 200 elsewhere in
+        # this platform, so the status code is not evidence that money moved.
+        # This counter is — `status` is the broker's own verdict.
+        _order_timer = ORDER_LATENCY.time(route="pending" if use_limit else "market")
 
         if use_limit:
             # Task 2b: Direction-vs-price sanity check for resting limit orders
@@ -119,6 +128,25 @@ class ExecutionEngine:
                 comment=comment,
                 reference_price=decision.entry_price
             )
+
+        # The dispatch above is the part that talks to money; stop the clock
+        # before the journal write below so the latency number means "how long
+        # the broker took", not "how long SQLite took".
+        _order_timer.stop()
+        _order_status = str((res or {}).get("status") or "UNKNOWN")
+        ORDERS_SUBMITTED.inc(mode=self._execution_mode(), status=_order_status)
+        log_event(
+            logger,
+            logging.WARNING if _order_status != "FILLED" else logging.INFO,
+            "order_dispatched",
+            f"{decision.symbol}: {_order_status}",
+            symbol=decision.symbol,
+            action=decision.bias,
+            status=_order_status,
+            route="pending" if use_limit else "market",
+            volume=lots,
+            duration_ms=_order_timer.elapsed_ms,
+        )
 
         # §2: Re-anchor SL/TP to actual fill price if slippage occurred
         if res and res.get("status") == "FILLED":

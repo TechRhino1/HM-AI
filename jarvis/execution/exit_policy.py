@@ -54,7 +54,6 @@ DEFAULT_FAST_CASH_VOLUME_PCT = 0.50
 DEFAULT_BE_BUFFER_PCT = 0.05      # buffer above/below entry when locking BE
 DEFAULT_RUNNER_TRAIL_ATR = 1.2    # trail width in ATR once running
 DEFAULT_TRAIL_ACTIVATION_R = 2.0  # only start trailing beyond +2R
-DEFAULT_PARTIAL_R = 0.75
 
 
 @dataclass

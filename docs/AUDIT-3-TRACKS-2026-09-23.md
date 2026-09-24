@@ -1183,6 +1183,61 @@ symbol-set change.
 
 ---
 
+## Q — A timed-out analyst is counted as a neutral reading
+
+**The defect.** `ParallelAnalystCluster.run_all_parallel` substitutes a NEUTRAL
+`score=50.0` `AnalystReport` whenever an analyst raises or times out. That fabricated
+50.0 was averaged into `ai_score` exactly as if a real analyst had returned it:
+
+```python
+ai_score = sum(r.score for r in analyst_reports.values()) / max(1, len(analyst_reports))
+```
+
+`ai_score` is **not a soft input** — it is a hard gate compared at
+70/72/75/78/80/82/85 (`decision_engine.py:528,557,562,567,588,615,621,627,651,663`), and it is
+also fed to `ai_dissector.dissect(...)` and `master_confluence.score(...)`, whose outputs
+(`dissection_score`, `master_score`) **are** recorded in the scan columns.
+
+The fallback's `evidence` entry, `"<ROLE> timeout / neutral fallback"`, was extended
+**unfiltered** into `primary_evidence` by `HypothesisEngine.construct_hypotheses`
+(`hypothesis_engine.py:23-26`) — so a note about *our process* was presented as market
+evidence about the asset. And `total_score` (`hypothesis_engine.py:40`), the denominator of
+the confluence ratio, summed the fabricated 50 as well.
+
+**Why it is not a rare edge case.** The cluster allows the analyst **2.0s**, while the news
+fetch MACRO calls synchronously allows **5s and 6s** behind a 90s TTL (measured cold path
+**14.98s**, MyFxBook backed off **3.91s**, healthy **~1.00s** — §O). On a merely slow
+network the fallback is the **expected** outcome, not an exception.
+
+| Consumer | Before | After |
+|---|---|---|
+| `ai_score` | fabricated 50 averaged in | excluded (`_blended_ai_score`) |
+| `primary_evidence` | timeout marker quoted as evidence | flagged reports dropped |
+| `total_score` (confluence denom.) | fabricated 50 summed | flagged reports dropped |
+
+**The fix.** `AnalystReport.is_fallback` (default `False`, so every real construction and
+every older object is unaffected), set by the **one** fallback constructor. A shared helper
+`schemas.answered_reports()` is the single filter, so the two front ends cannot drift apart.
+`decision_engine` gains `_blended_ai_score()` — the inline mean, extracted so it is
+testable — which averages only analysts that ran.
+
+**Fail-open is preserved.** A partial panel still trades; it is simply a *smaller* panel
+rather than a padded one. The degenerate case (nothing answered) returns `0.0`, which fails
+every gate. Substituting a neutral 50 there would be inventing the very reading we lack.
+
+**Evidence.** `tests/test_analyst_fallback_provenance.py` — 16 tests, each driving the REAL
+fallback constructor and the REAL aggregation. Two mutations prove the fix is load-bearing:
+removing the filter kills **6** tests; not setting the flag kills **3**. Magnitude: one
+fabricated 50 in the confluence denominator moved `primary_probability` from **0.75 to
+0.65** — a ten-point swing produced by a value nobody produced.
+
+**Scope, stated honestly.** This removes an invented input from a hard gate. It does **not**
+make the population profitable — §P stands. Its direction on trade count is *not
+measurable* from stored data, because `ai_score` is never persisted (§P). It can raise or
+lower `ai_score` depending on whether the real analyst would have scored above or below 50.
+
+---
+
 ## Test status today
 
 | Check | Result |

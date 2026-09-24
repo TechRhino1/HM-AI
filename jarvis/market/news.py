@@ -17,6 +17,12 @@ from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Any, ClassVar
 
 from jarvis.common.http import read_bounded
+from jarvis.observability import log_event
+from jarvis.observability.instruments import (
+    NEWS_CALENDAR_SERVED,
+    NEWS_FETCHES,
+    NEWS_FETCH_LATENCY,
+)
 
 logger = logging.getLogger("HM_LiveNewsEngine")
 
@@ -149,10 +155,15 @@ class LiveNewsEngine:
         with self._lock:
             now = time.time()
             if not force_refresh and self._cached_news and (now - self._last_fetch_time) < self.cache_ttl_sec:
+                NEWS_CALENDAR_SERVED.inc(origin="cached")
                 return self._organize_news_feed(self._cached_news)
 
         if max_wait is None:
             events = self._fetch_all_live_sources()
+            # Instrumented: `synthetic` here means the deterministic calendar,
+            # which drives a hard MACRO gate. Counting it is the only way to
+            # know how often that gate is decided by data no feed produced.
+            NEWS_CALENDAR_SERVED.inc(origin="live" if events else "synthetic")
             if not events:
                 events = self._generate_dynamic_calendar()
 
@@ -168,9 +179,15 @@ class LiveNewsEngine:
             if self._refresh_in_flight:
                 # Someone is already fetching. Do not pile on -- serve what we have.
                 if self._cached_news:
+                    NEWS_CALENDAR_SERVED.inc(origin="cached")
                     return self._organize_news_feed(self._cached_news)
+                NEWS_CALENDAR_SERVED.inc(origin="synthetic")
                 return self._organize_news_feed(self._generate_dynamic_calendar())
             self._refresh_in_flight = True
+            # A caller on a latency budget (the MACRO analyst has 2.0s) is served
+            # whatever is already cached while the refresh runs. Counting that is
+            # what separates "we have real news" from "we have a calendar".
+            NEWS_CALENDAR_SERVED.inc(origin="cached" if self._cached_news else "synthetic")
 
         done = threading.Event()
 
@@ -235,7 +252,9 @@ class LiveNewsEngine:
         # spacing 0, 0, 80, 80 items while recovering from a burst.
         now_mono = time.monotonic()
         if now_mono < self._fe_backoff_until:
+            NEWS_FETCHES.inc(source="faireconomy", outcome="skipped")
             return []
+        _fe_timer = NEWS_FETCH_LATENCY.time(source="faireconomy")
         try:
             req = urllib.request.Request(self.FAIRECONOMY_URL, headers=headers)
             with urllib.request.urlopen(req, context=self._ctx, timeout=5) as resp:
@@ -281,17 +300,26 @@ class LiveNewsEngine:
                     "event_dt": event_dt,
                     "timestamp_iso": event_dt.isoformat()
                 })
+            _fe_timer.stop()
+            NEWS_FETCHES.inc(source="faireconomy", outcome="ok" if parsed else "empty")
+            log_event(logger, logging.DEBUG, "news_source_fetched",
+                      f"faireconomy: {len(parsed)} event(s)",
+                      source="faireconomy", outcome="ok" if parsed else "empty",
+                      duration_ms=_fe_timer.elapsed_ms)
             return parsed
         except Exception as e:
+            _fe_timer.stop()
             # A 429 is not a transient glitch -- it is a cooldown. Backing off is
             # what lets the feed come back; hammering is what kept it 429-ing.
             if getattr(e, "code", None) == 429:
                 self._fe_backoff_until = time.monotonic() + self.RATE_LIMIT_BACKOFF_SEC
+                NEWS_FETCHES.inc(source="faireconomy", outcome="rate_limited")
                 logger.warning(
                     "FairEconomy rate-limited (HTTP 429). Backing off for %.0fs; "
                     "the news calendar will be synthetic until then.",
                     self.RATE_LIMIT_BACKOFF_SEC)
             else:
+                NEWS_FETCHES.inc(source="faireconomy", outcome="error")
                 logger.debug(f"FairEconomy news fetch error: {e}")
             return []
 
@@ -301,7 +329,9 @@ class LiveNewsEngine:
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
         }
         if time.monotonic() < self._mfb_backoff_until:
+            NEWS_FETCHES.inc(source="myfxbook", outcome="skipped")
             return []
+        _mfb_timer = NEWS_FETCH_LATENCY.time(source="myfxbook")
         try:
             req = urllib.request.Request(self.MYFXBOOK_URL, headers=headers)
             with urllib.request.urlopen(req, context=self._ctx, timeout=6) as resp:
@@ -359,9 +389,12 @@ class LiveNewsEngine:
                     "event_dt": event_dt,
                     "timestamp_iso": event_dt.isoformat()
                 })
-            
+
+            _mfb_timer.stop()
+            NEWS_FETCHES.inc(source="myfxbook", outcome="ok" if parsed else "empty")
             return parsed
         except Exception as e:
+            _mfb_timer.stop()
             # MyFxBook sits behind a Cloudflare challenge that `urllib` can never
             # pass -- it executes no JavaScript. Measured: HTTP 403, body
             # "Just a moment...", every time. So this is not a transient error,
@@ -371,11 +404,13 @@ class LiveNewsEngine:
             # lapses, the next attempt after the window will find out.
             if getattr(e, "code", None) in (403, 401, 404):
                 self._mfb_backoff_until = time.monotonic() + self.BLOCKED_SOURCE_BACKOFF_SEC
+                NEWS_FETCHES.inc(source="myfxbook", outcome="blocked")
                 logger.warning(
                     "MyFxBook is blocked (HTTP %s, Cloudflare challenge). Skipping it "
                     "for %.0fs -- urllib cannot pass a JavaScript challenge.",
                     getattr(e, "code", None), self.BLOCKED_SOURCE_BACKOFF_SEC)
             else:
+                NEWS_FETCHES.inc(source="myfxbook", outcome="error")
                 logger.debug(f"MyFxBook news fetch error: {e}")
             return []
 

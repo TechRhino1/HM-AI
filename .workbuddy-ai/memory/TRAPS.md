@@ -2076,3 +2076,62 @@ the same four symbols used elsewhere. Instrument validated first against §J's e
 **Conclusion.** The cost lever is adverse (§J). No `tp_r`, no ranking variable, and no threshold turns this
 population positive. **The lever is the entry model — a strategy change, not a bug fix.** Anything that
 reports otherwise from this data is measuring a symbol trend, not an edge.
+
+## §Q — A timed-out analyst is counted as a neutral reading (detail)
+
+`ParallelAnalystCluster.run_all_parallel` substitutes a NEUTRAL `score=50.0` `AnalystReport`
+when an analyst raises or times out (`parallel_runner.py:102`). That fabricated 50 was
+averaged into `ai_score` exactly like a real reading, and `ai_score` is a **hard gate**
+compared at 70/72/75/78/80/82/85 (`decision_engine.py:528,557,562,567,588,615,621,627,651,663`).
+It also feeds `ai_dissector.dissect()` and `master_confluence.score()`, whose outputs
+(`dissection_score`, `master_score`) **are** recorded in the scan columns — so unlike
+`ai_score` itself, there is an observable downstream channel.
+
+**Two mis-consumptions, not one.** Besides the score, the fallback's `evidence` entry
+`"<ROLE> timeout / neutral fallback"` was extended **unfiltered** into `primary_evidence`
+(`hypothesis_engine.py:23-26`) — a note about our process presented as market evidence about
+the asset. And `total_score` (`:40`), the confluence denominator, summed the fabricated 50.
+
+**The earlier round had already half-fixed this**, and the half-fix is instructive: the
+fallback was logged, `confidence` was set to 0.0, and the marker was put in `evidence`. But
+`AnalystReport.confidence` has **no consumer** in `jarvis/`, and `evidence` was read *without
+a fallback or bias filter*. So the label existed and nothing read it.
+
+**The lesson, generalised: a label nobody reads is not a label.** A warning in a log line and
+a string in a prose field are *visibility*, not *control*. Marking structurally
+(`is_fallback`) and filtering at the consumer (`answered_reports`) is what actually changes
+behaviour. The earlier comment even said the marker was "the only thing downstream can
+inspect" — and nothing inspected it.
+
+**Why it fires often.** The cluster allows the analyst **2.0s**; the news fetch MACRO calls
+synchronously allows **5s and 6s** behind a 90s TTL (cold **14.98s**, MyFxBook backed off
+**3.91s**, healthy **~1.00s**). So the fallback is the expected outcome on a merely slow
+machine, not an edge case.
+
+**Fix.** `AnalystReport.is_fallback` (default False — every real construction and older
+object unaffected), set by the ONE fallback constructor. Shared helper
+`schemas.answered_reports()` is the single filter, so the two front ends cannot drift apart.
+`decision_engine._blended_ai_score()` replaces the inline mean, extracted so it is testable.
+
+**Fail-open preserved.** A partial panel still trades, on a SMALLER panel rather than a padded
+one. Degenerate case (nothing answered) = 0.0, failing every gate — because substituting a
+neutral 50 there would be inventing the very reading we lack.
+
+**Evidence.** `tests/test_analyst_fallback_provenance.py`, 16 tests driving the REAL
+constructor and REAL aggregation. Two mutations: removing the filter kills 6, not setting the
+flag kills 3. One fabricated 50 in the confluence denominator moved `primary_probability`
+**0.75 → 0.65**.
+
+**Scope, honestly.** Removes an invented input from a hard gate. Does NOT make the population
+profitable (§P stands). Its direction on trade count is **unmeasurable** from stored data
+because `ai_score` is never persisted.
+
+### Still open — the Devil's Advocate recorded-column conflation
+
+The Devil's Advocate fallback sets `penalty_score=0.0`, which PASSES the adversarial guard
+(`decision_engine:644`, `penalty_score <= 43.0`) and is recorded as `adversarial_penalty`
+(`signal_scan.py:315`), where **0.0 is indistinguishable from "the critic examined this and
+found nothing wrong"**. `critique_confidence` (0.0 on fallback) is NOT in `CANDIDATE_COLUMNS`
+(`signal_scan.py:60`), so the conflation cannot be resolved from stored data. Deliberately
+NOT fixed: adding a column changes the candidate-cache schema that §P's instrument
+(`tools/audit_selectivity_edge.py`) validates against, so it needs its own decision.

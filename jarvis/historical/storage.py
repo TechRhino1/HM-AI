@@ -28,16 +28,6 @@ OHLCV_SCHEMA = pa.schema([
     ("real_volume", pa.int64()),
 ])
 
-TICK_SCHEMA = pa.schema([
-    ("time", pa.timestamp("ns", tz="UTC")),
-    ("bid", pa.float64()),
-    ("ask", pa.float64()),
-    ("last", pa.float64()),
-    ("volume", pa.float64()),
-    ("flags", pa.int64()),
-])
-
-
 class StorageEngine:
     """
     Manages physical storage of historical market data in Parquet format,

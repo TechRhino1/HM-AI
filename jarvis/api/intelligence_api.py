@@ -305,9 +305,6 @@ class BacktestJob:
             out["result"] = self.result
         return out
 
-    def summary_line(self) -> str:
-        return f"[{self.status}] {self.label or self.id}"
-
 
 class BacktestJobManager:
     """Serialised, cancellable job queue for optimiser runs.

@@ -27,6 +27,8 @@ import threading
 import time
 from typing import Any, Dict, Optional
 
+from jarvis.observability.instruments import BROKER_LOCK_ACQUISITIONS, BROKER_LOCK_WAIT
+
 logger = logging.getLogger("JARVIS_BrokerLock")
 
 DEFAULT_WAIT_SEC = 10.0
@@ -65,8 +67,16 @@ class TrackedRLock:
         if not blocking:
             wait = 0.0
 
+        # Instrumented: `busy` means a broker call never returned and Python
+        # could not interrupt it. Nothing else in the platform distinguishes
+        # "the broker is slow" from "the broker is gone" -- the caller just sees
+        # its own call time out and fall back.
+        _wait_started = time.monotonic()
         got = self._lock.acquire(True, wait) if wait > 0 else self._lock.acquire(False)
+        _waited = time.monotonic() - _wait_started
+        BROKER_LOCK_WAIT.observe(_waited)
         if not got:
+            BROKER_LOCK_ACQUISITIONS.inc(result="busy")
             h = self.health()
             logger.error(
                 "%s lock: waited %.1fs and gave up. Held by %s (task %s) for %.1fs — "
@@ -80,6 +90,7 @@ class TrackedRLock:
                 f"{h['age_sec']:.1f}s"
             )
 
+        BROKER_LOCK_ACQUISITIONS.inc(result="acquired")
         with self._book:
             if self._depth == 0:
                 self._owner_ident = threading.get_ident()
