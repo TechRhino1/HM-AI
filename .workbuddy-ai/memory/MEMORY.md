@@ -38,7 +38,7 @@ is dashboard-only. Routes: **`TRAPS.md`**.
 
 ## Baselines
 
-**pytest junit `tests=3267 failures=0 errors=0 skipped=2`, 0 failing testcases** (2026-09-24) —
+**pytest junit `tests=3292 failures=0 errors=0 skipped=2`, 0 failing testcases** (2026-09-24) —
 green, not tolerated. Parse `--junit-xml`; the harness truncates stdout so `-rf` never prints.
 
 **NEVER wrap a command in `env`** — `env FOO=bar python -c "print(1)"` prints **nothing**, exit 0: it
