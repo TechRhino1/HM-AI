@@ -1970,3 +1970,109 @@ run looked like 5/7 but proved nothing about mutation 4. Re-running it alone sho
 **When several mutations touch one file, verify each in isolation** before counting it as evidence. A
 kill count from a combined run is an upper bound on what the suite discriminates, not a measurement of
 each mutation.
+
+## Measurement instruments — the narrative detail (moved out of MEMORY.md, rounds 40r–§P)
+
+MEMORY.md keeps four one-line rules; this is what each one actually cost.
+
+### A cache key that does not cover the instrument is a cache that lies
+
+Fixing a harness changes its outputs, so a result cached from the *old* harness is silently served for the
+*new* one. Key on the harness version (a `salt`) as well as on its inputs. The failure is invisible
+because the cache hit looks like a fast, successful run.
+
+### Check the instrument before believing the number
+
+§J's headline reading — "noise in both directions" — came from a harness whose `apply_registry(None)` was
+a no-op. The consequence was not a small bias: **only the FIRST symbol scanned ever had a genuine
+incumbent arm**, so every later symbol was compared against *itself*. The signature is unmistakable once
+you look for it: `A == B` for every symbol except the first.
+
+Corrected, §J is **ADVERSE** (−47…−87 R across 7/8 symbols and 5/5 exit models), and **96% of that delta
+is a VOLUME effect** — 412 extra trades at an unchanged ~−0.2 R each. So for that A/B, **trade count, not
+entry quality, was the lever.** Do not generalise that to the population as a whole: §P (below) shows the
+population has no measured edge at all, which is a different claim about a different population.
+
+### A wall-clock timeout on GIL-bound thread work is load-dependent
+
+MACRO is budgeted **2.0s** while the news fetch it depends on is allowed **5–6s**. The timeout therefore
+fires on a merely *slow* network, not only on a dead one — so the fallback path is the expected path
+whenever the machine is busy. Measured cold-path cost with both news sources live: **14.98s**; with
+MyFxBook backed off: **3.91s**; healthy: **~1.00s**. Against a 2.0s budget that is 7.5× over.
+
+**Retract any claim that a timeout makes behaviour deterministic.** It does not; it makes behaviour a
+function of load.
+
+### A fallback must not claim confidence it does not have
+
+And say plainly when a fix is *visibility only*. `AnalystReport.confidence` has no consumer anywhere in
+`jarvis/`, so changing it changes nothing about trading — only about what a human reads. Claiming
+otherwise turns a cosmetic change into a false statement about risk.
+
+## §O — the fabricated news calendar (detail)
+
+**Two fabrication paths, both unlabelled.**
+
+1. **Total fallback.** `_fetch_all_live_sources()` returns `[]` → `_generate_dynamic_calendar()` returns a
+   **hardcoded 7-event plan** (five of them USD HIGH with `actual == "Upcoming"`).
+2. **Silent padding.** `_organize_news_feed` — *"if there are fewer than 4 upcoming events, append
+   upcoming institutional calendar items"*. So **one real event in → seven items out, six invented.**
+
+**Why it mattered.** `MacroAnalyst` subtracts **−5.0** per USD HIGH event whose `actual == "Upcoming"`. The
+hardcoded plan carries five → a **constant, information-free −25.0**. Measured: MACRO scores **40.0 on the
+live calendar vs 65.0 with no news at all**. `ai_score` is the plain mean of six analysts, so −25 on MACRO
+is **−4.17 on a hard gate** thresholded at 70/72/75/78/80/82/85.
+
+**Second consumer, with conviction.** `evaluate_post_news_sweep_reaction` granted `conviction_boost: 0.20`
+to **both** `calibrated_win_p` and `final_win_p`, **plus `ai_score += 8.0`**. Its filter was
+`is_past and diff_seconds >= -45min and impact in (HIGH, MEDIUM) and symbol affected` — and the plan's
+three Friday-anchored "past" entries carry real-looking `actual` values, so a fabricated event cleared it.
+Proven: with the filter disabled a fabricated event could set the reported bias (`assert 'BULLISH' ==
+'NEUTRAL'`).
+
+**`is_live` is a TIMING flag, not a provenance flag.** It means "this event's shock window is open now", so
+fabricated events carried it and looked real.
+
+**The fix.** Both builders stamp `"is_fallback": True, "source": "synthetic_calendar"`; `_organize_news_feed`
+propagates it per item; `MacroAnalyst` excludes flagged events *before* any scoring and reports the count as
+a risk factor; `evaluate_post_news_sweep_reaction` refuses flagged events; `/api/news` exposes
+`synthetic_count` / `source`; the dashboard shows a source chip. **A labelled fallback beats an unlabelled
+fabrication** — the codebase's own rule, from `tradingview_provider.py`.
+
+**The correction that matters most.** I first reported "both feeds are structurally down" — **that was
+wrong, and self-inflicted.** My probes called `force_refresh=True` every 3s→30s→60s, and each cycle makes
+**two** requests (FairEconomy then MyFxBook), which held FairEconomy inside its rate limit. I was measuring
+my own footprint. Isolated call: **HTTP 200 / 10,849 bytes.** At 90s spacing: **0, 0, 80, 80**, then
+**0, 0, 0, 0, 80, 80** (recovers after ~6 min). MyFxBook *is* genuinely dead to `urllib` (403, Cloudflare JS
+challenge).
+
+**A 429 is a cooldown, not a glitch.** The 90s cache TTL fired straight back into the rate limit, so the
+engine *prolonged* the outage. Fixed with `RATE_LIMIT_BACKOFF_SEC = 600` and
+`BLOCKED_SOURCE_BACKOFF_SEC = 3600`; a blocked source now costs exactly **one** request, not one per cycle.
+
+## §P — no parameter makes this population profitable (detail)
+
+Two independent negatives, both measured.
+
+**1. The ranking variables are inverted.** Replaying the `ex_a` candidate population and keeping each
+selectivity variable beside its realised R:
+
+| variable | top quintile t | verdict |
+|---|---|---|
+| `score` (= `model_confidence`, 0–1) | **−2.78** | top quintile is WORST |
+| `master_score` | **−2.49** | top quintile is WORST |
+| `dissection_score` | **−3.96** | top quintile is WORST |
+
+15 of 16 variable/quantile combinations are negative. Nothing that is *recorded* separates winners from
+losers — and the thing that might (`ai_score`) is **never persisted**: `signal_scan.py` states the
+DecisionObject exposes `model_confidence` and there is no separate blended AI score on the object, so the
+hard gate cannot be audited from stored data at all.
+
+**2. The wide-TP "rescue" is one symbol.** At `tp_r = 6.0` the sweep shows **+258.5 R** — which looks like
+the answer. It is not: it is **WTI alone, 1257 of 2347 trades (54%)**, which simply trended 68→117 in that
+window. It **reverses out-of-sample** (−428.9 R on the 365-day window), and it vanishes when restricted to
+the same four symbols used elsewhere. Instrument validated first against §J's exact `−196.673`.
+
+**Conclusion.** The cost lever is adverse (§J). No `tp_r`, no ranking variable, and no threshold turns this
+population positive. **The lever is the entry model — a strategy change, not a bug fix.** Anything that
+reports otherwise from this data is measuring a symbol trend, not an edge.

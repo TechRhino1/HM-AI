@@ -11,7 +11,11 @@ Rules only; detail elsewhere: **`MASTER_PLAN.md`** (backlog M0–M5), **`AGENT_S
 
 Loses money on real MT5 data; 3/20 beat always-long vs 5 by chance; **DSR > 0.95 met by 0/20** (94,937
 rows = **327 independent bets**). **`AUDIT-2026-09.md`**. **Consume `spread_pips`, never raw `spread` ×
-`pip_size`.**
+`pip_size`.** **No parameter makes it profitable (§P, measured):** the ranking variables are **inverted**
+(top quintile of `score`/`master_score`/`dissection_score` is the WORST, t to −3.96); the wide-TP "rescue"
+is **WTI alone** (54% of trades) and **reverses out-of-sample**; the cost lever is adverse (§J). **The
+lever is the entry model — a strategy change, not a fix.** The gate `ai_score` is **never persisted** —
+unauditable. `tools/audit_selectivity_edge.py`.
 
 ## The news calendar is a FABRICATED input — **check `is_fallback`**
 
@@ -48,7 +52,7 @@ is dashboard-only. Routes: **`TRAPS.md`**.
 
 ## Baselines
 
-**pytest junit `tests=3339 failures=0 errors=0 skipped=2`, 0 failing testcases** (2026-09-24) — green,
+**pytest junit `tests=3350 failures=0 errors=0 skipped=2`, 0 failing testcases** (2026-09-24) — green,
 not tolerated. Parse `--junit-xml`; the harness truncates stdout so `-rf` never prints. **The sandbox's
 bulk-delete guard is per-TURN and cumulative** — after enough deletions a suite run returns ~169 bogus
 `errors` (`SAFE_DELETE_BULK_REJECTED`), which is NOT a regression; a clean run needs an intact budget.
@@ -64,18 +68,12 @@ not the payload.** `nohup &` / `run_in_background` do not survive here. `tools/`
 
 ## Measurement instruments
 
-* **A cache key that does not cover the instrument is a cache that lies.** Fixing a harness changes its
-  outputs, so key on the harness version (a `salt`), not only on its inputs.
-* **Check the instrument before believing the number.** §J's "noise in both directions" came from a
-  harness whose `apply_registry(None)` was a no-op, so **only the FIRST symbol scanned had a genuine
-  incumbent arm** and every later symbol was measured against itself. Signature: `A == B` for all but the
-  first. Corrected, §J is **ADVERSE** (−47…−87 R, 7/8 symbols, 5/5 exit models) — and **96% of it is a
-  VOLUME effect**: 412 extra trades at an unchanged ~−0.2 R each. **Trade count, not entry quality, is
-  the lever here.**
-* **A wall-clock timeout on GIL-bound thread work is load-dependent.** MACRO gets 2.0s while the news
-  fetch allows 5–6s, so the fallback fires on a merely slow network. Retract any "deterministic" claim.
-* **A fallback must not claim confidence it does not have**, and say plainly when a fix is visibility only
-  — `AnalystReport.confidence` has no consumer in `jarvis/`.
+**Key on the harness version (a `salt`), not only on its inputs** — a cache key that omits the instrument
+is a cache that lies. **Check the instrument before believing the number** — §J's first "noise both ways"
+reading was an artefact, and corrected §J is **ADVERSE** (−47…−87 R, 7/8 symbols), **96% of it a VOLUME
+effect**. **A wall-clock timeout on GIL-bound work is load-dependent** — MACRO gets 2.0s, so retract any
+"deterministic" claim. **A fallback must not claim confidence it lacks**; say when a fix is visibility only.
+*Narrative detail: `TRAPS.md` → "Measurement instruments".*
 
 ## Rules worth repeating
 
