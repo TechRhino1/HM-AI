@@ -998,22 +998,33 @@ gate** with thresholds 70/72/75/78/80/82/85
 set by a hardcoded list. It reached the UI too: `/api/news` served this under
 the comment *"Real-Time Institutional Macro News & Economic Calendar"*.
 
-### The feeds really are down (and it is not self-inflicted)
+### What the feeds actually do — a correction
 
-| Source | Response |
+I first concluded "both feeds are structurally down". **That was wrong for
+FairEconomy, and I caused it.** The honest record:
+
+| Source | Behaviour |
 |---|---|
-| FairEconomy `nfs.faireconomy.media` | **HTTP 429**, body `Rate Limited` |
-| MyFxBook `myfxbook.com/rss/…` | **HTTP 403**, body Cloudflare `Just a moment...` |
+| FairEconomy `nfs.faireconomy.media` | **Works.** Isolated call: **HTTP 200, 10,849 bytes**. At 90s spacing: **0, 0, 80, 80** items. But it rate-limits hard under bursty access — **HTTP 429**, body `Rate Limited`, with a cooldown of minutes. |
+| MyFxBook `myfxbook.com/rss/…` | **Genuinely dead to `urllib`.** **HTTP 403**, Cloudflare `Just a moment...` — a JavaScript challenge, so retrying can never fix it. |
 
-MyFxBook cannot be fixed by retrying — it is a JavaScript challenge and
-`urllib` runs no JavaScript.
+My probes called `force_refresh=True` every 3s, then 30s, then 60s. Each cycle
+makes **two** requests (FE then MFB), so I held FairEconomy inside its rate
+limit and measured **my own footprint** as a permanent outage: 6/6, then 5/5,
+then 5/5 synthetic. Only when I stopped probing and asked the feed directly did
+it answer 200 / 10.8 KB. **Fifth broken instrument this session** — after the
+`_PRISTINE` restore, the news-freeze salt, the provenance classifier's wrong
+key, and the "frozen vs live" cache salt.
 
-**Instrument caveat, stated plainly.** The first probe hammered the feed every
-3s and got 6/6 synthetic, which could have been a rate limit I caused. Re-run
-with **60s spacing: 5/5 still synthetic**, so the failure is real. One isolated
-call in a separate process did return 20 real events, so the feeds are
-**intermittent, not permanently dead** — which is worse, because intermittent
-fabrication is harder to notice than a clean outage.
+**So the fabrication is not the steady state — but the defect is unchanged.**
+At production cadence (one FE request per 90s cache TTL) the feed works. The
+hardcoded calendar appears whenever that fetch fails: rate limiting, a network
+blip, or any burst of `force_refresh` callers — and the news page polls
+`/api/news` on the same cache. When it appears it is **unlabelled** and it
+drives a **hard gate**. A silent, fabricated fallback on a decision path is a
+bug whether it fires 1% or 100% of the time, which is why the fix stands.
+What I have **not** measured is the true firing rate in production; the probes
+cannot answer that, because probing is what triggers it.
 
 ### Fixed — `is_fallback`, following `tradingview_provider`'s own precedent
 

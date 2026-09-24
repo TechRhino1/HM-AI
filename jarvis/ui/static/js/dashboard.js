@@ -91,6 +91,8 @@
     news: [],             // events from /api/news, in server order
     newsAt: 0,            // client clock when the calendar arrived
     newsSkew: null,       // ms this machine's clock runs ahead of the server
+    newsSource: null,     // live_feed | mixed | synthetic_calendar, from the API
+    newsSynthetic: 0,     // how many of those events are the hardcoded plan
     newsImpact: 'ALL',    // impact filter
     newsCurrency: 'ALL',  // currency filter
     newsSelected: null,   // key of the event open in the detail panel
@@ -2536,6 +2538,22 @@
     }
   }
 
+  /* Provenance, stated rather than implied. `payload.source` is 'live_feed',
+     'mixed' or 'synthetic_calendar'. The engine substitutes a HARDCODED event
+     plan when the feed is rate-limited or unreachable, so a calendar that looks
+     entirely real may be entirely invented -- and it used to say nothing. */
+  function renderNewsSourceChip() {
+    var chip = $('news-source-chip');
+    if (!chip) return;
+    var src = state.newsSource;
+    if (!src || src === 'live_feed') { chip.hidden = true; return; }
+    chip.hidden = false;
+    chip.className = 'tt-chip tt-chip--high';
+    chip.textContent = (src === 'mixed')
+      ? 'partly synthetic · ' + (state.newsSynthetic || 0)
+      : 'synthetic calendar · feed unavailable';
+  }
+
   /* The countdown cell carries its own anchors so the per-second tick can
      recompute without a lookup into a list that a filter may have changed. */
   function newsCdCell(ev, rem, phase, cls) {
@@ -2595,6 +2613,7 @@
     setText($('news-count'), all.length === rows.length
       ? String(rows.length) : rows.length + ' of ' + all.length);
     renderNewsLiveChip();
+    renderNewsSourceChip();
 
     if (!all.length) {
       setState(host, 'empty', 'No events scheduled',
@@ -2837,6 +2856,7 @@
     });
 
     renderNewsLiveChip();
+    renderNewsSourceChip();
 
     // Promote the next release once the featured one has finished.
     if (newsKey(pickNextEvent()) !== state.newsHeroKey) renderNewsHero();
@@ -2863,6 +2883,11 @@
       var payload = res.data || {};
       var events = Array.isArray(payload.news) ? payload.news : [];
       state.news = events;
+      // Provenance. Older servers do not send these, so a missing value must
+      // read as "unknown" and render no chip -- never as "real".
+      state.newsSource = payload.source || null;
+      state.newsSynthetic = typeof payload.synthetic_count === 'number'
+        ? payload.synthetic_count : 0;
       state.newsAt = Date.now();
 
       // Skew between this machine's clock and the server's, taken from the

@@ -92,6 +92,9 @@ class LiveNewsEngine:
     
     FAIRECONOMY_URL = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
     MYFXBOOK_URL = "https://www.myfxbook.com/rss/forex-economic-calendar-events"
+    #: How long to stop asking after a 429. FairEconomy's cooldown is minutes,
+    #: so the 90s cache TTL would otherwise re-trigger it on every expiry.
+    RATE_LIMIT_BACKOFF_SEC: float = 600.0
     
     COUNTRY_MAP: ClassVar[Dict[str, str]] = {
         "United States": "USD", "US": "USD", "Euro Area": "EUR", "Eurozone": "EUR", "Germany": "EUR",
@@ -112,6 +115,9 @@ class LiveNewsEngine:
         #: Monotonic stamp of the last "the calendar is fabricated" warning, so
         #: the news page's polling does not flood the log with the same fact.
         self._last_fabrication_warn: float = 0.0
+        #: Monotonic stamp before which FairEconomy must not be asked again,
+        #: set after an HTTP 429 so the cooldown can actually elapse.
+        self._fe_backoff_until: float = 0.0
 
     def get_news_calendar(self, force_refresh: bool = False,
                           max_wait: float | None = None) -> List[Dict[str, Any]]:
@@ -215,6 +221,15 @@ class LiveNewsEngine:
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
             "Accept": "application/json"
         }
+        # FairEconomy answers 429 with a "Rate Limited" page and a cooldown of
+        # minutes. Retrying on the 90s cache TTL keeps the pressure on and keeps
+        # the caller stuck on the hardcoded calendar, so back off instead. This
+        # does not make the feed reliable -- it stops us from being the reason
+        # it stays down. Measured: isolated call 200 / 10,849 bytes, and at 90s
+        # spacing 0, 0, 80, 80 items while recovering from a burst.
+        now_mono = time.monotonic()
+        if now_mono < self._fe_backoff_until:
+            return []
         try:
             req = urllib.request.Request(self.FAIRECONOMY_URL, headers=headers)
             with urllib.request.urlopen(req, context=self._ctx, timeout=5) as resp:
@@ -262,7 +277,16 @@ class LiveNewsEngine:
                 })
             return parsed
         except Exception as e:
-            logger.debug(f"FairEconomy news fetch error: {e}")
+            # A 429 is not a transient glitch -- it is a cooldown. Backing off is
+            # what lets the feed come back; hammering is what kept it 429-ing.
+            if getattr(e, "code", None) == 429:
+                self._fe_backoff_until = time.monotonic() + self.RATE_LIMIT_BACKOFF_SEC
+                logger.warning(
+                    "FairEconomy rate-limited (HTTP 429). Backing off for %.0fs; "
+                    "the news calendar will be synthetic until then.",
+                    self.RATE_LIMIT_BACKOFF_SEC)
+            else:
+                logger.debug(f"FairEconomy news fetch error: {e}")
             return []
 
     def _fetch_myfxbook_feed(self) -> List[Dict[str, Any]]:
@@ -526,9 +550,9 @@ class LiveNewsEngine:
                 self._last_fabrication_warn = now_mono
                 logger.warning(
                     "News calendar is %s: %d of %d events are SYNTHETIC "
-                    "(source=%r). Both live feeds failed, so these are hardcoded "
-                    "events, not releases. Anything deriving signal from them must "
-                    "check `is_fallback` first.",
+                    "(source=%r). The live fetch returned nothing, so these are "
+                    "hardcoded events, not releases. Anything deriving signal "
+                    "from them must check `is_fallback` first.",
                     "ENTIRELY fabricated" if n_fab == len(feed) else "PARTLY fabricated",
                     n_fab, len(feed), "synthetic_calendar")
 

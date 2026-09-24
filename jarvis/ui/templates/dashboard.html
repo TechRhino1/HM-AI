@@ -503,6 +503,11 @@
         <span class="tt-panel__count" id="news-count">0</span>
         <span class="tt-panel__spacer"></span>
         <span class="tt-chip tt-chip--none" id="news-live-chip">—</span>
+        <!-- Provenance. The engine falls back to a HARDCODED event plan when the
+             feed is rate-limited or unreachable, and it used to look identical to
+             real releases. The API now says which it is, so say it here. Reuses
+             tt-chip--high rather than adding a style, to keep the sheet untouched. -->
+        <span class="tt-chip tt-chip--high" id="news-source-chip" hidden>—</span>
         <label class="tt-sr-only" for="news-impact">Filter by impact</label>
         <select class="tt-select tt-select--compact" id="news-impact">
           <option value="ALL">All impact</option>
