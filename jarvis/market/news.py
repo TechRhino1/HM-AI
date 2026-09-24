@@ -106,23 +106,85 @@ class LiveNewsEngine:
         self._cached_news: List[Dict[str, Any]] = []
         self._last_fetch_time: float = 0.0
         self._ctx = ssl.create_default_context()
+        #: True while a background refresh is running, so a burst of callers
+        #: (a scan calls this once per candidate) cannot spawn a thread each.
+        self._refresh_in_flight: bool = False
 
-    def get_news_calendar(self, force_refresh: bool = False) -> List[Dict[str, Any]]:
-        """Returns fresh macro economic events formatted in IST & UTC with 1 most recent on top."""
+    def get_news_calendar(self, force_refresh: bool = False,
+                          max_wait: float | None = None) -> List[Dict[str, Any]]:
+        """Returns macro economic events formatted in IST & UTC with 1 most recent on top.
+
+        `max_wait` bounds how long this call may block on the network.
+
+        * ``max_wait=None`` (the default) is the original behaviour: fetch
+          synchronously and wait as long as the feed takes. The news page wants
+          exactly this, and every existing caller keeps it.
+        * ``max_wait=<seconds>`` is for callers on a latency budget. The fetch
+          moves to a daemon thread that ALSO refreshes the cache when it lands,
+          so a slow feed costs this caller nothing and the next caller benefits.
+
+        WHY THIS EXISTS. `MacroAnalyst` calls this on the decision path, inside
+        `ParallelAnalystCluster`, which allows it **2.0s**. This method's socket
+        timeouts are 5s and 6s behind a 90s TTL, so on a cache miss the analyst
+        could not finish and was replaced by a **fabricated score-50 NEUTRAL
+        report**. A cache miss was measured at 1.32s -- 66% of the budget before
+        any CPU work. Bounding the wait is what lets the analyst keep real news
+        instead of losing the analyst. See `docs/AUDIT-3-TRACKS-2026-09-23.md`.
+        """
         with self._lock:
             now = time.time()
             if not force_refresh and self._cached_news and (now - self._last_fetch_time) < self.cache_ttl_sec:
                 return self._organize_news_feed(self._cached_news)
 
-        events = self._fetch_all_live_sources()
-        if not events:
-            events = self._generate_dynamic_calendar()
+        if max_wait is None:
+            events = self._fetch_all_live_sources()
+            if not events:
+                events = self._generate_dynamic_calendar()
+
+            with self._lock:
+                if events:
+                    self._cached_news = events
+                    self._last_fetch_time = time.time()
+                return self._organize_news_feed(self._cached_news or self._generate_dynamic_calendar())
+
+        # Bounded path. Prefer stale REAL data to a synthetic calendar, and never
+        # block longer than the caller's budget.
+        with self._lock:
+            if self._refresh_in_flight:
+                # Someone is already fetching. Do not pile on -- serve what we have.
+                if self._cached_news:
+                    return self._organize_news_feed(self._cached_news)
+                return self._organize_news_feed(self._generate_dynamic_calendar())
+            self._refresh_in_flight = True
+
+        done = threading.Event()
+
+        def _refresh() -> None:
+            try:
+                events = self._fetch_all_live_sources()
+                if events:
+                    with self._lock:
+                        self._cached_news = events
+                        self._last_fetch_time = time.time()
+            except Exception as exc:
+                # Never let a background refresh kill the process or the caller.
+                logger.warning("Background news refresh failed (%s: %s); "
+                               "keeping the cached calendar.", type(exc).__name__, exc)
+            finally:
+                with self._lock:
+                    self._refresh_in_flight = False
+                done.set()
+
+        threading.Thread(target=_refresh, name="news_refresh", daemon=True).start()
+        done.wait(max(0.0, float(max_wait)))
 
         with self._lock:
-            if events:
-                self._cached_news = events
-                self._last_fetch_time = time.time()
-            return self._organize_news_feed(self._cached_news or self._generate_dynamic_calendar())
+            if self._cached_news:
+                return self._organize_news_feed(self._cached_news)
+        # Cold start with a slow feed: no real data exists yet, so this is the one
+        # case that still returns the deterministic calendar. The refresh thread
+        # will populate the cache for the next caller.
+        return self._organize_news_feed(self._generate_dynamic_calendar())
 
     def _fetch_all_live_sources(self) -> List[Dict[str, Any]]:
         """Fetches from FairEconomy and MyFxBook, merging and deduplicating."""

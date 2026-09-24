@@ -233,11 +233,24 @@ def main() -> int:
     ap.add_argument("--tf", default="H1")
     ap.add_argument("--window", type=int, default=183)
     ap.add_argument("--out", default=None)
+    ap.add_argument("--symbols", default=None,
+                    help="comma-separated subset for the sweep/reproduce modes "
+                         "(default: the 8 J2 symbols). Use to run an out-of-sample check "
+                         "on a different data window.")
     ap.add_argument("--no-freeze-news", action="store_true",
                     help="do NOT freeze the macro news calendar during the scan. Reproduces "
                          "production behaviour, where a cache miss makes MACRO time out and be "
                          "replaced by a fabricated NEUTRAL report, so the scan drifts between runs.")
     args = ap.parse_args()
+
+    _syms = ([x.strip().upper() for x in args.symbols.split(",") if x.strip()]
+             if args.symbols else list(J2_SYMBOLS))
+    if args.symbols:
+        unknown = [x for x in _syms if x not in J2_CORRECTED]
+        if unknown:
+            print(f"[warn] no corrected spread entry for {unknown}; "
+                  "they will use the incumbent", flush=True)
+    print(f"[symbols] {_syms}", flush=True)
 
     results = []
     out_path = None
@@ -255,13 +268,13 @@ def main() -> int:
                        "tp_sweep": TPS, "results": results}, fh, indent=2, default=str)
 
     if args.mode == "reproduce":
-        scanned = scan_universe(J2_SYMBOLS, J2_CORRECTED, args.tf, args.window, freeze_news=not args.no_freeze_news)
+        scanned = scan_universe(_syms, J2_CORRECTED, args.tf, args.window, freeze_news=not args.no_freeze_news)
         per, tot = replay_all(scanned, 1.5)
         results.append(report("J2 REPRODUCE -- 8 symbols, tp_r=1.5", per, tot))
         _flush()
 
     elif args.mode == "sweep":
-        scanned = scan_universe(J2_SYMBOLS, J2_CORRECTED, args.tf, args.window)
+        scanned = scan_universe(_syms, J2_CORRECTED, args.tf, args.window, freeze_news=not args.no_freeze_news)
         for tp in TPS:
             per, tot = replay_all(scanned, tp)
             results.append(report(f"J2 symbols -- tp_r={tp}", per, tot))
