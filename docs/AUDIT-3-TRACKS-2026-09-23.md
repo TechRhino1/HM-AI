@@ -23,10 +23,12 @@ is that we no longer know the *mechanical* cause — the stop floor was a false 
 **Consequence:** the top-ranked fix in §D is withdrawn. Phase 5 (stop-floor hardening) is **not
 recommended**, and Phase 7 (FVG) is answered **no**. See §F for what replaces them.
 
-**Later, and still open:** §J's spread-calibration result — the adverse number that justified
-*withholding* that change — **did not reproduce** on re-measurement (§M). Treat §J as unresolved,
-not settled. Also in §M: the EV `spread_cost` term does not reach the gates at all, which
-corrects a claim made earlier in this report.
+**Later, and now CLOSED:** §J's spread-calibration result — the adverse number that justified
+*withholding* that change — **did not reproduce** on re-measurement (§M), and a `tp_r` sweep has since
+shown the effect is **noise in both directions** (§J, status block). The sign crosses zero between
+`tp_r` 2.0 and 2.5, and the largest delta is **0.0011 R/trade**. Nothing was withheld; there is no
+measurable effect to take. Also in §M: the EV `spread_cost` term does not reach the gates at all,
+which corrects a claim made earlier in this report.
 
 ---
 
@@ -493,12 +495,52 @@ harness). Same selection behaviour, different exits — so these are different e
 and that, not the spread change, is what flips the sign of the delta. Note also that WTI alone is
 **+103.081 R** and 46% of §J2's executions, so that total is dominated by one profitable symbol.
 
-**Status: unresolved, and now with a documented reason.** §J2's artefact says adverse; the newer
-harness says favourable; the two disagree because the exit model differs, and §J2's headline
-numbers do not match its own output. Do not treat either as settled, and do not treat the
-favourable number as a green light. It needs one run with both harnesses pinned to the same exit
-model and symbol set. This does **not** affect the A-vs-B′ conclusion above, which is a same-bar,
-same-process paired comparison.
+**Status: RESOLVED 2026-09-24 — the lever is noise in both directions. Do not ship it.**
+
+Re-measured with `.scratch/reconcile_j.py`, which loads §J2's own harness by path (a re-implementation
+would measure my reading of §J2, not §J2), scans each symbol once under both registries, and then
+replays the **same** candidate sets across a `tp_r` sweep. `tp_r` *is* the exit model in `Geometry`
+(be / partial / trail are left disabled exactly as §J2 had them), so the sweep varies only the exit
+model and holds the tree, the symbol set and the data fixed.
+
+**1. The sign is not robust — it crosses zero inside a plausible exit-model range.**
+
+| `tp_r` | ΔTotal R | Sign |
+|---|---|---|
+| 1.0 | −3.154 | ADVERSE |
+| 1.5 | −1.155 | ADVERSE |
+| 2.0 | −0.155 | ADVERSE |
+| 2.5 | **+1.844** | FAVOURABLE |
+| 3.0 | +0.844 | FAVOURABLE |
+
+**2. The magnitude is noise.** The largest |Δ| is **3.15 R over 2,868 trades = 0.0011 R/trade**.
+The whole 5-model range is [−3.15, +1.84] R against a baseline of −270.8 R. This is not a lever
+either way, and it explains why two harnesses could disagree: each was reading a different sign of
+the same zero.
+
+**3. Only 3 of 8 symbols change at all** — BTCUSD, EURUSD, GBPJPY. The other five (USDJPY, AUDUSD,
+EURJPY, and WTI's selection) are byte-identical across every `tp_r`. The executed count moves
+2,868 → 2,859 (−9, or −0.3%) and that −9 is identical at every `tp_r`, as it must be: selection does
+not depend on the exit model.
+
+**4. §J2's artefact is stale against the current tree — and this is the other half of the mystery.**
+The candidate sets match **exactly** (EURUSD 2151/2151, GBPUSD 2198/2198, GBPJPY 2190/2190, AUDUSD
+2309/2309, USDJPY 2350/2350, EURJPY 2266/2266, BTCUSD 3191/3191, WTI 2168/2168) while the **EXECUTE**
+decisions do not (EURUSD 17/22 vs 14/21, GBPUSD 649/649 vs 649/677, GBPJPY 160/161 vs 127/127,
+EURJPY 355/355 vs 286/286, BTCUSD 361/346 vs 346/347). Candidate generation is unchanged; the **gate
+stack moved**. So §J2's numbers describe a code state that no longer exists, and the "1.7× per-trade
+R gap" was never an exit-model difference alone — it also mixed in a tree change and, in the newer
+harness, a 20-vs-8 symbol universe.
+
+Baseline per-trade R at the *same* `tp_r=1.5` on the current tree is **−0.0944** (§J2 artefact:
+−0.0741) — a 1.27× shift from the tree change alone, with the symbol set and exit model held fixed.
+
+**Consequence for the decision: nothing was withheld.** The earlier "adverse" reading did not block a
+profitable change; there is no measurable effect to block or to take. Spread calibration stays off,
+now on evidence rather than on a number that does not reproduce.
+
+This does **not** affect the A-vs-B′ conclusion above, which is a same-bar, same-process paired
+comparison.
 
 Determinism was verified: two identical cross-process runs are byte-identical. The unseeded
 `np.random.beta` in `ensemble_bandit.py:36` / `strategy_bandit.py:89,101` is a red herring —

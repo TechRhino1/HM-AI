@@ -264,9 +264,14 @@ Ranked by measured impact, not by effort:
    windowed-P&L figure was computed from the exit time.
 3. **Do not tune entries.** The measured DSR is 0/20. The honest options are to reduce size, reduce
    frequency, or find a different signal — not to adjust thresholds on a sample with no edge.
-4. **Complete the spread-calibration reconciliation** (§J, unresolved): two harnesses disagree on the
-   sign of the spread-cost lever because they use different exit models. One run with both pinned to the
-   same exit model and symbol set would settle it.
+4. **The spread-calibration lever is closed — it is noise, not an opportunity.** The two harnesses that
+   disagreed on its sign were each reading a different sign of the same zero. Swept across the exit
+   model on a fixed tree, symbol set and data, ΔTotal R runs −3.154 → −1.155 → −0.155 → **+1.844** →
+   +0.844 R as `tp_r` goes 1.0 → 3.0: **the sign crosses zero between 2.0 and 2.5**, and the largest
+   effect is **0.0011 R/trade**. Only 3 of 8 symbols change at all. §J2's artefact is also stale
+   against the current tree (candidate sets match exactly, EXECUTE decisions do not), so its quoted
+   numbers describe code that no longer exists. **Nothing was withheld; there is nothing to take.**
+   Detail and the full table: `docs/AUDIT-3-TRACKS-2026-09-23.md` §J.
 
 ---
 
