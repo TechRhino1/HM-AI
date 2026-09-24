@@ -67,10 +67,26 @@ def _impl(engine):
     return getattr(engine.get_news_calendar, "__func__", engine.get_news_calendar)
 
 
+def _normalise(engine):
+    """Drop any pre-existing instance attribute on the singleton.
+
+    `GLOBAL_NEWS_ENGINE` is module-level, so a test that patches
+    `get_news_calendar` and restores it by ASSIGNING the bound method back leaves
+    a permanent instance attribute behind (that was a real defect in
+    `test_analyst_scoring`, fixed alongside this file). `frozen_news` faithfully
+    restores whatever it found, so a polluted singleton would make the
+    `not in engine.__dict__` assertions below fail for a reason that has nothing
+    to do with the freeze. Normalising first keeps these tests measuring
+    `frozen_news` rather than the previous test's leftovers.
+    """
+    engine.__dict__.pop("get_news_calendar", None)
+
+
 class TestTheContextManagerContract:
     def test_it_restores_the_original_on_exit(self):
         m = _fresh_harness()
         _, engine = _engine()
+        _normalise(engine)
         # Compare the underlying FUNCTIONS, not the bound methods: each attribute
         # access builds a fresh bound-method object, so `is` on those is always
         # False and would assert nothing.
@@ -86,6 +102,7 @@ class TestTheContextManagerContract:
         """A scan that dies must not leave the process serving a frozen calendar."""
         m = _fresh_harness()
         _, engine = _engine()
+        _normalise(engine)
         original_func = _impl(engine)
         with pytest.raises(RuntimeError):
             with m.frozen_news():
@@ -143,7 +160,7 @@ class TestTheFreezeRemovesTheNetworkFromTheMeasurement:
         Without this, the test above could pass for the wrong reason — e.g. if
         `get_news_calendar` had stopped consulting the TTL at all.
         """
-        m = _fresh_harness()
+        _fresh_harness()   # the harness must be importable; the freeze is NOT used
         _, engine = _engine()
         calls = []
         original_fetch = engine._fetch_all_live_sources

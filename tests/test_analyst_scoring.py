@@ -829,7 +829,7 @@ class TestMacroAnalyst:
                    MarketRegime.LIQUIDITY_STRESS, MarketRegime.RANGE):
             assert self.run(reg=rg).score == 65.0
 
-    def test_only_a_missing_calendar_consults_the_global_news_engine(self):
+    def test_only_a_missing_calendar_consults_the_global_news_engine(self, monkeypatch):
         """`news_calendar` used to be coalesced with `or []`, so `[]` was
         indistinguishable from `None` and there was no way to say 'no news' —
         both fell through to `GLOBAL_NEWS_ENGINE`, a live lookup. Only `None`
@@ -837,28 +837,32 @@ class TestMacroAnalyst:
         `parallel_runner.py:47`) should reach the network now."""
         import jarvis.market.news as news
         seen = []
-        orig = news.GLOBAL_NEWS_ENGINE.get_news_calendar
 
         def spy(force_refresh=False):
             seen.append(force_refresh)
             return [{"currency": "USD", "impact": "HIGH", "event": "CPI",
                      "actual": "5", "forecast": "1"}]
 
-        news.GLOBAL_NEWS_ENGINE.get_news_calendar = spy
-        try:
-            assert MacroAnalyst().analyze(ctx(), regime()).bias == "BEARISH"
-            assert len(seen) == 1
+        # monkeypatch, NOT `orig = ...; obj.attr = orig`. `get_news_calendar` is a
+        # CLASS attribute, so assigning the captured bound method back leaves a
+        # permanent instance attribute shadowing it on a module-level singleton.
+        # That polluted every later test in the suite -- it is what made
+        # `test_scan_news_freeze` fail only in a full run and pass in isolation.
+        # monkeypatch records that the attribute did not exist and deletes it on
+        # teardown, which is the behaviour the `finally` above was reaching for.
+        monkeypatch.setattr(news.GLOBAL_NEWS_ENGINE, "get_news_calendar", spy)
 
-            assert MacroAnalyst(news_calendar=[]).analyze(ctx(), regime()).bias == "NEUTRAL"
-            assert len(seen) == 1
+        assert MacroAnalyst().analyze(ctx(), regime()).bias == "BEARISH"
+        assert len(seen) == 1
 
-            assert MacroAnalyst(news_calendar=[{"currency": "EUR", "impact": "HIGH",
-                                                "event": "X", "actual": "5",
-                                                "forecast": "1"}]).analyze(
-                ctx(), regime()).bias == "NEUTRAL"
-            assert len(seen) == 1
-        finally:
-            news.GLOBAL_NEWS_ENGINE.get_news_calendar = orig
+        assert MacroAnalyst(news_calendar=[]).analyze(ctx(), regime()).bias == "NEUTRAL"
+        assert len(seen) == 1
+
+        assert MacroAnalyst(news_calendar=[{"currency": "EUR", "impact": "HIGH",
+                                            "event": "X", "actual": "5",
+                                            "forecast": "1"}]).analyze(
+            ctx(), regime()).bias == "NEUTRAL"
+        assert len(seen) == 1
 
     def test_a_shock_that_does_not_apply_to_the_symbol_still_blocks_the_fallback(self):
         """AUDNZD is in neither symbol map, so a USD shock sets no bias — yet
@@ -869,18 +873,14 @@ class TestMacroAnalyst:
                                 "actual": "5", "forecast": "1"}])
         assert r.bias == "NEUTRAL"
 
-    def test_a_news_engine_failure_degrades_to_no_news(self):
+    def test_a_news_engine_failure_degrades_to_no_news(self, monkeypatch):
         import jarvis.market.news as news
-        orig = news.GLOBAL_NEWS_ENGINE.get_news_calendar
 
         def boom(force_refresh=False):
             raise RuntimeError("feed down")
 
-        news.GLOBAL_NEWS_ENGINE.get_news_calendar = boom
-        try:
-            r = MacroAnalyst().analyze(ctx(), regime())
-        finally:
-            news.GLOBAL_NEWS_ENGINE.get_news_calendar = orig
+        monkeypatch.setattr(news.GLOBAL_NEWS_ENGINE, "get_news_calendar", boom)
+        r = MacroAnalyst().analyze(ctx(), regime())
         assert r.score == 65.0 and r.bias == "NEUTRAL"
         assert r.risk_factors == []
 
