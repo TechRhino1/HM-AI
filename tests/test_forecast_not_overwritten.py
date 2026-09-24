@@ -27,7 +27,6 @@ import sqlite3
 
 import pytest
 
-from jarvis.data.schema_version import read_version
 from jarvis.intelligence.self_learning import SelfLearningEngine
 
 
@@ -219,4 +218,20 @@ class TestTheWriteSites:
         # The outcome is written with COALESCE so a sync that cannot see the
         # exit deal (an open position) does not erase an outcome the live close
         # path already recorded — see `record_trade_exit`.
-        assert "realized_pnl = COALESCE(?, realized_pnl), executor = ?, timestamp = ?" in src
+        assert "realized_pnl = COALESCE(?, realized_pnl), executor = ?," in src
+
+    def test_the_close_update_does_not_overwrite_the_entry_time(self):
+        """`timestamp` is the ENTRY time and must survive a close.
+
+        This UPDATE used to carry `timestamp = ?` fed with the EXIT deal's time,
+        so every sync rewrote a closed row's entry timestamp to its close second.
+        Measured on data/jarvis_history.db before the fix: 144/144 closed rows
+        had `closed_at == timestamp` (a zero-duration trade with a non-zero
+        P&L), and 33 rows sat out of chronological order because the primary key
+        no longer tracked time. The close time belongs in `closed_at`, which is
+        already written on the line below.
+        """
+        src = self._source()
+        assert "executor = ?, timestamp = ?" not in src, (
+            "the close UPDATE is rewriting the entry timestamp again"
+        )

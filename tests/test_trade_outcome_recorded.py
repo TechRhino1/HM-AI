@@ -310,3 +310,104 @@ class TestSyncRecordsTheExitPrice:
             assert row["exit_price"] is None
         finally:
             db.close()
+
+
+class TestSyncDoesNotDestroyTheEntryTime:
+    """A close must not rewrite WHEN THE TRADE OPENED.
+
+    The close UPDATE carried `timestamp = ?` fed with the EXIT deal's time, so
+    every sync moved a closed row's timestamp forward to its close second while
+    the row kept its id. Measured on data/jarvis_history.db before the fix:
+    144/144 closed rows had `closed_at == timestamp` — a zero-duration trade
+    with a non-zero realised P&L — and 33 rows were out of chronological order.
+    The close time belongs in `closed_at`; `timestamp` is the entry time.
+    """
+
+    def _run_sync(self, db, deals):
+        import sys
+        from types import SimpleNamespace
+        from unittest.mock import patch
+
+        fake = SimpleNamespace(
+            terminal_info=lambda: SimpleNamespace(connected=True),
+            initialize=lambda **kw: True,
+            history_deals_get=lambda *a, **k: list(deals),
+        )
+        with patch.dict(sys.modules, {"MetaTrader5": fake}), \
+                patch("jarvis.data.database.broker_utc_offset", return_value=0):
+            db.sync_mt5_history(days=1)
+
+    def _deals(self):
+        import time
+        from types import SimpleNamespace
+
+        # The entry is an hour ago, the exit a minute ago — far enough apart that
+        # "the timestamp moved" cannot be confused with clock granularity.
+        entry_time = int(time.time()) - 3600
+        exit_time = int(time.time()) - 60
+        entry_deal = SimpleNamespace(
+            symbol="EURUSD", position_id=555222999, entry=0, type=0,
+            price=1.1000, volume=0.10, profit=0.0, swap=0.0, commission=0.0,
+            time=entry_time, magic=888999, comment="",
+        )
+        exit_deal = SimpleNamespace(
+            symbol="EURUSD", position_id=555222999, entry=1, type=1,
+            price=1.1088, volume=0.10, profit=42.0, swap=0.0, commission=0.0,
+            time=exit_time, magic=888999, comment="",
+        )
+        return entry_deal, exit_deal
+
+    def test_the_entry_timestamp_survives_a_close(self, tmp_path):
+        import datetime as _dt
+        import sqlite3
+
+        # Read the row with a direct query rather than through
+        # `fetch_recent_trades`. That read path calls `sync_mt5_history`, which
+        # on this box would reach the real terminal, and it also stamps
+        # `_last_mt5_sync` — so the explicit sync below would be swallowed by
+        # the throttle and the test would pass while proving nothing.
+        db_path = str(tmp_path / "sync.db")
+        db = SQLiteTradeDB(db_path=db_path)
+
+        def _stamp():
+            conn = sqlite3.connect(db_path)
+            try:
+                return conn.execute(
+                    "SELECT timestamp, closed_at, realized_pnl FROM executed_trades "
+                    "WHERE ticket = ?", (555111000,)
+                ).fetchone()
+            finally:
+                conn.close()
+
+        try:
+            _open_trade(db, ticket=555111000, position_id=555222999)
+            before = _stamp()[0]
+
+            entry_deal, exit_deal = self._deals()
+            db._last_mt5_sync = 0.0  # defeat the sync throttle explicitly
+            self._run_sync(db, [entry_deal, exit_deal])
+
+            after_ts, closed_at, realized = _stamp()
+            assert after_ts == before, (
+                "the close rewrote the entry timestamp: "
+                f"{before!r} -> {after_ts!r}"
+            )
+            # And it really did record the close, so this is not a no-op test.
+            assert realized == 42.0, "the sync did not record the outcome"
+            assert closed_at is not None, "the sync did not record a close time"
+            assert closed_at != after_ts, (
+                "closed_at and timestamp collapsed onto the same second again"
+            )
+            # `timestamp` is the moment the ENGINE logged the entry (wall
+            # clock), not the broker's entry-deal time — so it need not equal
+            # `entry_time`. The defect was the stamp being *moved forward* to the
+            # exit second; adopting the broker's entry time for a row that
+            # already has one is a separate behaviour change and is deliberately
+            # not made here. What must hold is that the two stamps stay distinct.
+            entry_stamp = _dt.datetime.fromisoformat(after_ts).timestamp()
+            exit_stamp = _dt.datetime.fromisoformat(closed_at).timestamp()
+            assert abs(entry_stamp - exit_stamp) > 1.0, (
+                "the entry timestamp was overwritten with the exit time"
+            )
+        finally:
+            db.close()

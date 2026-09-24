@@ -644,7 +644,31 @@ class SQLiteTradeDB:
                 dt_str = datetime.fromtimestamp(
                     float(target_time) - broker_offset, timezone.utc
                 ).isoformat()
-                
+
+                # The ENTRY time is a different fact, from a different deal.
+                #
+                # Deriving both from `target_deal` is what destroyed every entry
+                # timestamp in the journal: `dt_str` is the CLOSE time whenever
+                # the position has closed, and the close UPDATE below wrote it
+                # into `timestamp`. A row therefore kept its id while its
+                # timestamp jumped forward to the exit second. Measured on
+                # data/jarvis_history.db: 144/144 closed rows had
+                # `closed_at == timestamp` — a zero-duration trade with a
+                # non-zero realised P&L, which is arithmetically impossible —
+                # and 33 rows sat out of chronological order, because the
+                # primary key no longer tracked time. Hold time, session
+                # attribution and the `days=N` history window were all reading
+                # the exit time as if it were the entry.
+                #
+                # `entry_deal.time` is the fill that actually opened the
+                # position. When there is no entry deal the row is being
+                # reconstructed from a partial history and `target_deal` is the
+                # best available anchor.
+                entry_time = entry_deal.time if entry_deal else target_deal.time
+                entry_dt_str = datetime.fromtimestamp(
+                    float(entry_time) - broker_offset, timezone.utc
+                ).isoformat()
+
                 # Determine executor (BOT vs MANUAL)
                 magic_num = getattr(target_deal, "magic", 0)
                 raw_comment = str(exit_deal.comment if exit_deal else target_deal.comment or "")
@@ -719,7 +743,7 @@ class SQLiteTradeDB:
                     conn.execute('''
                         INSERT INTO executed_trades (ticket, position_id, origin, execution_mode, symbol, action, entry_price, sl, tp, volume, timestamp, ai_score, regime, expected_value, exit_price, realized_pnl, executor, closed_at)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ''', (pid, pid, "broker", "live", clean_sym, side, entry_p, sl_val, tp_val, vol, dt_str, None, regime_str, None, exit_p, pnl, exec_label,
+                    ''', (pid, pid, "broker", "live", clean_sym, side, entry_p, sl_val, tp_val, vol, entry_dt_str, None, regime_str, None, exit_p, pnl, exec_label,
                           dt_str if exit_deal else None))
                 else:
                     # Update realized PnL, executor, and close timestamp for completed positions.
@@ -739,9 +763,15 @@ class SQLiteTradeDB:
                     # `self_learning` was averaging the very thing it was supposed
                     # to predict. The forecast is written once, at open, and is
                     # left alone here.
+                    # `timestamp` is deliberately NOT updated. It is the ENTRY
+                    # time and this UPDATE only ever runs for a row that already
+                    # exists, i.e. one whose entry time was written when the
+                    # trade opened. Writing `dt_str` (the exit time) here was
+                    # silently rewriting it — see the `entry_dt_str` note above.
+                    # The close time has its own column, `closed_at`.
                     conn.execute('''
                         UPDATE executed_trades
-                        SET realized_pnl = COALESCE(?, realized_pnl), executor = ?, timestamp = ?,
+                        SET realized_pnl = COALESCE(?, realized_pnl), executor = ?,
                             -- The exit price, when the closing deal carried one.
                             -- COALESCE for the same reason as `realized_pnl`: a
                             -- sync that cannot see the exit deal must not erase an
@@ -756,7 +786,7 @@ class SQLiteTradeDB:
                             sl = CASE WHEN ? > 0 THEN ? ELSE sl END,
                             tp = CASE WHEN ? > 0 THEN ? ELSE tp END
                         WHERE id = ?
-                    ''', (pnl, exec_label, dt_str, exit_p,
+                    ''', (pnl, exec_label, exit_p,
                           pid, pid,
                           dt_str if exit_deal else None, dt_str if exit_deal else None,
                           sl_val, sl_val, tp_val, tp_val, row[0]))
