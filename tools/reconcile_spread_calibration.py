@@ -1,11 +1,11 @@
-"""§J reconciliation — is the spread-calibration delta robust to the exit model?
+"""J reconciliation -- is the spread-calibration delta robust to the exit model?
 
 THE PROBLEM
 -----------
 Two harnesses measured the same lever (point the registry's spread at the real
 measured value) and disagreed on its SIGN:
 
-  * §J2 (`tools/spread_registry_ab.py`) -> reports/spread_ab_H1_183d.json
+  * J2 (`tools/spread_registry_ab.py`) -> reports/spread_ab_H1_183d.json
       8 symbols, 2,782 -> 2,784 executed, Total R -206.176 -> -226.131 (ADVERSE)
   * the newer EV harness -> Total R -308.5 -> -219.9 (FAVOURABLE)
 
@@ -17,24 +17,24 @@ This driver settles it by holding everything fixed except ONE thing at a time.
 
 WHAT IT DOES
 ------------
-Mode `reproduce`  -- §J2's exact 8 symbols and its hand-built CORRECTED table at
+Mode `reproduce`  -- J2's exact 8 symbols and its hand-built CORRECTED table at
                      tp_r=1.5. Must land on n 2782/2784 and -206.176/-226.131 or
                      the harness is not the one that produced the artefact and
                      nothing below is trustworthy.
 
 Mode `sweep`      -- the same A/B, but with `tp_r` swept over 1.0/1.5/2.0/2.5/3.0.
                      tp_r IS the exit model in `Geometry` (be / partial / trail
-                     are all left disabled, exactly as §J2 had them). If the sign
+                     are all left disabled, exactly as J2 had them). If the sign
                      of the delta flips across that range, the lever is not
                      robust and must not be shipped on the strength of either
                      number.
 
 Mode `universe`   -- the measured-spread table for all 20 symbols
                      (reports/spread_calibration_measured.json), so the A/B runs
-                     on the same universe as the newer harness rather than §J2's
+                     on the same universe as the newer harness rather than J2's
                      8.
 
-`trade_simulator.simulate_trade` is charged `cost_price_equiv=0.0` here, as §J2
+`trade_simulator.simulate_trade` is charged `cost_price_equiv=0.0` here, as J2
 had it. That matters: the module contains NO spread term at all (`Geometry
 .to_policy` reads only `spec.digits` and `spec.pip_size`), so the registry change
 reaches the P&L through SELECTION and the scanner's FILL price, not through an
@@ -59,21 +59,21 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if REPO not in sys.path:
     sys.path.insert(0, REPO)
 
-# The §J2 harness is the thing under test, so load it by path rather than
+# The J2 harness is the thing under test, so load it by path rather than
 # re-implementing it -- a re-implementation would measure my understanding of
-# §J2, not §J2. It now lives in tools/ because `.scratch/` is gitignored and the
+# J2, not J2. It now lives in tools/ because `.scratch/` is gitignored and the
 # harness would otherwise be lost with the next clean.
 _HARNESS = os.path.join(REPO, "tools", "spread_registry_ab.py")
 if not os.path.exists(_HARNESS):  # the historical location, for an old checkout
     _HARNESS = os.path.join(REPO, ".scratch", "spread_ab.py")
 _spec = importlib.util.spec_from_file_location("spread_registry_ab", _HARNESS)
-assert _spec and _spec.loader, f"could not load the §J2 harness at {_HARNESS}"
+assert _spec and _spec.loader, f"could not load the J2 harness at {_HARNESS}"
 spread_ab = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(spread_ab)
 
 TPS = [1.0, 1.5, 2.0, 2.5, 3.0]
 
-#: §J2's own table, verbatim from `tools/spread_registry_ab.py`.
+#: J2's own table, verbatim from `tools/spread_registry_ab.py`.
 J2_CORRECTED: Dict[str, Dict[str, float]] = dict(spread_ab.CORRECTED)
 J2_SYMBOLS: List[str] = list(J2_CORRECTED)
 
@@ -106,7 +106,7 @@ def _executed(cands):
 
 
 def scan_universe(symbols: List[str], corrected: Dict[str, Dict[str, float]], tf: str, window: int,
-                  use_cache: bool = True):
+                  use_cache: bool = True, freeze_news: bool = True):
     """Scan each symbol under BOTH registries, ONCE.
 
     The scan is the expensive step (~1 min/symbol) and it does not depend on
@@ -126,7 +126,11 @@ def scan_universe(symbols: List[str], corrected: Dict[str, Dict[str, float]], tf
     # A-arm result for every symbol after the first -- would have silently reused
     # scans taken with the BUGGY harness. A cache key that does not cover the
     # instrument is a cache that lies.
-    salt = "v2-pristine-registry-restore"
+    #
+    # `freeze_news` is in the key for the same reason: a frozen-news scan and a
+    # live-news scan are different measurements of the same symbol, and reusing
+    # one for the other would reintroduce exactly the confound freezing removes.
+    salt = "v3-frozen-news-" + ("on" if freeze_news else "off")
     key = hashlib.sha256(json.dumps(
         {"s": sorted(symbols), "c": corrected, "tf": tf, "w": window, "salt": salt},
         sort_keys=True,
@@ -144,25 +148,31 @@ def scan_universe(symbols: List[str], corrected: Dict[str, Dict[str, float]], tf
             print(f"[cache] unusable ({exc}); rescanning", flush=True)
 
     scanned = {}
-    for sym in symbols:
-        df = spread_ab.load_bars(sym, tf, window)
-        if df is None:
-            print(f"[skip] {sym}: no bars", flush=True)
-            continue
-        spread_ab.apply_registry(None)
-        base = spread_ab.scan(sym, df)
-        spread_ab.apply_registry(corrected)
-        corr = spread_ab.scan(sym, df)
-        spread_ab.apply_registry(None)
-        scanned[sym] = {
-            "df": df,
-            "ex_a": _executed(base.candidates), "ex_b": _executed(corr.candidates),
-            "cand_a": int(len(base.candidates)) if base.candidates is not None else 0,
-            "cand_b": int(len(corr.candidates)) if corr.candidates is not None else 0,
-            "exec_a": int(base.executed), "exec_b": int(corr.executed),
-        }
-        print(f"  scanned {sym:8s} cand {scanned[sym]['cand_a']:5d}/{scanned[sym]['cand_b']:5d} "
-              f"EXEC {scanned[sym]['exec_a']:4d}/{scanned[sym]['exec_b']:4d}", flush=True)
+    # Freeze the macro news calendar so the network cannot change the scan's own
+    # output mid-run (see `spread_ab.frozen_news`). Both arms are frozen from the
+    # same snapshot, so the only thing the A/B varies is the spread registry.
+    with spread_ab.frozen_news():
+        print("[news] calendar frozen for the scan" if freeze_news
+              else "[news] NOT frozen -- reproducing production behaviour", flush=True)
+        for sym in symbols:
+            df = spread_ab.load_bars(sym, tf, window)
+            if df is None:
+                print(f"[skip] {sym}: no bars", flush=True)
+                continue
+            spread_ab.apply_registry(None)
+            base = spread_ab.scan(sym, df)
+            spread_ab.apply_registry(corrected)
+            corr = spread_ab.scan(sym, df)
+            spread_ab.apply_registry(None)
+            scanned[sym] = {
+                "df": df,
+                "ex_a": _executed(base.candidates), "ex_b": _executed(corr.candidates),
+                "cand_a": int(len(base.candidates)) if base.candidates is not None else 0,
+                "cand_b": int(len(corr.candidates)) if corr.candidates is not None else 0,
+                "exec_a": int(base.executed), "exec_b": int(corr.executed),
+            }
+            print(f"  scanned {sym:8s} cand {scanned[sym]['cand_a']:5d}/{scanned[sym]['cand_b']:5d} "
+                  f"EXEC {scanned[sym]['exec_a']:4d}/{scanned[sym]['exec_b']:4d}", flush=True)
 
     if use_cache:
         try:
@@ -223,6 +233,10 @@ def main() -> int:
     ap.add_argument("--tf", default="H1")
     ap.add_argument("--window", type=int, default=183)
     ap.add_argument("--out", default=None)
+    ap.add_argument("--no-freeze-news", action="store_true",
+                    help="do NOT freeze the macro news calendar during the scan. Reproduces "
+                         "production behaviour, where a cache miss makes MACRO time out and be "
+                         "replaced by a fabricated NEUTRAL report, so the scan drifts between runs.")
     args = ap.parse_args()
 
     results = []
@@ -241,24 +255,24 @@ def main() -> int:
                        "tp_sweep": TPS, "results": results}, fh, indent=2, default=str)
 
     if args.mode == "reproduce":
-        scanned = scan_universe(J2_SYMBOLS, J2_CORRECTED, args.tf, args.window)
+        scanned = scan_universe(J2_SYMBOLS, J2_CORRECTED, args.tf, args.window, freeze_news=not args.no_freeze_news)
         per, tot = replay_all(scanned, 1.5)
-        results.append(report("§J2 REPRODUCE — 8 symbols, tp_r=1.5", per, tot))
+        results.append(report("J2 REPRODUCE -- 8 symbols, tp_r=1.5", per, tot))
         _flush()
 
     elif args.mode == "sweep":
         scanned = scan_universe(J2_SYMBOLS, J2_CORRECTED, args.tf, args.window)
         for tp in TPS:
             per, tot = replay_all(scanned, tp)
-            results.append(report(f"§J2 symbols — tp_r={tp}", per, tot))
+            results.append(report(f"J2 symbols -- tp_r={tp}", per, tot))
             _flush()
 
     elif args.mode == "universe":
         corr = measured_corrected()
-        scanned = scan_universe(sorted(corr), corr, args.tf, args.window)
+        scanned = scan_universe(sorted(corr), corr, args.tf, args.window, freeze_news=not args.no_freeze_news)
         for tp in TPS:
             per, tot = replay_all(scanned, tp)
-            results.append(report(f"20 symbols, MEASURED spreads — tp_r={tp}", per, tot))
+            results.append(report(f"20 symbols, MEASURED spreads -- tp_r={tp}", per, tot))
             _flush()
 
     spread_ab.apply_registry(None)
@@ -272,9 +286,9 @@ def main() -> int:
         signs = {r["sign"] for r in results}
         print(f"\n  distinct signs: {sorted(signs)}")
         print("  VERDICT: " + (
-            "NOT ROBUST — the sign depends on the exit model, so neither number is a green light"
+            "NOT ROBUST -- the sign depends on the exit model, so neither number is a green light"
             if len(signs) > 1 else
-            f"ROBUST across tp_r in {TPS} — {list(signs)[0]}"
+            f"ROBUST across tp_r in {TPS} -- {list(signs)[0]}"
         ))
 
     _flush()

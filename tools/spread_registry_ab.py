@@ -19,6 +19,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import contextlib
 import dataclasses
 import json
 import math
@@ -52,7 +53,7 @@ CORRECTED: Dict[str, Dict[str, float]] = {
 
 
 #: The registry as it ships, captured at import BEFORE any override is applied.
-#: This is what makes `apply_registry(None)` a genuine restore — see the note on
+#: This is what makes `apply_registry(None)` a genuine restore -- see the note on
 #: `apply_registry` below.
 _PRISTINE: Dict[str, Any] = dict(reg._REGISTRY)
 
@@ -68,7 +69,7 @@ def apply_registry(overrides: Dict[str, Dict[str, float]] | None) -> None:
 
     so `apply_registry(None)` was a no-op, not a restore. Once
     `apply_registry(CORRECTED)` had run, every later `apply_registry(None)` left
-    the corrected specs in place — and because both `main()` and the
+    the corrected specs in place -- and because both `main()` and the
     reconciliation driver call `apply_registry(None)` before the INCUMBENT scan
     of every symbol, **only the first symbol scanned ever had a genuine incumbent
     arm**. Every other symbol was measured corrected-vs-corrected.
@@ -95,6 +96,62 @@ def load_bars(sym: str, tf: str, window: int):
 
 def scan(sym: str, df: pd.DataFrame):
     return SignalScanner(start_bar_idx=60).scan(df, sym)
+
+
+@contextlib.contextmanager
+def frozen_news():
+    """Freeze the macro news calendar for the duration of a scan.
+
+    WHY THIS EXISTS. `MacroAnalyst` calls `GLOBAL_NEWS_ENGINE.get_news_calendar()`
+    on the decision path. That is a synchronous network fetch (5s and 6s socket
+    timeouts in `jarvis/market/news.py`) sitting behind a 90s cache TTL, while
+    `ParallelAnalystCluster` allows the analyst only 2.0s. On a cache miss the
+    fetch was measured at 1.32s -- 66% of the analyst's entire budget, before any
+    CPU work, competing with six other analysts for the GIL. So on a cache miss
+    the analyst is replaced by a FABRICATED score-50 NEUTRAL report, and because
+    the TTL expiry lands wherever it lands relative to the scan, the scan's own
+    output changes between runs.
+
+    Measured before this was added: AUDUSD under the pristine registry gave
+    EXEC 51 in a clean process (2 reps, 0 fallbacks) and 53 / 56 in runs that
+    logged timeouts. One measurement, three answers.
+
+    Freezing removes the network from the measurement so the ONLY thing varying
+    between the two arms is the spread registry -- which is what the A/B is
+    supposed to isolate. It does not favour either arm: both are frozen from the
+    same snapshot.
+
+    Note this makes the scan MORE reproducible than production, deliberately. It
+    is an instrument, not a model of production; the production defect it papers
+    over (a budget smaller than its dependency's timeout) is tracked separately
+    in `docs/AUDIT-3-TRACKS-2026-09-23.md` J.
+    """
+    import jarvis.market.news as news_mod
+
+    engine = news_mod.GLOBAL_NEWS_ENGINE
+    snapshot = engine.get_news_calendar()   # one real fetch, before freezing
+    # Restore by REMOVING the instance attribute rather than assigning the bound
+    # method back. `engine.get_news_calendar` is a class attribute, so assigning
+    # the captured bound method as an instance attribute leaves a permanent
+    # shadow: functionally the same call, but the object is no longer the one the
+    # class defines, and `is` comparisons (and any future monkeypatch) break.
+    had_instance_attr = "get_news_calendar" in engine.__dict__
+    original = engine.get_news_calendar
+
+    def _frozen(force_refresh: bool = False):  # signature-compatible
+        return snapshot
+
+    engine.get_news_calendar = _frozen
+    try:
+        yield snapshot
+    finally:
+        if had_instance_attr:
+            engine.get_news_calendar = original
+        else:
+            try:
+                del engine.get_news_calendar
+            except AttributeError:
+                pass
 
 
 def replay(sym: str, df: pd.DataFrame, cands: pd.DataFrame, tp_r: float = 1.5):
