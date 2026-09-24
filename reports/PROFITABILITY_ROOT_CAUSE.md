@@ -266,16 +266,18 @@ Ranked by measured impact, not by effort:
    frequency, or find a different signal — not to adjust thresholds on a sample with no edge.
 4. **Trade count is the one lever with a measured magnitude — and it points at "fewer".** The §J sweep
    gives an unusually clean natural experiment: raising `max_spread_pips` (which makes the spread gate
-   more permissive) added **412 trades** and moved total R by **−86.9**. Decomposing that delta into
-   volume vs quality: **volume −83.7 R (96%), quality −3.2 R (4%)**. In **4 of 8 symbols the per-trade
-   result actually improved** (GBPUSD −0.20195 → −0.19626) and the total still fell, because each took
-   more trades. So the engine's per-trade expectancy is ~−0.2 R and nearly insensitive to cost
-   modelling; what moves the total is how often it trades. This is the same conclusion the live data
-   reached in §2 (the bot's −2.46/trade ≈ the backtested −0.074 R/trade × ~$33 risk), and it is the
-   only lever here that does not require finding an edge first. It does **not** follow that tightening
-   the gate makes the strategy profitable — the edge is still absent — only that the way to improve
-   the total without an edge is to take fewer trades, not better-modelled ones. Full table:
-   `docs/AUDIT-3-TRACKS-2026-09-23.md` §J.
+   more permissive) added **408 trades** and moved total R by **−80.5**. Decomposing that delta into
+   volume vs quality: **volume −100.9 R, quality +20.4 R (net −80.5)**. With the measurement's news
+   confound removed, the **per-trade effect is net POSITIVE** — GBPUSD alone contributes +27.8 R of
+   quality, i.e. the corrected spreads genuinely make the trades the engine keeps *better*. It still
+   loses, entirely because it takes 408 more of them at a negative expectancy. In **4 of 8 symbols the
+   per-trade result improves** while the total falls. So the engine's per-trade expectancy is ~−0.2 R
+   and nearly insensitive to cost modelling; what moves the total is how often it trades. This is the
+   same conclusion the live data reached in §2 (the bot's −2.46/trade ≈ the backtested −0.074 R/trade ×
+   ~$33 risk), and it is the only lever here that does not require finding an edge first. It does
+   **not** follow that tightening the gate makes the strategy profitable — the edge is still absent —
+   only that the way to improve the total without an edge is to take fewer trades, not better-modelled
+   ones. Full table: `docs/AUDIT-3-TRACKS-2026-09-23.md` §J.
 4. **The spread-calibration lever is closed — it is ADVERSE, and that is now measured twice.** An
    earlier version of this report called it "noise, not an opportunity", with the sign crossing zero
    between `tp_r` 2.0 and 2.5 and a largest effect of 0.0011 R/trade. **That is withdrawn: it was

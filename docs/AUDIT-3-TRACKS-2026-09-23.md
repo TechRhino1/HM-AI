@@ -33,9 +33,12 @@ the earlier sweep reported "only 3 of 8 symbols change". With the harness fixed 
 
 **So §J's original withholding decision was right after all.** Spread calibration stays off, and this
 time on an instrument that can see the effect. The earlier "nothing was withheld" sentence in this
-report is retracted. Also in §M: the EV `spread_cost` term does not reach the gates at all, which
-corrects a claim made earlier in this report — that finding is unaffected, it was a same-process
-paired comparison.
+report is retracted. A second run with the scan's news confound removed confirms it independently —
+ADVERSE at 5 of 5 exit models (−49.6, −80.5, −84.2, −79.8, −96.3 R), 7 of 8 symbols, 0 fabricated
+readings — and shows the per-trade effect is actually net POSITIVE (+20.4 R), with the loss coming
+entirely from the 408 extra trades the change unlocks. Also in §M: the EV `spread_cost` term does not
+reach the gates at all, which corrects a claim made earlier in this report — that finding is
+unaffected, it was a same-process paired comparison.
 
 ---
 
@@ -589,6 +592,44 @@ quality and not cost modelling.** 412 extra trades cost 84 R at an unchanged per
 not follow that tightening the gate makes the strategy profitable — the edge is still absent (DSR
 0/20) — but it does follow that the only way to improve the total *without* finding an edge is to take
 fewer, not better-modelled, trades.
+
+### Confirmation with the confound removed
+
+The table above was measured before the news freeze existed. Re-run with `frozen_news()` (0 MACRO
+fallbacks, where the unfrozen run logged 3) — same symbols, same data, same exit-model sweep:
+
+| `tp_r` | Δ unfrozen (confounded) | Δ frozen (clean) |
+|---|---|---|
+| 1.0 | −47.452 | **−49.561** |
+| 1.5 | −86.862 | **−80.457** |
+| 2.0 | −85.062 | **−84.189** |
+| 2.5 | −65.815 | **−79.754** |
+| 3.0 | −78.997 | **−96.334** |
+
+Still ADVERSE at 5 of 5, still 7 of 8 symbols, and now with a tighter spread of readings (−49.6 to
+−96.3 rather than −47.5 to −87.0). The verdict does not depend on the confound.
+
+Two details are worth keeping. First, **the freeze moved the incumbent arm, not the corrected one** —
+GBPUSD went 417 → 385 on the A side while B stayed at 649, and EURJPY and BTCUSD were unchanged in
+both arms. So the fabricated NEUTRAL readings were *adding* executions to the incumbent baseline,
+which is why the confounded deltas looked slightly smaller. Second, AUDUSD under the freeze gives
+**51**, matching the clean-process probe's 51 exactly — the freeze reproduces the uncontended
+measurement rather than inventing a third answer.
+
+The decomposition is sharper with the confound gone:
+
+| | unfrozen | frozen |
+|---|---|---|
+| volume | −83.670 R (96%) | **−100.853 R (83%)** |
+| quality | −3.183 R (4%) | **+20.397 R** |
+| total | −86.853 R | **−80.456 R** |
+
+**The quality effect is net POSITIVE once the confound is removed.** GBPUSD alone contributes +27.758 R
+of quality: the corrected spreads genuinely make the trades the engine keeps *better*. The strategy
+still loses, entirely because it takes 408 more of them. "Make the spreads realistic" is therefore not
+a cost-reduction lever that fails — it is a *selectivity* lever that succeeds at per-trade level and is
+drowned by the volume it unlocks. That is a much cleaner statement of the same conclusion, and it is
+the one to carry forward.
 
 ### This restores §J's original decision, and §J2's artefact
 
