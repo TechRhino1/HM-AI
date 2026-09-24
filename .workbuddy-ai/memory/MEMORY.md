@@ -41,8 +41,10 @@ is dashboard-only. Routes: **`TRAPS.md`**.
 
 ## Baselines
 
-**pytest junit `tests=3292 failures=0 errors=0 skipped=2`, 0 failing testcases** (2026-09-24) — green,
-not tolerated. Parse `--junit-xml`; the harness truncates stdout so `-rf` never prints.
+**pytest junit `tests=3308 failures=0 errors=0 skipped=2`, 0 failing testcases** (2026-09-24) — green,
+not tolerated. Parse `--junit-xml`; the harness truncates stdout so `-rf` never prints. **The sandbox's
+bulk-delete guard is per-TURN and cumulative** — after enough deletions a suite run returns ~169 bogus
+`errors` (`SAFE_DELETE_BULK_REJECTED`), which is NOT a regression; a clean run needs an intact budget.
 
 **NEVER wrap a command in `env`** — `env FOO=bar python -c "print(1)"` prints **nothing**, exit 0: it
 swallows whatever it wraps. That, not `--basetemp`, is why pytest "succeeded" with an empty log.
