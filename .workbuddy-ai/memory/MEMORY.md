@@ -1,10 +1,13 @@
 # HM-AI / HM Algo 2.0 — index
 
-Injected every session, **hard-truncated at ~6,520 bytes** — stay under or the tail is lost. Rules only;
-detail lives elsewhere: **`MASTER_PLAN.md`** (backlog, M0–M5), **`AGENT_SYSTEM.md`** (multi-agent),
+Injected every session, **hard-truncated at ~6,520 bytes** — stay under or the tail is lost. (That
+figure is the stated limit; an 8,208-byte version was in fact injected in full on 2026-09-24, so treat
+it as unverified. `UI / mobile` was split into `UI-MOBILE.md` anyway, to keep the tail off the cliff.)
+Rules only; detail elsewhere: **`MASTER_PLAN.md`** (backlog M0–M5), **`AGENT_SYSTEM.md`** (multi-agent),
 **`TRAPS.md`** (every trap), `AUDIT-2026-09.md` (signal quality), `AUDIT-TRADES-2026-09.md` (trade data),
-`YYYY-MM-DD.md` (sessions). Skills: `diagnose-git-push-auth`, `recover-vanished-working-tree`,
-`audit-trading-system-integrity`, `diagnose-layout-defects`.
+`YYYY-MM-DD.md` (sessions), `AUDIT-3-TRACKS-2026-09-23.md` (§J, 3-track audit). Skills:
+`diagnose-git-push-auth`, `recover-vanished-working-tree`, `audit-trading-system-integrity`,
+`diagnose-layout-defects`.
 
 ## Signal quality — **the entry signal has no measured edge.**
 
@@ -38,8 +41,8 @@ is dashboard-only. Routes: **`TRAPS.md`**.
 
 ## Baselines
 
-**pytest junit `tests=3292 failures=0 errors=0 skipped=2`, 0 failing testcases** (2026-09-24) —
-green, not tolerated. Parse `--junit-xml`; the harness truncates stdout so `-rf` never prints.
+**pytest junit `tests=3292 failures=0 errors=0 skipped=2`, 0 failing testcases** (2026-09-24) — green,
+not tolerated. Parse `--junit-xml`; the harness truncates stdout so `-rf` never prints.
 
 **NEVER wrap a command in `env`** — `env FOO=bar python -c "print(1)"` prints **nothing**, exit 0: it
 swallows whatever it wraps. That, not `--basetemp`, is why pytest "succeeded" with an empty log.
@@ -50,6 +53,24 @@ swallows whatever it wraps. That, not `--basetemp`, is why pytest "succeeded" wi
 ~3.5 min. **A command that "succeeds" instantly with no output — suspect the wrapper, not the payload.**
 `nohup &` / `run_in_background` do not survive here. `tools/` — 12 harnesses, all green.
 
+## Measurement instruments
+
+* **A cache key that does not cover the instrument is a cache that lies.** Fixing a harness changes its
+  outputs, so key on the harness version (a `salt`), not only on its inputs.
+* **Check the instrument before believing the number.** §J's "noise in both directions" came from a
+  harness whose `apply_registry(None)` was a no-op, so **only the FIRST symbol scanned had a genuine
+  incumbent arm** and every later symbol was measured against itself. Signature: `A == B` for all but the
+  first. Corrected, §J is **ADVERSE** (−47…−87 R, 7/8 symbols, 5/5 exit models) — and **96% of it is a
+  VOLUME effect**: 412 extra trades at an unchanged ~−0.2 R each. **Trade count, not entry quality, is
+  the lever here.**
+* **A wall-clock timeout on GIL-bound thread work is load-dependent.** `ParallelAnalystCluster` allows
+  MACRO 2.0s while the news fetch it calls allows 5–6s against a 90s TTL (a miss measured 1.32s = 66% of
+  the budget), so the fallback fires on a merely slow network and substitutes a **fabricated** score-50
+  into a live decision. One symbol+registry gave EXEC **51 / 53 / 56**. Retract any "deterministic" claim
+  made under load.
+* **A fallback must not claim confidence it does not have**, and say plainly when a fix is visibility only
+  — `AnalystReport.confidence` has no consumer in `jarvis/`.
+
 ## Rules worth repeating
 
 * **Execution mode must not gate market data.** Paper skips `mt5.initialize()`, so the data path must call
@@ -59,50 +80,30 @@ swallows whatever it wraps. That, not `--basetemp`, is why pytest "succeeded" wi
 * **A frontend reading a key the server never sends renders the empty state on success** (3×). **A refused
   order is answered with HTTP 200** — decide from the body's `status`, never `res.ok`.
 * **A test can pin a bug, so a green suite is not evidence the bug is gone.** `test_forecast_not_overwritten`
-  asserted the buggy `timestamp = ?` literal — it would have gone red *on the fix*. When you fix a defect,
-  grep the suite for the buggy literal. **`fetch_recent_trades` fires a real sync and stamps
-  `_last_mt5_sync`** — a test that reads a row through it first gets its own sync throttled to a no-op.
+  asserted the buggy `timestamp = ?` literal; `test_parallel_runner` asserted the old `confidence == 0.50` —
+  both would have gone red *on the fix*. When you fix a defect, grep the suite for the buggy literal.
+  **`fetch_recent_trades` fires a real sync and stamps `_last_mt5_sync`** — a test that reads a row through
+  it first gets its own sync throttled to a no-op.
 * **Back up `jarvis_history.db` with `sqlite3.Connection.backup()`, never `cp`** (WAL + live writer).
-* **`executed_trades.timestamp` is not the entry time** — `database.py:287` overwrites it with the EXIT
-  time; **neither column is safe**. `tools/audit_trades.py`. **Shared defect? grep the other front end.**
+* **`executed_trades.timestamp` is not the entry time** — `database.py:287` overwrote it with the EXIT time
+  (fixed 2026-09-24); **neither column is safe**. `tools/audit_trades.py`. **Shared defect? grep the other front end.**
 * **`curl -s -o /dev/null -w '%{http_code}'` exits 23** — an `&&` chain on it silently skips later steps.
 * **A price must be finite AND `> 0`.** `_is_finite(0.0)` is True; an empty frame gives `bid = 0.0`, from
   which a **negative** stop passed the last gate.
-* **`fetch_recent_trades` calls `sync_mt5_history` on every read** — tests get real broker deals. Fix at
-  the fixture boundary with `monkeypatch.setattr`, not by guarding production (broke 4 tests).
-* **Unknown R: withhold a recorded quantity, default a hyperparameter.** Bandit `rewards` is in R → leave
-  it; in `update_online` R only weights the gradient → omit the arg (`None` ⇒ +1R). AI6.
-* **Never count a mutation as evidence until it turns something red** — it may be unreachable, and
-  mutations on one file shadow each other. **"Dead" ≠ "unwired"** (AI9's calibration refuses 11 of 16
-  symbols → opt-in). **No production caller may make a fallback branch the most dangerous code in the
-  file.** **Latent is not a defence** (AI7). **Check the execution mode before the broker call** (A18).
-  Hermeticity needs both ends (AI8). **Detail: `TRAPS.md`.**
+* **`fetch_recent_trades` calls `sync_mt5_history` on every read** — tests get real broker deals. Fix at the
+  fixture boundary with `monkeypatch.setattr`, not by guarding production (broke 4 tests).
+* **Unknown R: withhold a recorded quantity, default a hyperparameter.** Bandit `rewards` is in R → leave it;
+  in `update_online` R only weights the gradient → omit the arg (`None` ⇒ +1R). AI6.
+* **Never count a mutation as evidence until it turns something red** — it may be unreachable, and mutations
+  on one file shadow each other. **"Dead" ≠ "unwired"** (AI9's calibration refuses 11 of 16 symbols →
+  opt-in). **No production caller may make a fallback branch the most dangerous code in the file.**
+  **Latent is not a defence** (AI7). **Check the execution mode before the broker call** (A18). Hermeticity
+  needs both ends (AI8). **Detail: `TRAPS.md`.**
 
 ## UI / mobile
 
-* **Only `dashboard.html` loads `ios_mobile.css`.** `/` and `/dashboard` both serve it (not `index.html`
-  — that is `/classic`), so `/` *looks* fixed while `/stocks /india /options /console` run their own page
-  sheets + `ios_pages.css`. Check which sheet a page loads before believing a fix landed.
-* **`@media (max-width: 1024px)` only *should* mean desktop is untouched — prove it.** At 1440px snapshot
-  `getComputedStyle` per element, `sheet.disabled = true`, snapshot again, diff, in one page load
-  (`.scratch/prove_desktop.js`). Caught a `<span>` wrap recolouring the brand at every width — fix at the
-  source with `:not()`, never by patching colour back in the new sheet.
-* **A page sheet's `!important` beats `hm_ui.css`'s specificity**, so several "unified" rules never
-  applied. Visually-hidden text has 3 class names — `.tt-sr-only`, `.sr-only`, `.cx-visually-hidden`.
-* **A page in `PAGES` is not a page that is measured.** The verifier's market pages ran 3 checks; its
-  `GLASS_SELECTORS` are dashboard-only, so the four glass pages' glass was asserted nowhere. Now a
-  per-page `hud` + 3 checks **gated to `vp.width <= 1024`**. 238/238 → **321/321**.
-* **A server-rendered control whose handler is defined by a later blocking script is dead on arrival.**
-  The dock's inline `onclick="switchMobileXView(...)"` resolves at *click* time, but the handler lives
-  ~400 lines later — so every early tap threw `switchMobileXView is not defined` and did nothing. Reads
-  as **intermittent** (warm-cache smoke test passes; ~1 run in 3 fails). Fixed by `mobile_dock.js` loaded
-  **before** the dock, replaying an early tap via `window.registerMobileView`. `/console` and `/dashboard`
-  were never affected — delegated listeners, no inline `onclick`.
-* **A recorded field that is read but never written silently reverts user state** —
-  `state.activeMobileView` was read by the resize handler and the init in all three controllers, written
-  by only one. **Grep for the write, not just the read.**
-* **`getComputedStyle` reports an animation on a `display:none` element** — a `querySelector` matched a
-  hidden bottom-sheet modal and reported its `slideUpSheet` presentation animation as the content card's
-  entry motion. Filter by `getBoundingClientRect().width > 0`. `slideUpSheet` there is *correct*.
-* **Prove a fix is non-vacuous by reverting it** — removing the bootstrap turned 7 checks red.
-  `tools/verify_mobile_dock.js` holds the controller to force the race. Detail: `2026-09-22.md`.
+Detail: **`UI-MOBILE.md`** (split out 2026-09-24 — it was being truncated off the tail of this
+index). The two that bite most: **check which stylesheet a page loads before believing a fix
+landed** (only `dashboard.html` loads `ios_mobile.css`; `/` *looks* fixed while `/stocks /india
+/options /console` run their own sheets), and **a server-rendered control whose handler is
+defined by a later blocking script is dead on arrival** (reads as *intermittent*).

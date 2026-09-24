@@ -23,12 +23,19 @@ is that we no longer know the *mechanical* cause — the stop floor was a false 
 **Consequence:** the top-ranked fix in §D is withdrawn. Phase 5 (stop-floor hardening) is **not
 recommended**, and Phase 7 (FVG) is answered **no**. See §F for what replaces them.
 
-**Later, and now CLOSED:** §J's spread-calibration result — the adverse number that justified
-*withholding* that change — **did not reproduce** on re-measurement (§M), and a `tp_r` sweep has since
-shown the effect is **noise in both directions** (§J, status block). The sign crosses zero between
-`tp_r` 2.0 and 2.5, and the largest delta is **0.0011 R/trade**. Nothing was withheld; there is no
-measurable effect to take. Also in §M: the EV `spread_cost` term does not reach the gates at all,
-which corrects a claim made earlier in this report.
+**Later — and CORRECTED AGAIN 2026-09-24 (§J, status block):** §J's spread-calibration result was
+first reported as "did not reproduce", then as "noise in both directions / 0.0011 R per trade".
+**Both of those readings were produced by a broken instrument and are withdrawn.** The harness leaked
+its registry override, so `apply_registry(None)` was a no-op and **only the first symbol scanned ever
+had a genuine incumbent arm** — every later symbol was measured corrected-vs-corrected, which is why
+the earlier sweep reported "only 3 of 8 symbols change". With the harness fixed the lever is
+**ADVERSE at every `tp_r`** (−47.5, −86.9, −85.1, −65.8, −79.0 R) and **7 of 8 symbols** change.
+
+**So §J's original withholding decision was right after all.** Spread calibration stays off, and this
+time on an instrument that can see the effect. The earlier "nothing was withheld" sentence in this
+report is retracted. Also in §M: the EV `spread_cost` term does not reach the gates at all, which
+corrects a claim made earlier in this report — that finding is unaffected, it was a same-process
+paired comparison.
 
 ---
 
@@ -450,7 +457,7 @@ geometry nor modelled cost is what loses money here. Line 261 can be shipped as 
 correctness fix (honest cost in the blended EV, zero measured P&L impact, does not touch the
 four named gates), but it should carry an explicit "no measured benefit" note.
 
-### ⚠ UNRESOLVED — the §J spread-calibration measurement did not reproduce
+### §J spread calibration — RESOLVED (twice over) as ADVERSE. The first resolution was measured with a broken instrument; see the status block below.
 
 The A/B included a **reference arm** precisely to validate the harness, and it **failed**.
 
@@ -495,56 +502,143 @@ harness). Same selection behaviour, different exits — so these are different e
 and that, not the spread change, is what flips the sign of the delta. Note also that WTI alone is
 **+103.081 R** and 46% of §J2's executions, so that total is dominated by one profitable symbol.
 
-**Status: RESOLVED 2026-09-24 — the lever is noise in both directions. Do not ship it.**
+**Status: CORRECTED 2026-09-24 — the lever is ADVERSE, and robustly so. Do not ship it. §J was right.**
 
-Re-measured with `.scratch/reconcile_j.py`, which loads §J2's own harness by path (a re-implementation
-would measure my reading of §J2, not §J2), scans each symbol once under both registries, and then
-replays the **same** candidate sets across a `tp_r` sweep. `tp_r` *is* the exit model in `Geometry`
-(be / partial / trail are left disabled exactly as §J2 had them), so the sweep varies only the exit
-model and holds the tree, the symbol set and the data fixed.
+### The previous conclusion was produced by a broken instrument
 
-**1. The sign is not robust — it crosses zero inside a plausible exit-model range.**
+The first re-measurement (committed as `40c52d4`) reported the effect as "noise in both directions"
+— ΔTotal R −3.154 → −1.155 → −0.155 → **+1.844** → +0.844 across `tp_r` 1.0→3.0, largest |Δ| 0.0011
+R/trade, "only 3 of 8 symbols change". **All of that is withdrawn.**
 
-| `tp_r` | ΔTotal R | Sign |
-|---|---|---|
-| 1.0 | −3.154 | ADVERSE |
-| 1.5 | −1.155 | ADVERSE |
-| 2.0 | −0.155 | ADVERSE |
-| 2.5 | **+1.844** | FAVOURABLE |
-| 3.0 | +0.844 | FAVOURABLE |
+The harness leaked its own override. `apply_registry` rebuilt the registry from the **live**
+`reg._REGISTRY` rather than from a pristine snapshot, so `apply_registry(None)` was a no-op, not a
+restore. Because the driver calls `apply_registry(None)` before the incumbent scan of every symbol,
+**only the first symbol scanned ever had a genuine incumbent arm**; every later symbol was measured
+corrected-vs-corrected. Measured directly: pristine AUDUSD 0.9 → after CORRECTED 2.3 → after
+`apply_registry(None)` **2.3, not 0.9**.
 
-**2. The magnitude is noise.** The largest |Δ| is **3.15 R over 2,868 trades = 0.0011 R/trade**.
-The whole 5-model range is [−3.15, +1.84] R against a baseline of −270.8 R. This is not a lever
-either way, and it explains why two harnesses could disagree: each was reading a different sign of
-the same zero.
+The defect has a signature, and the old numbers carry it exactly — `A == B` for every symbol but the
+first:
 
-**3. Only 3 of 8 symbols change at all** — BTCUSD, EURUSD, GBPJPY. The other five (USDJPY, AUDUSD,
-EURJPY, and WTI's selection) are byte-identical across every `tp_r`. The executed count moves
-2,868 → 2,859 (−9, or −0.3%) and that −9 is identical at every `tp_r`, as it must be: selection does
-not depend on the exit model.
+| symbol | scanned | contaminated run (leaked) | fixed run |
+|---|---|---|---|
+| EURUSD (first) | 1st | 17 / 22 | 17 / 23 |
+| GBPUSD | 2nd | **649 / 649** | 417 / 649 |
+| EURJPY | 6th | **355 / 355** | 201 / 286 |
+| GBPJPY | 5th | 160 / 161 | 126 / 155 |
+| AUDUSD | 4th | 75 / 75 | 53 / 77 |
+| BTCUSD | 7th | 361 / 346 | 339 / 346 |
 
-**4. §J2's artefact is stale against the current tree — and this is the other half of the mystery.**
-The candidate sets match **exactly** (EURUSD 2151/2151, GBPUSD 2198/2198, GBPJPY 2190/2190, AUDUSD
-2309/2309, USDJPY 2350/2350, EURJPY 2266/2266, BTCUSD 3191/3191, WTI 2168/2168) while the **EXECUTE**
-decisions do not (EURUSD 17/22 vs 14/21, GBPUSD 649/649 vs 649/677, GBPJPY 160/161 vs 127/127,
-EURJPY 355/355 vs 286/286, BTCUSD 361/346 vs 346/347). Candidate generation is unchanged; the **gate
-stack moved**. So §J2's numbers describe a code state that no longer exists, and the "1.7× per-trade
-R gap" was never an exit-model difference alone — it also mixed in a tree change and, in the newer
-harness, a 20-vs-8 symbol universe.
+EURUSD is the one symbol the leak could not touch, and its A-arm is 17 in both runs. That is the
+diagnosis confirming itself. "Only 3 of 8 symbols change" was never a property of the lever — it was
+the leak, reporting zero difference for the five symbols it had silently turned into self-comparisons.
 
-Baseline per-trade R at the *same* `tp_r=1.5` on the current tree is **−0.0944** (§J2 artefact:
-−0.0741) — a 1.27× shift from the tree change alone, with the symbol set and exit model held fixed.
+### The corrected measurement
 
-**Consequence for the decision: nothing was withheld.** The earlier "adverse" reading did not block a
-profitable change; there is no measurable effect to block or to take. Spread calibration stays off,
-now on evidence rather than on a number that does not reproduce.
+Same harness, same symbol set, same data, same exit-model sweep — only the registry restore fixed.
+Re-run: `tools/reconcile_spread_calibration.py --mode sweep --out reports/j_reconcile_sweep_fixed.json`.
 
-This does **not** affect the A-vs-B′ conclusion above, which is a same-bar, same-process paired
-comparison.
+| `tp_r` | Total R incumbent | Total R corrected | ΔTotal R | Sign |
+|---|---|---|---|---|
+| 1.0 | −88.781 | −136.233 | **−47.452** | ADVERSE |
+| 1.5 | −107.436 | −194.298 | **−86.862** | ADVERSE |
+| 2.0 | +38.533 | −46.529 | **−85.062** | ADVERSE |
+| 2.5 | +50.936 | −14.879 | **−65.815** | ADVERSE |
+| 3.0 | +139.201 | +60.204 | **−78.997** | ADVERSE |
 
-Determinism was verified: two identical cross-process runs are byte-identical. The unseeded
-`np.random.beta` in `ensemble_bandit.py:36` / `strategy_bandit.py:89,101` is a red herring —
-those methods are never called on the scan path.
+Executed 2,450 → 2,862 (+412, +16.8%) — and the count delta is **identical at every `tp_r`**, as it
+must be, since selection does not depend on the exit model. **7 of 8 symbols change.** The verdict is
+ROBUST: the sign is ADVERSE at every point of the sweep, and the magnitude (−47 to −87 R) is the same
+order as the baseline itself (−89 to +139 R). This is material, not noise.
+
+Note the direction of the two effects. The corrected spreads are mostly *higher* (EURUSD 0.7 → 1.9,
+GBPUSD 0.9 → 2.2, BTCUSD 1500 → 2250; only WTI falls, 13.0 → 3.0), yet corrected executes **more**.
+That is the `max_spread_pips` gate, not the EV cost term: raising the *max* makes the gate more
+permissive, while raising the *typical* only makes each trade more expensive. The permissive effect
+wins on count, and the cost effect wins on R — which is why the count rises while the P&L falls.
+That asymmetry is worth remembering the next time a spread change is proposed as a cost reduction.
+
+### The adverse move is 96% a VOLUME effect, not a quality effect
+
+Decomposing ΔR = (n_b − n_a)·mean_a + n_b·(mean_b − mean_a) at `tp_r=1.5`:
+
+| symbol | n_a | n_b | mean R incumbent | mean R corrected | volume | quality | ΔR |
+|---|---|---|---|---|---|---|---|
+| EURUSD | 17 | 23 | −0.28373 | −0.47878 | −1.702 | −4.486 | −6.189 |
+| GBPUSD | 417 | 649 | −0.20195 | **−0.19626** | **−46.852** | **+3.693** | −43.160 |
+| USDJPY | 0 | 0 | 0 | 0 | 0.000 | 0.000 | 0.000 |
+| AUDUSD | 53 | 77 | −0.48657 | **−0.45799** | −11.678 | **+2.201** | −9.477 |
+| GBPJPY | 126 | 155 | −0.71104 | **−0.70218** | −20.620 | **+1.373** | −19.247 |
+| EURJPY | 201 | 286 | −0.06271 | −0.07992 | −5.330 | −4.922 | −10.252 |
+| BTCUSD | 339 | 346 | −0.10767 | **−0.10405** | −0.754 | **+1.253** | +0.499 |
+| WTI | 1297 | 1326 | +0.11263 | +0.11090 | +3.266 | −2.294 | +0.972 |
+| **total** | **2450** | **2862** | | | **−83.670** | **−3.183** | **−86.853** |
+
+**Volume: −83.670 R (96%). Quality: −3.183 R (4%).**
+
+In **4 of 8 symbols the per-trade result actually improves** under the corrected spreads (GBPUSD
+−0.20195 → −0.19626, AUDUSD −0.48657 → −0.45799, GBPJPY −0.71104 → −0.70218, BTCUSD −0.10767 →
+−0.10405) and the total still falls, because each takes more trades. The signal's per-trade expectancy
+is roughly **−0.2 R and near-insensitive to the spread configuration**; what moves the total is *how
+many trades are taken*.
+
+This is the most actionable number in the section, and it is the same conclusion §9 of
+`reports/PROFITABILITY_ROOT_CAUSE.md` reached from the live data (the bot's −2.46/trade is the
+backtested −0.074 R/trade × ~$33 risk): **the dominant lever on P&L here is trade count, not entry
+quality and not cost modelling.** 412 extra trades cost 84 R at an unchanged per-trade edge. It does
+not follow that tightening the gate makes the strategy profitable — the edge is still absent (DSR
+0/20) — but it does follow that the only way to improve the total *without* finding an edge is to take
+fewer, not better-modelled, trades.
+
+### This restores §J's original decision, and §J2's artefact
+
+§J originally withheld spread calibration because feeding real spreads everywhere measured
+**adverse** (−115.0 → −240.3 R as quoted; the artefact itself says −206.176 → −226.131, Δ −19.96 R).
+§J2's artefact was independently adverse. Both are now corroborated by a third, independent run with
+a working instrument. **Three measurements, three adverse readings.** Spread calibration stays off —
+not because a number failed to reproduce, but because it reproduces adverse.
+
+The one part of the previous analysis that survives is the **§J2-as-quoted vs §J2-as-recorded**
+discrepancy (648≈649, 285≈286, 1286≈1285 look like transposed A/B figures) and the **8-vs-20 symbol
+universe** arithmetic. Those were about §J2's bookkeeping, not about the instrument, and they stand.
+
+### ⚠ New caveat: the scan itself is not fully deterministic
+
+While the fixed sweep was running it logged, three times:
+
+```
+Analyst MACRO failed or timed out after 2.00s (TimeoutError: ) -- substituting a NEUTRAL score-50 fallback.
+```
+
+That is a **fabricated input**, not a measurement. `ParallelAnalystCluster` gives MACRO a 2.0s budget
+while the news fetch MACRO calls synchronously (`jarvis/market/news.py`) is allowed 5s and 6s against
+a 90s cache TTL; a cache miss was measured at 1.32s — 66% of the budget before any CPU work, competing
+with six other analysts for the GIL. So the fallback is reachable whenever the network is merely slow.
+
+The consequence for §J is a confound: if MACRO times out during the incumbent arm but not the
+corrected arm, the two arms differ for a reason unrelated to spread. **This does not overturn the
+result** — the effect is ADVERSE at 5 of 5 exit models and 7 of 8 symbols, and 96% of it is the
+volume term, which three fallback events cannot manufacture. But the previous claim in this section,
+"Determinism was verified: two identical cross-process runs are byte-identical", **is retracted**: it
+is true only when no wall-clock timeout fires.
+
+Measured (`tools/measure_scan_determinism.py`, AUDUSD pristine, 2 reps in one process, 0 fallbacks):
+`EXEC = [51, 51]` → deterministic. The **same** symbol and registry gave **53** in this sweep (which
+logged 3 fallbacks) and **56** in the earlier universe run (which logged timeouts too). So the
+scanner is repeatable *within* a process and drifts by a few executions across runs *only when the
+timeout fires* — 51 / 53 / 56 is one measurement with three answers, and the difference is the
+fabricated NEUTRAL readings, not the data.
+
+The unseeded `np.random.beta` in `ensemble_bandit.py:36` / `strategy_bandit.py:89,101` remains a red
+herring — those methods are never called on the scan path.
+
+The cure (stop the analyst blocking on the fetch at all — background refresh, or propagate the
+deadline into `get_news_calendar`) is **not** applied: it changes a live trading system's inputs, and
+the existing fail-open control flow was a deliberate documented decision. What was applied is the
+visibility half — the analyst fallback no longer claims `confidence=0.50` it does not have, matching
+the rule the Devil's Advocate fallback in the same function already followed. See
+`jarvis/analysts/parallel_runner.py` and `tests/test_parallel_runner.py`.
+
 
 ### N. "Fix all issues" pass — triaged by defect class, not by lint count
 

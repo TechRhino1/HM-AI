@@ -264,14 +264,30 @@ Ranked by measured impact, not by effort:
    windowed-P&L figure was computed from the exit time.
 3. **Do not tune entries.** The measured DSR is 0/20. The honest options are to reduce size, reduce
    frequency, or find a different signal — not to adjust thresholds on a sample with no edge.
-4. **The spread-calibration lever is closed — it is noise, not an opportunity.** The two harnesses that
-   disagreed on its sign were each reading a different sign of the same zero. Swept across the exit
-   model on a fixed tree, symbol set and data, ΔTotal R runs −3.154 → −1.155 → −0.155 → **+1.844** →
-   +0.844 R as `tp_r` goes 1.0 → 3.0: **the sign crosses zero between 2.0 and 2.5**, and the largest
-   effect is **0.0011 R/trade**. Only 3 of 8 symbols change at all. §J2's artefact is also stale
-   against the current tree (candidate sets match exactly, EXECUTE decisions do not), so its quoted
-   numbers describe code that no longer exists. **Nothing was withheld; there is nothing to take.**
-   Detail and the full table: `docs/AUDIT-3-TRACKS-2026-09-23.md` §J.
+4. **Trade count is the one lever with a measured magnitude — and it points at "fewer".** The §J sweep
+   gives an unusually clean natural experiment: raising `max_spread_pips` (which makes the spread gate
+   more permissive) added **412 trades** and moved total R by **−86.9**. Decomposing that delta into
+   volume vs quality: **volume −83.7 R (96%), quality −3.2 R (4%)**. In **4 of 8 symbols the per-trade
+   result actually improved** (GBPUSD −0.20195 → −0.19626) and the total still fell, because each took
+   more trades. So the engine's per-trade expectancy is ~−0.2 R and nearly insensitive to cost
+   modelling; what moves the total is how often it trades. This is the same conclusion the live data
+   reached in §2 (the bot's −2.46/trade ≈ the backtested −0.074 R/trade × ~$33 risk), and it is the
+   only lever here that does not require finding an edge first. It does **not** follow that tightening
+   the gate makes the strategy profitable — the edge is still absent — only that the way to improve
+   the total without an edge is to take fewer trades, not better-modelled ones. Full table:
+   `docs/AUDIT-3-TRACKS-2026-09-23.md` §J.
+4. **The spread-calibration lever is closed — it is ADVERSE, and that is now measured twice.** An
+   earlier version of this report called it "noise, not an opportunity", with the sign crossing zero
+   between `tp_r` 2.0 and 2.5 and a largest effect of 0.0011 R/trade. **That is withdrawn: it was
+   produced by a broken instrument.** The harness rebuilt the spread registry from the live registry
+   instead of a pristine snapshot, so `apply_registry(None)` was a no-op and **only the first symbol
+   scanned ever had a genuine incumbent arm** — every later symbol was compared against itself, which
+   is why the old run reported "only 3 of 8 symbols change". With the harness fixed, ΔTotal R is
+   **ADVERSE at every point of the sweep** — −47.5, −86.9, −85.1, −65.8, −79.0 R as `tp_r` goes
+   1.0 → 3.0 — and **7 of 8 symbols** change. The magnitude is the same order as the baseline itself,
+   so this is material. It also restores §J's original decision and agrees with §J2's artefact: three
+   independent measurements, three adverse readings. Spread calibration stays off, now on an
+   instrument that can see the effect. Detail: `docs/AUDIT-3-TRACKS-2026-09-23.md` §J.
 
 ---
 
