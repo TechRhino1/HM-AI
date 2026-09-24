@@ -15,11 +15,13 @@ rows = **327 independent bets**). **`AUDIT-2026-09.md`**. **Consume `spread_pips
 
 ## The news calendar is a FABRICATED input — **check `is_fallback`**
 
-Both live feeds are down (FairEconomy **429**, MyFxBook **403 Cloudflare**), so the engine substituted a
-**hardcoded 7-event plan** and **padded** short real feeds with it, unlabelled. It cost MACRO a constant
-**−25** (**−4.2 on `ai_score`**, a hard gate) and handed out **+8.0 / +0.20 conviction** via
-`evaluate_post_news_sweep_reaction`. Now stamped; consumers must check `is_fallback`.
-**§O, `AUDIT-3-TRACKS-2026-09-23.md`.** *A fallback that invents data must say so.*
+Whenever the live fetch fails the engine substitutes a **hardcoded 7-event plan** and **pads** short real
+feeds with it, unlabelled. It cost MACRO a constant **−25** (**−4.2 on `ai_score`**, a hard gate) and
+handed out **+8.0 / +0.20 conviction** via `evaluate_post_news_sweep_reaction`. Now stamped; consumers
+must check `is_fallback`. MyFxBook is dead to `urllib` (403 Cloudflare JS); FairEconomy merely
+**rate-limits** — **my own probing caused the 429 I first reported as an outage**. *§O,
+`AUDIT-3-TRACKS-2026-09-23.md`.* **A measurement that says "broken, always" is suspect — five
+instruments failed that way this session.**
 
 ## Environment
 
