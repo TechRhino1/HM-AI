@@ -14,6 +14,7 @@ import urllib.request
 from datetime import datetime, timezone
 import numpy as np
 
+from jarvis.common.http import read_bounded
 from jarvis.data.determinism import stable_seed
 from jarvis.data.schemas import is_observed_price
 from jarvis.data.market_data_provider import (
@@ -343,7 +344,7 @@ class TradingViewDataProvider:
         try:
             with urllib.request.urlopen(req, timeout=self.request_timeout) as resp:
                 if resp.status == 200:
-                    body = resp.read().decode("utf-8")
+                    body = read_bounded(resp).decode("utf-8")
                     data = json.loads(body)
                     return data.get("data", [])
                 logger.warning(

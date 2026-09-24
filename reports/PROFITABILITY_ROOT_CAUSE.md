@@ -144,6 +144,49 @@ entry_dt_str = datetime.fromtimestamp(float(entry_time) - broker_offset, timezon
 | Sub-floor stop distance | `institutional_entry_engine.py` | fixed — cap can no longer undercut the pip floor |
 | Spread-blowout guard permanently disabling trailing stops / breakeven / partial closes on EURUSD, GBPUSD, USDJPY, AUDUSD | `position_monitor.py` | fixed — feeds the symbol's own typical spread |
 
+### 4.3 A recovered bracket could be stored on the wrong side of entry — **fixed this pass**
+
+**Symptom.** 24 rows carried a stop on the **wrong side** of entry — 14 BUY with `sl >= entry`, 10 SELL
+with `sl <= entry`. The 20 closed ones among them were **20 winners totalling +37.38**, which a genuine
+stop cannot produce.
+
+**Root cause.** Not the order path — `trade_guard.validate_pre_execution` already refuses an inverted
+bracket at build time, with a direction-aware check and an explicit rejection of an unrecognised bias.
+The leak was at the **other end**: `sync_mt5_history` does not read `sl`/`tp` from the broker, it
+recovers them by string-parsing the order comment (`[sl...]` / `[tp...]`), and that parse had **no
+direction check**. A comment carrying the target's number was written straight into the `sl` column.
+The `tp = 0` on 14 of the 24 rows is the same signature: the target had been consumed by the `sl` field.
+
+**Fix.** Validate the parsed value against the direction before storing it, and refuse it when it cannot
+have come from a valid order. A non-positive value still means "no tag parsed" and is left alone, so
+this only rejects a value that is demonstrably on the wrong side.
+
+```python
+if entry_deal is not None:
+    if not _bracket_side_ok(side, entry_p, sl_val, is_stop=True):
+        logger.warning("Refusing a parsed stop for position %s: sl=%s ... ", pid, sl_val, entry_p)
+        sl_val = 0.0
+```
+
+Only checked when the entry deal is in the window: without it `entry_p` falls back to
+`target_deal.price`, which for a closed position is the **exit** price, and the comparison would be
+against the wrong reference.
+
+### 4.4 Two security items, settled by measurement
+
+* **XML entity expansion (`news.py:210`) — measured, NOT a live exposure.** `ET.fromstring` on remote
+  data looked like a billion-laughs DoS, and the standing note was "needs `defusedxml`, not a
+  dependency". Measured on this runtime, that is wrong: **expat 2.8.1 blocks it.** Payloads at 6, 9 and
+  12 nesting levels all raise `ParseError: limit on input amplification factor (from DTD and entities)
+  breached` in **~0.4 s**. **No new dependency is needed.**
+* **Unbounded remote reads — fixed.** All four remote fetches set a socket timeout but called
+  `resp.read()` with no argument. A timeout bounds *time, not bytes*: a streaming endpoint can return
+  hundreds of MB inside a 5-6 s window on a request/scheduler path. Added
+  `jarvis/common/http.read_bounded`, which reads at most `limit + 1` bytes (so a body of exactly
+  `limit` is accepted, without trusting `Content-Length`) and raises `ResponseTooLargeError`, a
+  `ValueError` subclass so the existing `except Exception` handlers degrade it like any malformed
+  payload. Wired into `news.py` (×2) and `tradingview_provider.py`.
+
 ---
 
 ## 5. Root cause #3 — the entry signal has no measured edge (not fixable by tuning)
@@ -171,15 +214,22 @@ aimed at the wrong 39%.
 | File | Change | Why |
 |---|---|---|
 | `jarvis/data/database.py` | Close `UPDATE` no longer writes `timestamp`; INSERT uses the entry deal's time | Stops the entry timestamp being overwritten by the exit time (§4.1) |
+| `jarvis/data/database.py` | `_bracket_side_ok` + a direction check on the parsed `sl`/`tp` | Stops a wrong-side stop being persisted (§4.3) |
+| `jarvis/common/http.py` | **New.** `read_bounded` + `ResponseTooLargeError` | Bounds a remote read by bytes, not just time (§4.4) |
+| `jarvis/market/news.py`, `jarvis/data/tradingview_provider.py` | Use `read_bounded` at all 3 remote read sites | Same |
 | `tests/test_trade_outcome_recorded.py` | +1 behavioural test: a real sync preserves the entry timestamp and still records the outcome | Pins the fix at behaviour level, not SQL text |
 | `tests/test_forecast_not_overwritten.py` | Replaced the assertion that *pinned the bug*, +1 test asserting it stays gone | The old test asserted `"executor = ?, timestamp = ?" in src` — it was locking the defect in |
-| `tests/test_position_sizing_ceiling.py` | **New**, 42 tests | Locks the risk ceiling: no size may exceed 0.5% except the documented 2× min-lot floor; high-conviction multipliers may only reduce risk |
+| `tests/test_position_sizing_ceiling.py` | **New**, 42 tests | Locks the risk ceiling: no size may exceed 0.5% except the documented 2× min-lot floor |
+| `tests/test_bracket_side_validation.py` | **New**, 14 tests | Predicate + a real sync with a wrong-side comment, **and a positive control** so a guard that rejects everything cannot pass |
+| `tests/test_bounded_remote_read.py` | **New**, 11 tests | The cap, the boundary, the one-byte over-read, and that no unbounded read remains |
 
 ### Non-vacuousness (proved by reverting)
 
 * Re-introducing `timestamp = ?` → **2 tests go red**; restoring it → 26 pass.
 * Removing the `min(ceiling, …)` clamp → **`test_high_conviction_multipliers_may_not_inflate_past_the_ceiling`
   goes red at 0.70% vs the 0.5% ceiling**; restoring it → 42 pass.
+* Disabling the bracket guard → **`sl` becomes `1.115`** (the target written into the stop field, i.e.
+  the live defect reproduced) while the 13 other tests still pass; restoring it → 14 pass.
 
 ---
 
@@ -187,9 +237,10 @@ aimed at the wrong 39%.
 
 * `tests/test_trade_outcome_recorded.py` + `tests/test_forecast_not_overwritten.py` → **26 passed**.
 * `tests/test_position_sizing_ceiling.py` → **42 passed**.
-* Full suite (junit XML, not stdout — the harness truncates it): **`tests=3267 failures=0 errors=0
-  skipped=2`, 0 failing testcases.** That is **+44 tests** over the 3223-test baseline, matching the 2
-  timestamp tests + 42 sizing tests added here.
+* `tests/test_bracket_side_validation.py` → **14 passed**.
+* `tests/test_bounded_remote_read.py` → **11 passed**.
+* Full suite (junit XML, not stdout — the harness truncates it): **`tests=3292 failures=0 errors=0
+  skipped=2`, 0 failing testcases.** That is **+69 tests** over the 3223-test baseline.
 
 ---
 
@@ -197,8 +248,9 @@ aimed at the wrong 39%.
 
 | | Tests | Failures | Errors |
 |---|---|---|---|
-| Baseline entering this pass | 3223 | 0 | 0 |
-| After this pass | **3267** | **0** | **0** |
+| Baseline entering this work | 3223 | 0 | 0 |
+| After the timestamp + sizing pass | 3267 | 0 | 0 |
+| After the bracket + bounded-read pass | **3292** | **0** | **0** |
 
 ---
 

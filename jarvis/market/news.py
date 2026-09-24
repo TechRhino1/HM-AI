@@ -16,6 +16,8 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Any, ClassVar
 
+from jarvis.common.http import read_bounded
+
 logger = logging.getLogger("HM_LiveNewsEngine")
 
 # Indian Standard Time (IST = UTC + 5:30)
@@ -151,7 +153,7 @@ class LiveNewsEngine:
         try:
             req = urllib.request.Request(self.FAIRECONOMY_URL, headers=headers)
             with urllib.request.urlopen(req, context=self._ctx, timeout=5) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
+                data = json.loads(read_bounded(resp).decode("utf-8"))
                 
             parsed = []
             now_dt = datetime.now(timezone.utc)
@@ -206,7 +208,7 @@ class LiveNewsEngine:
         try:
             req = urllib.request.Request(self.MYFXBOOK_URL, headers=headers)
             with urllib.request.urlopen(req, context=self._ctx, timeout=6) as resp:
-                xml_data = resp.read()
+                xml_data = read_bounded(resp)
                 root = ET.fromstring(xml_data)
                 
             parsed = []
