@@ -1,0 +1,359 @@
+{
+  "mode": "sweep",
+  "tf": "H1",
+  "window": 365,
+  "tp_sweep": [
+    1.0,
+    1.5,
+    2.0,
+    2.5,
+    3.0
+  ],
+  "results": [
+    {
+      "label": "J2 symbols -- tp_r=1.0",
+      "delta_r": -49.919,
+      "sign": "ADVERSE",
+      "exec_a": 1505,
+      "exec_b": 2093,
+      "n_a": 1505,
+      "n_b": 2093,
+      "total_r_a": -149.168,
+      "total_r_b": -199.087,
+      "per_trade_a": -0.09911,
+      "per_trade_b": -0.09512,
+      "symbols_changed": [
+        "AUDUSD",
+        "EURUSD",
+        "GBPJPY",
+        "GBPUSD"
+      ],
+      "per_symbol": {
+        "EURUSD": {
+          "cand_a": 4419,
+          "cand_b": 4419,
+          "exec_a": 33,
+          "exec_b": 46,
+          "n_a": 33,
+          "n_b": 46,
+          "r_a": -13.552,
+          "r_b": -18.794,
+          "mean_a": -0.41067,
+          "mean_b": -0.40856
+        },
+        "GBPUSD": {
+          "cand_a": 4559,
+          "cand_b": 4559,
+          "exec_a": 1028,
+          "exec_b": 1498,
+          "n_a": 1028,
+          "n_b": 1498,
+          "r_a": -50.476,
+          "r_b": -65.192,
+          "mean_a": -0.0491,
+          "mean_b": -0.04352
+        },
+        "AUDUSD": {
+          "cand_a": 4636,
+          "cand_b": 4636,
+          "exec_a": 114,
+          "exec_b": 145,
+          "n_a": 114,
+          "n_b": 145,
+          "r_a": -13.314,
+          "r_b": -22.872,
+          "mean_a": -0.11679,
+          "mean_b": -0.15774
+        },
+        "GBPJPY": {
+          "cand_a": 4575,
+          "cand_b": 4575,
+          "exec_a": 330,
+          "exec_b": 404,
+          "n_a": 330,
+          "n_b": 404,
+          "r_a": -71.826,
+          "r_b": -92.229,
+          "mean_a": -0.21765,
+          "mean_b": -0.22829
+        }
+      }
+    },
+    {
+      "label": "J2 symbols -- tp_r=1.5",
+      "delta_r": -79.241,
+      "sign": "ADVERSE",
+      "exec_a": 1505,
+      "exec_b": 2093,
+      "n_a": 1505,
+      "n_b": 2093,
+      "total_r_a": -203.515,
+      "total_r_b": -282.756,
+      "per_trade_a": -0.13523,
+      "per_trade_b": -0.1351,
+      "symbols_changed": [
+        "AUDUSD",
+        "EURUSD",
+        "GBPJPY",
+        "GBPUSD"
+      ],
+      "per_symbol": {
+        "EURUSD": {
+          "cand_a": 4419,
+          "cand_b": 4419,
+          "exec_a": 33,
+          "exec_b": 46,
+          "n_a": 33,
+          "n_b": 46,
+          "r_a": -13.593,
+          "r_b": -16.835,
+          "mean_a": -0.41191,
+          "mean_b": -0.36597
+        },
+        "GBPUSD": {
+          "cand_a": 4559,
+          "cand_b": 4559,
+          "exec_a": 1028,
+          "exec_b": 1498,
+          "n_a": 1028,
+          "n_b": 1498,
+          "r_a": -60.047,
+          "r_b": -92.423,
+          "mean_a": -0.05841,
+          "mean_b": -0.0617
+        },
+        "AUDUSD": {
+          "cand_a": 4636,
+          "cand_b": 4636,
+          "exec_a": 114,
+          "exec_b": 145,
+          "n_a": 114,
+          "n_b": 145,
+          "r_a": -32.597,
+          "r_b": -46.736,
+          "mean_a": -0.28594,
+          "mean_b": -0.32232
+        },
+        "GBPJPY": {
+          "cand_a": 4575,
+          "cand_b": 4575,
+          "exec_a": 330,
+          "exec_b": 404,
+          "n_a": 330,
+          "n_b": 404,
+          "r_a": -97.278,
+          "r_b": -126.762,
+          "mean_a": -0.29478,
+          "mean_b": -0.31377
+        }
+      }
+    },
+    {
+      "label": "J2 symbols -- tp_r=2.0",
+      "delta_r": -94.639,
+      "sign": "ADVERSE",
+      "exec_a": 1505,
+      "exec_b": 2093,
+      "n_a": 1505,
+      "n_b": 2093,
+      "total_r_a": -187.03,
+      "total_r_b": -281.669,
+      "per_trade_a": -0.12427,
+      "per_trade_b": -0.13458,
+      "symbols_changed": [
+        "AUDUSD",
+        "EURUSD",
+        "GBPJPY",
+        "GBPUSD"
+      ],
+      "per_symbol": {
+        "EURUSD": {
+          "cand_a": 4419,
+          "cand_b": 4419,
+          "exec_a": 33,
+          "exec_b": 46,
+          "n_a": 33,
+          "n_b": 46,
+          "r_a": -9.593,
+          "r_b": -10.835,
+          "mean_a": -0.2907,
+          "mean_b": -0.23554
+        },
+        "GBPUSD": {
+          "cand_a": 4559,
+          "cand_b": 4559,
+          "exec_a": 1028,
+          "exec_b": 1498,
+          "n_a": 1028,
+          "n_b": 1498,
+          "r_a": -57.702,
+          "r_b": -103.067,
+          "mean_a": -0.05613,
+          "mean_b": -0.0688
+        },
+        "AUDUSD": {
+          "cand_a": 4636,
+          "cand_b": 4636,
+          "exec_a": 114,
+          "exec_b": 145,
+          "n_a": 114,
+          "n_b": 145,
+          "r_a": -32.549,
+          "r_b": -43.549,
+          "mean_a": -0.28552,
+          "mean_b": -0.30034
+        },
+        "GBPJPY": {
+          "cand_a": 4575,
+          "cand_b": 4575,
+          "exec_a": 330,
+          "exec_b": 404,
+          "n_a": 330,
+          "n_b": 404,
+          "r_a": -87.186,
+          "r_b": -124.218,
+          "mean_a": -0.2642,
+          "mean_b": -0.30747
+        }
+      }
+    },
+    {
+      "label": "J2 symbols -- tp_r=2.5",
+      "delta_r": -115.967,
+      "sign": "ADVERSE",
+      "exec_a": 1505,
+      "exec_b": 2093,
+      "n_a": 1505,
+      "n_b": 2093,
+      "total_r_a": -199.592,
+      "total_r_b": -315.559,
+      "per_trade_a": -0.13262,
+      "per_trade_b": -0.15077,
+      "symbols_changed": [
+        "AUDUSD",
+        "EURUSD",
+        "GBPJPY",
+        "GBPUSD"
+      ],
+      "per_symbol": {
+        "EURUSD": {
+          "cand_a": 4419,
+          "cand_b": 4419,
+          "exec_a": 33,
+          "exec_b": 46,
+          "n_a": 33,
+          "n_b": 46,
+          "r_a": -5.593,
+          "r_b": -4.835,
+          "mean_a": -0.16948,
+          "mean_b": -0.1051
+        },
+        "GBPUSD": {
+          "cand_a": 4559,
+          "cand_b": 4559,
+          "exec_a": 1028,
+          "exec_b": 1498,
+          "n_a": 1028,
+          "n_b": 1498,
+          "r_a": -48.507,
+          "r_b": -100.044,
+          "mean_a": -0.04719,
+          "mean_b": -0.06678
+        },
+        "AUDUSD": {
+          "cand_a": 4636,
+          "cand_b": 4636,
+          "exec_a": 114,
+          "exec_b": 145,
+          "n_a": 114,
+          "n_b": 145,
+          "r_a": -37.672,
+          "r_b": -50.289,
+          "mean_a": -0.33046,
+          "mean_b": -0.34682
+        },
+        "GBPJPY": {
+          "cand_a": 4575,
+          "cand_b": 4575,
+          "exec_a": 330,
+          "exec_b": 404,
+          "n_a": 330,
+          "n_b": 404,
+          "r_a": -107.82,
+          "r_b": -160.391,
+          "mean_a": -0.32673,
+          "mean_b": -0.39701
+        }
+      }
+    },
+    {
+      "label": "J2 symbols -- tp_r=3.0",
+      "delta_r": -170.011,
+      "sign": "ADVERSE",
+      "exec_a": 1505,
+      "exec_b": 2093,
+      "n_a": 1505,
+      "n_b": 2093,
+      "total_r_a": -196.673,
+      "total_r_b": -366.684,
+      "per_trade_a": -0.13068,
+      "per_trade_b": -0.1752,
+      "symbols_changed": [
+        "AUDUSD",
+        "EURUSD",
+        "GBPJPY",
+        "GBPUSD"
+      ],
+      "per_symbol": {
+        "EURUSD": {
+          "cand_a": 4419,
+          "cand_b": 4419,
+          "exec_a": 33,
+          "exec_b": 46,
+          "n_a": 33,
+          "n_b": 46,
+          "r_a": -5.615,
+          "r_b": -2.857,
+          "mean_a": -0.17015,
+          "mean_b": -0.06211
+        },
+        "GBPUSD": {
+          "cand_a": 4559,
+          "cand_b": 4559,
+          "exec_a": 1028,
+          "exec_b": 1498,
+          "n_a": 1028,
+          "n_b": 1498,
+          "r_a": -34.961,
+          "r_b": -143.032,
+          "mean_a": -0.03401,
+          "mean_b": -0.09548
+        },
+        "AUDUSD": {
+          "cand_a": 4636,
+          "cand_b": 4636,
+          "exec_a": 114,
+          "exec_b": 145,
+          "n_a": 114,
+          "n_b": 145,
+          "r_a": -31.69,
+          "r_b": -42.307,
+          "mean_a": -0.27798,
+          "mean_b": -0.29177
+        },
+        "GBPJPY": {
+          "cand_a": 4575,
+          "cand_b": 4575,
+          "exec_a": 330,
+          "exec_b": 404,
+          "n_a": 330,
+          "n_b": 404,
+          "r_a": -124.407,
+          "r_b": -178.488,
+          "mean_a": -0.37699,
+          "mean_b": -0.4418
+        }
+      }
+    }
+  ]
+}

@@ -70,6 +70,24 @@ class MacroAnalyst(BaseAnalyst):
         else:
             active_news = self.news_calendar
 
+        # Provenance gate, BEFORE any scoring. `LiveNewsEngine` falls back to a
+        # hardcoded plan when both live feeds fail, and pads a short real feed
+        # with it, so `active_news` can contain invented events. Those must not
+        # become market facts: the hardcoded calendar carries 5 USD HIGH
+        # "Upcoming" entries and each one costs -5.0 below, a constant -25 that
+        # carries no information yet moves `ai_score` by -4.2 points -- straight
+        # into the hard gate at 70/72/75/78/80/82/85 in `decision_engine`.
+        # Measured: MACRO scored 40.0 on the live calendar and 65.0 on no news.
+        # Items without the flag are treated as real (back-compatible).
+        fabricated = [it for it in active_news if it.get("is_fallback")]
+        active_news = [it for it in active_news if not it.get("is_fallback")]
+        if fabricated:
+            risk_factors.append(
+                f"News feed unavailable — {len(fabricated)} of "
+                f"{len(fabricated) + len(active_news)} calendar events are "
+                "synthetic and were excluded from scoring."
+            )
+
         usd_bull_shock = False
         usd_bear_shock = False
 

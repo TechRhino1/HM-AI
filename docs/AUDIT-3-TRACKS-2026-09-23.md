@@ -954,6 +954,122 @@ default `pytest` run.
 | `tests/test_dynamic_levels_spread_symmetry.py` | BUY and SELL stops are mirror images: `spread_dist` is in the stop distance on **both** sides. Pre-fix, every BUY stop was exactly one spread tighter than the mirrored SELL stop for identical structure — an asymmetry produced by an inconsistency, not by any trading view. |
 | `tests/test_position_monitor_spread_guard.py` | Drives the real `_get_context` path against a context engine that mirrors `MarketContextEngine.build_context`'s signature *including its 2.0 default*, so a caller that forgets to pass the spread reproduces the defect exactly. Fails against the pre-fix code. |
 
+## §O. ⚠ The MACRO analyst's news input is fabricated, and it drives a hard gate
+
+Found by following §J's own instrument note down into the engine. This is not a
+performance question — it is a correctness one, and the largest source of
+invented data found in this audit.
+
+### The finding
+
+`LiveNewsEngine.get_news_calendar()` had **two** ways to serve invented events,
+and neither marked them:
+
+1. **Total fallback.** `_fetch_all_live_sources()` returns `[]` → the engine
+   returns `_generate_dynamic_calendar()`, a **hardcoded plan** of seven
+   realistic-looking events ("US S&P Global Composite Flash PMI", "Federal
+   Reserve Jackson Hole Monetary Assessment") anchored to this week's calendar
+   arithmetic rather than to any feed.
+2. **Silent padding.** `_organize_news_feed`: *"if there are fewer than 4
+   upcoming events, append upcoming institutional calendar items"*. A feed with
+   **one** real event came back as **seven** items — six of them invented.
+
+`is_live` looked like a provenance flag but is a **timing** flag ("is this
+event's shock window open right now"), so a fabricated calendar was
+indistinguishable from a real one to every consumer.
+
+### Why it is not cosmetic
+
+`MacroAnalyst` scores it. Every USD HIGH event whose `actual` is `"Upcoming"`
+costs **−5.0**, and the hardcoded plan carries **five** of them:
+
+| Input | MACRO score |
+|---|---|
+| live engine, as the system runs it | **40.0** |
+| no news at all | **65.0** |
+| the same calendar with actuals filled in | 65.0 |
+
+A constant **−25.0**, information-free, applied to every symbol at every scan.
+MACRO is one of six analysts and `ai_score` is their plain mean
+(`decision_engine.py:737`), so this is a permanent **−4.2 points** on a **hard
+gate** with thresholds 70/72/75/78/80/82/85
+(`decision_engine.py:527,556,561,587,614,620,626,650,662`). The gate was being
+set by a hardcoded list. It reached the UI too: `/api/news` served this under
+the comment *"Real-Time Institutional Macro News & Economic Calendar"*.
+
+### The feeds really are down (and it is not self-inflicted)
+
+| Source | Response |
+|---|---|
+| FairEconomy `nfs.faireconomy.media` | **HTTP 429**, body `Rate Limited` |
+| MyFxBook `myfxbook.com/rss/…` | **HTTP 403**, body Cloudflare `Just a moment...` |
+
+MyFxBook cannot be fixed by retrying — it is a JavaScript challenge and
+`urllib` runs no JavaScript.
+
+**Instrument caveat, stated plainly.** The first probe hammered the feed every
+3s and got 6/6 synthetic, which could have been a rate limit I caused. Re-run
+with **60s spacing: 5/5 still synthetic**, so the failure is real. One isolated
+call in a separate process did return 20 real events, so the feeds are
+**intermittent, not permanently dead** — which is worse, because intermittent
+fabrication is harder to notice than a clean outage.
+
+### Fixed — `is_fallback`, following `tradingview_provider`'s own precedent
+
+The codebase already had the right idiom: *"A labelled fallback beats an
+unlabelled fabrication"* (`tradingview_provider.py:643`).
+
+* `_generate_dynamic_calendar` / `_format_dynamic_item` stamp
+  `is_fallback: True`, `source: "synthetic_calendar"` on what they build.
+* `_organize_news_feed` **propagates** the flag per item instead of assuming, so
+  a mixed feed is stamped correctly; real items get
+  `is_fallback: False, source: "live_feed"`.
+* `MacroAnalyst` **excludes** fabricated events before any scoring and records
+  the exclusion as a risk factor. A fabricated deviation can no longer set the
+  bias — proven, it used to set `BULLISH`.
+* `/api/news` returns `synthetic_count`, `is_fallback` and `source`.
+* A rate-limited `WARNING` names the condition instead of failing silently.
+
+`tests/test_news_provenance.py` — 15 tests. Non-vacuity: disabling the filter
+turns **3** red, including `assert 'BULLISH' == 'NEUTRAL'`.
+
+### A second consumer — and it hands out conviction, not just a score
+
+`MacroAnalyst` was not the only reader. `decision_engine.py:780` calls
+`GLOBAL_NEWS_ENGINE.evaluate_post_news_sweep_reaction(...)`, which reads the same
+calendar and, on a match, adds **`conviction_boost: 0.20` to BOTH
+`calibrated_win_p` and `final_win_p`, plus `ai_score += 8.0`**
+(`decision_engine.py:781-788`).
+
+Its filter is `is_past and diff_seconds >= -45min and impact in (HIGH, MEDIUM)
+and the symbol is affected`. The hardcoded plan's three **Friday-anchored past
+entries carry real-looking `actual` values** — so on a Friday, within 45 minutes
+of 13:45 / 17:00 / 18:00 UTC, a fabricated event satisfies every condition.
+Measured (fabricated event handed to the method directly):
+
+```
+  news_reversal_setup : True
+  conviction_boost    : 0.2
+  catalyst_event      : US S&P Global Composite Flash PMI
+  reason              : Post-News Stop Hunt: … Institutional reversal favoring BUY.
+```
+
+**Fixed:** `and not ev.get("is_fallback")` in that filter. Re-measured:
+`news_reversal_setup: False`, `conviction_boost: 0.0`. Two further tests pin it,
+one of which proves a **real** recent event still grants the 0.20 (non-vacuity)
+and another that the 45-minute lookback itself still works.
+
+### The honest P&L consequence — and it is not the one you want
+
+Removing a −4.2 penalty **raises `ai_score`, so more trades pass the gate.** §J
+already measured this strategy's losses as a **volume** effect (−100.9 R of the
+−80.5 R total at `tp_r=1.5`, i.e. 83%), not an entry-quality one. So this
+correctness fix should be expected to make P&L *worse* — and that is itself the
+finding: **the gate calibration, not the news feed, is the lever.** Recorded
+rather than tuned away.
+
+---
+
 ## Test status today
 
 | Check | Result |

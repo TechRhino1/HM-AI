@@ -689,10 +689,29 @@ class JarvisRequestHandler(BaseHTTPRequestHandler):
                     logger.error(f"Error fetching trade history: {e}")
                     self._send_json({"error": str(e)})
             elif path == "/api/news":
-                # Real-Time Institutional Macro News & Economic Calendar
+                # Institutional Macro News & Economic Calendar. The banner used
+                # to claim "Real-Time" unconditionally while the engine served a
+                # hardcoded calendar whenever both feeds failed -- which is every
+                # time in this environment (FairEconomy answers 429 "Rate
+                # Limited", MyFxBook 403 behind a Cloudflare challenge that
+                # urllib can never pass, since it runs no JavaScript). The
+                # response now carries provenance so the UI can say which it is.
                 from jarvis.market.news import GLOBAL_NEWS_ENGINE
                 news_items = GLOBAL_NEWS_ENGINE.get_news_calendar()
-                self._send_json({"news": news_items, "timestamp": datetime.now(timezone.utc).isoformat()})
+                n_fab = sum(1 for it in news_items if it.get("is_fallback"))
+                if news_items and n_fab == len(news_items):
+                    source = "synthetic_calendar"
+                elif n_fab:
+                    source = "mixed"
+                else:
+                    source = "live_feed"
+                self._send_json({
+                    "news": news_items,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "synthetic_count": n_fab,
+                    "is_fallback": bool(news_items) and n_fab == len(news_items),
+                    "source": source,
+                })
             elif path == "/api/pending_orders":
                 pending = self.mt5_client.get_pending_orders()
                 self._send_json(pending)

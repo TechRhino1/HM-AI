@@ -109,6 +109,9 @@ class LiveNewsEngine:
         #: True while a background refresh is running, so a burst of callers
         #: (a scan calls this once per candidate) cannot spawn a thread each.
         self._refresh_in_flight: bool = False
+        #: Monotonic stamp of the last "the calendar is fabricated" warning, so
+        #: the news page's polling does not flood the log with the same fact.
+        self._last_fabrication_warn: float = 0.0
 
     def get_news_calendar(self, force_refresh: bool = False,
                           max_wait: float | None = None) -> List[Dict[str, Any]]:
@@ -450,6 +453,15 @@ class LiveNewsEngine:
                 "live_end_ist": live_end_ist,
                 "diff_seconds": diff_seconds,
                 "timestamp_iso": event_dt.isoformat(),
+                # Per-item provenance, PROPAGATED from the input rather than
+                # assumed. `get_news_calendar` feeds this method the synthetic
+                # generator's output when the live fetch fails, and this method
+                # also PADS a short real feed with synthetic events (see the
+                # `< 4 upcoming` branch below). Stamping everything live is how
+                # six hardcoded events reached the MACRO analyst looking real.
+                "is_fallback": bool(e.get("is_fallback", False)),
+                "source": ("synthetic_calendar" if e.get("is_fallback")
+                           else "live_feed"),
                 # Deep Intelligence fields for click modal
                 "category": intel["category"],
                 "description": intel["description"],
@@ -501,7 +513,26 @@ class LiveNewsEngine:
             tail.sort(key=lambda x: x.get("diff_seconds", 999999))
             ordered_feed = [head] + tail
 
-        return ordered_feed[:20]
+        feed = ordered_feed[:20]
+
+        # Say it out loud. This used to be silent: the feed fell back to the
+        # hardcoded plan (or padded a short real feed with it) and every
+        # consumer -- `MacroAnalyst` above all -- read the result as real
+        # releases. Rate-limited so the news page's polling does not flood.
+        n_fab = sum(1 for x in feed if x.get("is_fallback"))
+        if n_fab:
+            now_mono = time.monotonic()
+            if now_mono - self._last_fabrication_warn > 300.0:
+                self._last_fabrication_warn = now_mono
+                logger.warning(
+                    "News calendar is %s: %d of %d events are SYNTHETIC "
+                    "(source=%r). Both live feeds failed, so these are hardcoded "
+                    "events, not releases. Anything deriving signal from them must "
+                    "check `is_fallback` first.",
+                    "ENTIRELY fabricated" if n_fab == len(feed) else "PARTLY fabricated",
+                    n_fab, len(feed), "synthetic_calendar")
+
+        return feed
 
     def _generate_event_intel(self, title: str, currency: str, impact: str, actual: str, forecast: str, previous: str) -> Dict[str, str]:
         """Generates institutional analysis, deviation metrics, and directional bias for the modal."""
@@ -652,6 +683,11 @@ class LiveNewsEngine:
             "live_end_ist": live_end_ist,
             "diff_seconds": diff_seconds,
             "timestamp_iso": event_dt.isoformat(),
+            # Built only from the hardcoded plan, so always fabricated. This is
+            # the path that PADS a short real feed to a minimum of 4 upcoming
+            # events, which is why a working feed can still carry invented ones.
+            "is_fallback": True,
+            "source": "synthetic_calendar",
             "category": intel["category"],
             "description": intel["description"],
             "impact_analysis": intel["impact_analysis"],
@@ -748,7 +784,15 @@ class LiveNewsEngine:
                 "actual": p["actual"],
                 "diff_seconds": diff_seconds,
                 "event_dt": event_dt,
-                "timestamp_iso": event_dt.isoformat()
+                "timestamp_iso": event_dt.isoformat(),
+                # This event is INVENTED. The plan above is a hardcoded list
+                # anchored to the current week's calendar arithmetic, not to any
+                # feed. `tradingview_provider` set the precedent: a labelled
+                # fallback beats an unlabelled fabrication. Without this flag the
+                # items below are indistinguishable from real releases, and
+                # `_organize_news_feed` used to stamp them as live data.
+                "is_fallback": True,
+                "source": "synthetic_calendar",
             })
         return res
 
@@ -768,11 +812,18 @@ class LiveNewsEngine:
             return {"news_reversal_setup": False, "conviction_boost": 0.0, "reason": "No active sweep"}
 
         calendar = self.get_news_calendar()
+        # `is_fallback` items are the hardcoded plan, not releases. This method
+        # hands out `conviction_boost` 0.20 to BOTH win probabilities and +8.0
+        # to `ai_score` (decision_engine.py:781-788), so a fabricated event must
+        # never qualify. The plan's three Friday-anchored "past" entries carry
+        # real-looking actuals, and on a Friday within 45 minutes of 13:45 /
+        # 17:00 / 18:00 UTC they satisfy every other condition here.
         recent_news = [
             ev for ev in calendar 
             if ev.get("is_past") and ev.get("diff_seconds", 0) >= (-lookback_minutes * 60)
             and ev.get("impact") in ["HIGH", "MEDIUM"]
             and any(p in symbol for p in ev.get("affected_pairs", []))
+            and not ev.get("is_fallback")
         ]
 
         if not recent_news:
